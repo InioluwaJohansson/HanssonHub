@@ -1,0 +1,5 @@
+{
+  "name": "HanssonHub",
+  "description": "A smart home control dashboard for managing doors, lights, appliances, and cameras.",
+  "requestFramePermissions": []
+}
