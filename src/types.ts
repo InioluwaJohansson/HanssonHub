@@ -1,9 +1,10 @@
-export type DeviceType = 'light' | 'door' | 'appliance' | 'camera' | 'speaker';
+export type DeviceType = 'light' | 'door' | 'appliance' | 'camera' | 'speaker' | 'window';
 
 export type DoorStatus = 'locked' | 'unlocked' | 'open' | 'open-locked';
 export type LightStatus = 'on' | 'off';
 export type CameraStatus = 'active' | 'inactive';
 export type ApplianceStatus = 'on' | 'off' | 'active' | 'inactive';
+export type WindowStatus = 'open' | 'closed' | 'locked';
 
 export interface Device {
   id: string;
@@ -13,6 +14,8 @@ export interface Device {
   value?: number; // For dimmers, volume, etc.
   room?: string; // Optional if attached directly to a section
   section: string;
+  doorType?: 'exterior' | 'interior';
+  powerUsage?: number; // in Watts
 }
 
 export interface SceneAction {
@@ -38,4 +41,50 @@ export interface Room {
 export interface Section {
   id: string;
   name: string;
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  action: string;
+  userName: string;
+  userAvatar: string;
+}
+
+export interface ContactAddress {
+  label: string;
+  address: string;
+}
+
+export interface Contact {
+  id: string;
+  firstName: string;
+  lastName: string;
+  category: string;
+  emails: { label: string; email: string }[];
+  phones: { label: string; phone: string }[];
+  addresses: ContactAddress[];
+}
+
+export interface ContactCategory {
+  id: string;
+  name: string;
+}
+
+export interface UserProfile {
+  name: string;
+  email: string;
+  avatar: string;
+  phone: string;
+  address: string;
+  cameraAccess: string[];
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'user' | 'guest';
+  avatar: string;
+  lastActive: string;
 }

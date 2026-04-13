@@ -18,7 +18,8 @@ import {
   Coffee, 
   Wind,
   Droplets,
-  ChevronRight
+  ChevronRight,
+  AppWindow as WindowIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
@@ -48,6 +49,10 @@ const getIcon = (device: Device) => {
       if (isLocked) return <Lock className="h-5 w-5 text-red-500" />;
       if (status === 'open') return <DoorOpen className="h-5 w-5 text-green-500" />;
       return <Unlock className="h-5 w-5 text-yellow-500" />;
+    case 'window':
+      if (status === 'locked') return <Lock className="h-5 w-5 text-red-500" />;
+      if (status === 'open') return <WindowIcon className="h-5 w-5 text-green-500" />;
+      return <WindowIcon className="h-5 w-5 text-muted-foreground" />;
     case 'appliance':
       return <Power className={cn("h-5 w-5 transition-colors", color)} />;
     case 'camera':
@@ -66,7 +71,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, va
   const isSummary = variant === 'summary';
 
   const handleDoorAction = (action: 'lock' | 'unlock' | 'open' | 'close') => {
-    if (device.type !== 'door' || isSummary) return;
+    if ((device.type !== 'door' && device.type !== 'window') || isSummary) return;
     
     if (action === 'lock') {
       if (isOpen) {
@@ -95,6 +100,11 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, va
     }
   };
 
+  const getOpenCloseLabel = () => {
+    if (device.status === 'open-locked') return 'Open';
+    return isOpen ? 'Close' : 'Open';
+  };
+
   return (
     <motion.div
       layout
@@ -115,12 +125,19 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, va
             )}>
               {getIcon(device)}
             </div>
-            <CardTitle className="text-sm font-medium leading-none">
-              {device.name}
-            </CardTitle>
+            <div className="flex flex-col">
+              <CardTitle className="text-sm font-medium leading-none">
+                {device.name}
+              </CardTitle>
+              {device.doorType && (
+                <span className="mt-1 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {device.doorType}
+                </span>
+              )}
+            </div>
           </div>
           {!isSummary && (
-            device.type === 'door' ? (
+            (device.type === 'door' || device.type === 'window') ? (
               <Button 
                 variant="ghost" 
                 size="icon" 
@@ -151,9 +168,14 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, va
                   {`${device.value}%`}
                 </span>
               )}
+              {device.type === 'appliance' && device.powerUsage !== undefined && (
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {device.powerUsage}W
+                </span>
+              )}
             </div>
             
-            {device.type === 'door' && !isSummary && (
+            {(device.type === 'door' || device.type === 'window') && !isSummary && (
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
                   <Button 
@@ -171,13 +193,14 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, va
                     className="flex-1 text-[10px]"
                     onClick={() => handleDoorAction(isOpen ? 'close' : 'open')}
                   >
-                    {isOpen ? 'Close' : 'Open'}
+                    {isOpen ? (device.status === 'open-locked' ? <DoorOpen className="mr-1 h-3 w-3" /> : <WindowIcon className="mr-1 h-3 w-3" />) : <WindowIcon className="mr-1 h-3 w-3" />}
+                    {getOpenCloseLabel()}
                   </Button>
                 </div>
               </div>
             )}
 
-            {device.value !== undefined && isActive && device.type !== 'door' && !isSummary && (
+            {device.value !== undefined && isActive && device.type !== 'door' && device.type !== 'window' && !isSummary && (
               <div className="pt-2">
                 <Slider
                   value={[device.value]}
