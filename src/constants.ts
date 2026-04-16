@@ -28,6 +28,9 @@ export const INITIAL_DEVICES: Device[] = [
   { id: '8', name: 'Bedside Lamp', type: 'light', status: 'off', value: 0, room: 'bedroom', section: 'indoor' },
   { id: '9', name: 'Main Light', type: 'light', status: 'off', value: 0, room: 'bedroom', section: 'indoor' },
   { id: 'w1', name: 'Bedroom Window', type: 'window', status: 'closed', room: 'bedroom', section: 'indoor' },
+  { id: 'd1', name: 'Bedroom Door', type: 'door', status: 'unlocked', room: 'bedroom', section: 'indoor', doorType: 'interior' },
+  { id: 'a1', name: 'Air Conditioner', type: 'appliance', status: 'off', room: 'bedroom', section: 'indoor', powerUsage: 0 },
+  { id: 'c1', name: 'Bedroom Camera', type: 'camera', status: 'active', room: 'bedroom', section: 'security' },
   
   { id: '10', name: 'Garage Door', type: 'door', status: 'locked', room: 'garage', section: 'outdoor', doorType: 'exterior' },
   { id: '11', name: 'Garage Light', type: 'light', status: 'off', value: 0, room: 'garage', section: 'outdoor' },

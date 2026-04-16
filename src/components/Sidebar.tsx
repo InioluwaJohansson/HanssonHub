@@ -21,7 +21,7 @@ import {
   ClipboardList,
   Contact,
   UserCircle,
-  Square as WindowIcon,
+  Layout as WindowIcon,
   Home as HomeIcon,
   Film,
   ChevronRight,
@@ -57,6 +57,7 @@ interface SidebarProps {
   rooms: Room[];
   sections: Section[];
   userProfile: UserProfile;
+  isCollapsed: boolean;
 }
 
 const iconMap: Record<string, any> = {
@@ -69,7 +70,7 @@ const iconMap: Record<string, any> = {
   Shield
 };
 
-export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile }: SidebarProps) {
+export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile, isCollapsed }: SidebarProps) {
   const [isFacilitiesOpen, setIsFacilitiesOpen] = React.useState(true);
 
   const navItems = [
@@ -79,19 +80,23 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
 
   const facilityItems = [
     { id: 'facility-overview', label: 'Overview', icon: Layers },
-    { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
-    { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
-    { id: 'facility-scenes', label: 'Scenes', icon: Film },
-    { id: 'facility-doors', label: 'Doors', icon: Lock },
-    { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
     { id: 'facility-appliances', label: 'Appliances', icon: Power },
     { id: 'facility-cameras', label: 'Cameras', icon: Camera },
+    { id: 'facility-doors', label: 'Doors', icon: Lock },
+    { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
+    { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
+    { id: 'facility-scenes', label: 'Scenes', icon: Film },
+    { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
     { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
   ];
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card/50 backdrop-blur-xl">
-      <ScrollArea className="flex-1 px-3">
+    <motion.div 
+      initial={false}
+      animate={{ width: isCollapsed ? 80 : 256 }}
+      className="flex h-full flex-col border-r bg-card/50 backdrop-blur-xl transition-all duration-300 overflow-hidden"
+    >
+      <ScrollArea className="flex-1 px-3 min-h-0">
         <div className="space-y-4 py-4">
           <div className="px-3 py-2 space-y-1">
             {navItems.map((item) => (
@@ -100,11 +105,13 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
                 onClick={() => onViewChange(item.id)}
                 className={cn(
                   "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                  activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                  activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                  isCollapsed && "justify-center px-0"
                 )}
+                title={isCollapsed ? item.label : undefined}
               >
-                <item.icon className="mr-2 h-4 w-4" />
-                {item.label}
+                <item.icon className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
+                {!isCollapsed && <span>{item.label}</span>}
               </button>
             ))}
 
@@ -112,11 +119,15 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
             <div className="space-y-1">
               <button
                 onClick={() => setIsFacilitiesOpen(!isFacilitiesOpen)}
-                className="group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                className={cn(
+                  "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                  isCollapsed && "justify-center px-0"
+                )}
+                title={isCollapsed ? "Facilities" : undefined}
               >
-                <Settings2 className="mr-2 h-4 w-4" />
-                <span className="flex-1 text-left">Facilities</span>
-                <ChevronRight className={cn("h-4 w-4 transition-transform", isFacilitiesOpen && "rotate-90")} />
+                <Settings2 className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
+                {!isCollapsed && <span className="flex-1 text-left">Facilities</span>}
+                {!isCollapsed && <ChevronRight className={cn("h-4 w-4 transition-transform", isFacilitiesOpen && "rotate-90")} />}
               </button>
               
               <AnimatePresence initial={false}>
@@ -125,19 +136,21 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    className="overflow-hidden pl-4 space-y-1"
+                    className={cn("overflow-hidden space-y-1", !isCollapsed ? "pl-4" : "flex flex-col items-center py-2")}
                   >
                     {facilityItems.map((item) => (
                       <button
                         key={item.id}
                         onClick={() => onViewChange(item.id)}
                         className={cn(
-                          "group flex w-full items-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                          activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                          "group flex w-full items-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground",
+                          activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                          !isCollapsed ? "px-3 py-1.5 text-xs font-medium" : "justify-center p-2"
                         )}
+                        title={isCollapsed ? item.label : undefined}
                       >
-                        <item.icon className="mr-2 h-3.5 w-3.5" />
-                        {item.label}
+                        <item.icon className={cn(!isCollapsed ? "mr-2 h-3.5 w-3.5" : "h-4 w-4")} />
+                        {!isCollapsed && item.label}
                       </button>
                     ))}
                   </motion.div>
@@ -145,38 +158,25 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
               </AnimatePresence>
             </div>
 
-            <button
-              onClick={() => onViewChange('contacts')}
-              className={cn(
-                "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                activeView === 'contacts' ? "bg-accent text-accent-foreground" : "text-muted-foreground"
-              )}
-            >
-              <Contact className="mr-2 h-4 w-4" />
-              Contacts
-            </button>
-
-            <button
-              onClick={() => onViewChange('all-users')}
-              className={cn(
-                "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                activeView === 'all-users' ? "bg-accent text-accent-foreground" : "text-muted-foreground"
-              )}
-            >
-              <UserCircle className="mr-2 h-4 w-4" />
-              All Users
-            </button>
-
-            <button
-              onClick={() => onViewChange('logs')}
-              className={cn(
-                "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                activeView === 'logs' ? "bg-accent text-accent-foreground" : "text-muted-foreground"
-              )}
-            >
-              <ClipboardList className="mr-2 h-4 w-4" />
-              Logs
-            </button>
+            {[
+              { id: 'contacts', label: 'Contacts', icon: Contact },
+              { id: 'all-users', label: 'All Users', icon: UserCircle },
+              { id: 'logs', label: 'Logs', icon: ClipboardList },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onViewChange(item.id)}
+                className={cn(
+                  "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                  activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                  isCollapsed && "justify-center px-0"
+                )}
+                title={isCollapsed ? item.label : undefined}
+              >
+                <item.icon className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
+                {!isCollapsed && <span>{item.label}</span>}
+              </button>
+            ))}
           </div>
         </div>
       </ScrollArea>
@@ -186,21 +186,27 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           onClick={() => onViewChange('profile')}
           className={cn(
             "flex w-full items-center gap-3 px-2 py-2 rounded-md transition-colors hover:bg-accent",
-            activeView === 'profile' ? "bg-accent" : ""
+            activeView === 'profile' ? "bg-accent" : "",
+            isCollapsed && "justify-center px-0"
           )}
+          title={isCollapsed ? "Profile" : undefined}
         >
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
             <img src={userProfile.avatar} alt="Profile" className="h-full w-full object-cover" />
           </div>
-          <div className="flex flex-col text-left">
-            <span className="text-xs font-medium">{userProfile.name.split(' ')[0]} {userProfile.name.split(' ')[1]?.[0]}.</span>
-            <span className="text-[10px] text-muted-foreground">Home Owner</span>
-          </div>
-          <div className="ml-auto rounded-md p-1">
-            <UserCircle className="h-4 w-4 text-muted-foreground" />
-          </div>
+          {!isCollapsed && (
+            <div className="flex flex-col text-left">
+              <span className="text-xs font-medium">{userProfile.name.split(' ')[0]} {userProfile.name.split(' ')[1]?.[0]}.</span>
+              <span className="text-[10px] text-muted-foreground">Home Owner</span>
+            </div>
+          )}
+          {!isCollapsed && (
+            <div className="ml-auto rounded-md p-1">
+              <UserCircle className="h-4 w-4 text-muted-foreground" />
+            </div>
+          )}
         </button>
       </div>
-    </div>
+    </motion.div>
   );
 }

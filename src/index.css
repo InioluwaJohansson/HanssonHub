@@ -120,21 +120,21 @@
 }
 
 @layer base {
+  html, body {
+    @apply h-screen overflow-hidden font-sans;
+  }
   * {
     @apply border-border outline-ring/50;
     }
   body {
     @apply bg-background text-foreground;
     }
-  html {
-    @apply font-sans;
-    }
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 2px;
-  height: 2px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -144,10 +144,13 @@
 ::-webkit-scrollbar-thumb {
   background: var(--muted-foreground);
   border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary);
+  background-clip: content-box;
 }
 
 /* For Firefox */

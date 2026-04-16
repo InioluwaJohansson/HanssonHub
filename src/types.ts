@@ -41,6 +41,7 @@ export interface Room {
 export interface Section {
   id: string;
   name: string;
+  type?: 'general' | 'secretive';
 }
 
 export interface LogEntry {
@@ -61,6 +62,7 @@ export interface Contact {
   firstName: string;
   lastName: string;
   category: string;
+  avatar?: string;
   emails: { label: string; email: string }[];
   phones: { label: string; phone: string }[];
   addresses: ContactAddress[];
