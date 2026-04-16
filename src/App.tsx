@@ -56,6 +56,7 @@ import {
   ShieldCheck,
   Zap,
   Lock,
+  Unlock,
   Camera,
   Plus,
   Play,
@@ -237,6 +238,32 @@ export default function App() {
   // Camera Modal
   const [isCameraModalOpen, setIsCameraModalOpen] = React.useState(false);
   const [selectedCamera, setSelectedCamera] = React.useState<Device | null>(null);
+
+  // Room Lock State
+  const [roomLocked, setRoomLocked] = React.useState(false);
+
+  const toggleRoomLock = (roomId: string) => {
+    const nextState = !roomLocked;
+    setRoomLocked(nextState);
+    
+    // Toggle all doors and windows in this room
+    setDevices(prev => prev.map(d => {
+      if (d.room === roomId && (d.type === 'door' || d.type === 'window')) {
+        return { ...d, status: nextState ? 'locked' : 'unlocked' };
+      }
+      return d;
+    }));
+    
+    // Add log
+    const newLog: LogEntry = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      action: `${nextState ? 'locked' : 'unlocked'} all security points in ${rooms.find(r => r.id === roomId)?.name || 'the room'}`,
+      userName: userProfile.name,
+      userAvatar: userProfile.avatar
+    };
+    setLogs(prev => [newLog, ...prev]);
+  };
 
   const handleAddCategory = () => {
     if (!newCategoryName.trim()) return;
@@ -536,7 +563,7 @@ export default function App() {
     } else if (activeView === 'user-room') {
       Icon = HomeIcon;
       title = `${userProfile.name.split(' ')[0]}'s Room`;
-    } else if (activeView === 'facility-overview') {
+    } else if (activeView === 'facilities' || activeView === 'facility-overview') {
       Icon = Layers;
       title = 'Facilities Overview';
     } else if (activeView === 'facility-rooms') {
@@ -741,7 +768,7 @@ export default function App() {
       );
     }
 
-    if (activeView === 'facilities') {
+    if (activeView === 'facilities' || activeView === 'facility-overview') {
       const facilityCategories = [
         { id: 'facility-appliances', name: 'Appliances', icon: Power, type: 'appliance' },
         { id: 'facility-cameras', name: 'Cameras', icon: Camera, type: 'camera' },
@@ -1290,13 +1317,23 @@ export default function App() {
       const sortedRoomDevices = [...roomDevices].sort((a, b) => {
         return (securityPriority[a.type] || 99) - (securityPriority[b.type] || 99);
       });
+
+      const doors = sortedRoomDevices.filter(d => d.type === 'door');
+      const windows = sortedRoomDevices.filter(d => d.type === 'window');
+      const lights = sortedRoomDevices.filter(d => d.type === 'light');
+      const appliances = sortedRoomDevices.filter(d => d.type === 'appliance');
+      const cameras = sortedRoomDevices.filter(d => d.type === 'camera');
+      
+      const roomScenes = scenes.filter(scene => 
+        scene.actions.some(action => roomDevices.some(d => d.id === action.deviceId))
+      );
       
       return (
         <motion.div
           key="user-room"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="space-y-8"
+          className="space-y-12"
         >
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
@@ -1306,7 +1343,7 @@ export default function App() {
             <p className="text-muted-foreground">Manage devices in your personal space.</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             <Card className="p-6 bg-primary/5 border-primary/10">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-primary" />
@@ -1343,24 +1380,169 @@ export default function App() {
                 </div>
               </div>
             </Card>
+            <Card 
+              className={cn(
+                "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
+                roomLocked 
+                  ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
+                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
+              )}
+              onClick={() => toggleRoomLock(userRoomId)}
+            >
+              <div className={cn(
+                "rounded-full p-4 transition-transform group-hover:scale-110",
+                roomLocked ? "bg-red-500/10" : "bg-green-500/10"
+              )}>
+                {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
+                <p className="text-[10px] text-muted-foreground font-medium">Click to toggle security</p>
+              </div>
+            </Card>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {sortedRoomDevices.map(device => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                onToggle={handleToggle}
-                onStatusChange={handleStatusChange}
-                onValueChange={handleValueChange}
-                onClick={(d) => {
-                  if (d.type === 'camera') {
-                    setSelectedCamera(d);
-                    setIsCameraModalOpen(true);
-                  }
-                }}
-              />
-            ))}
+          <div className="space-y-12">
+            {/* Row 1: Doors & Windows */}
+            <div className="flex flex-col md:flex-row gap-12">
+              <div className="md:w-2/3 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-bold">Doors</h2>
+                </div>
+                <Separator />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {doors.map(device => (
+                    <DeviceCard
+                      key={device.id}
+                      device={device}
+                      onToggle={handleToggle}
+                      onStatusChange={handleStatusChange}
+                      onValueChange={handleValueChange}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="md:w-1/3 space-y-4">
+                <div className="flex items-center gap-2">
+                  <WindowIcon className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-bold">Windows</h2>
+                </div>
+                <Separator />
+                <div className="grid grid-cols-1 gap-4">
+                  {windows.map(device => (
+                    <DeviceCard
+                      key={device.id}
+                      device={device}
+                      onToggle={handleToggle}
+                      onStatusChange={handleStatusChange}
+                      onValueChange={handleValueChange}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2: Lights, Appliances, Cameras */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-bold">Lights</h2>
+                </div>
+                <Separator />
+                <div className="grid grid-cols-1 gap-4">
+                  {lights.map(device => (
+                    <DeviceCard
+                      key={device.id}
+                      device={device}
+                      onToggle={handleToggle}
+                      onStatusChange={handleStatusChange}
+                      onValueChange={handleValueChange}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Power className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-bold">Appliances</h2>
+                </div>
+                <Separator />
+                <div className="grid grid-cols-1 gap-4">
+                  {appliances.map(device => (
+                    <DeviceCard
+                      key={device.id}
+                      device={device}
+                      onToggle={handleToggle}
+                      onStatusChange={handleStatusChange}
+                      onValueChange={handleValueChange}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-bold">Cameras</h2>
+                </div>
+                <Separator />
+                <div className="grid grid-cols-1 gap-4">
+                  {cameras.map(device => (
+                    <DeviceCard
+                      key={device.id}
+                      device={device}
+                      onToggle={handleToggle}
+                      onStatusChange={handleStatusChange}
+                      onValueChange={handleValueChange}
+                      onClick={(d) => {
+                        if (d.type === 'camera') {
+                          setSelectedCamera(d);
+                          setIsCameraModalOpen(true);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: Scenes */}
+            <div className="space-y-4 pt-4">
+              <div className="flex items-center gap-2">
+                <Film className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Room Scenes</h2>
+              </div>
+              <Separator />
+              {roomScenes.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {roomScenes.map(scene => (
+                    <Card 
+                      key={scene.id} 
+                      className="p-6 flex flex-col gap-4 hover:bg-accent transition-all cursor-pointer group relative"
+                      onClick={() => triggerScene(scene)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                          {scene.icon === 'Film' ? <Film className="h-5 w-5" /> : scene.icon === 'Sun' ? <Sun className="h-5 w-5" /> : <HomeIcon className="h-5 w-5" />}
+                        </div>
+                        <Button size="icon" variant="ghost" className="rounded-full h-8 w-8">
+                          <Play className="h-4 w-4 fill-current" />
+                        </Button>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold">{scene.name}</h3>
+                        <p className="text-[10px] text-muted-foreground">{scene.actions.length} Actions</p>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-32 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
+                  <p className="text-xs text-muted-foreground">No specific scenes for this room.</p>
+                </div>
+              )}
+            </div>
           </div>
         </motion.div>
       );
@@ -1514,20 +1696,36 @@ export default function App() {
                   <div className="flex items-center gap-2 border-b pb-2">
                     <Layers className="h-5 w-5 text-primary" />
                     <h2 className="text-xl font-bold">{section.name}</h2>
-                    <Badge variant="secondary" className="ml-2">
+                    <Badge variant="secondary" className="ml-2 uppercase text-[10px] tracking-wider">
+                      {section.type || 'general'}
+                    </Badge>
+                    <Badge variant="outline" className="ml-2">
                       {sectionRooms.length} Rooms • {sectionDevices.length} Devices
                     </Badge>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 ml-2"
-                      onClick={() => {
-                        setEditingSection(section);
-                        setIsEditSectionOpen(true);
-                      }}
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </Button>
+                    <div className="ml-auto flex items-center gap-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                        onClick={() => {
+                          setEditingSection(section);
+                          setIsEditSectionOpen(true);
+                        }}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDelete(() => setSections(prev => prev.filter(s => s.id !== section.id)));
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -1541,17 +1739,6 @@ export default function App() {
                             className="cursor-pointer hover:bg-accent transition-colors group relative"
                             onClick={() => setActiveView(`room-${room.id}`)}
                           >
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="absolute top-1 right-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingRoom(room);
-                              }}
-                            >
-                              <Edit3 className="h-3 w-3" />
-                            </Button>
                             <CardContent className="flex items-center gap-3 p-3">
                               <div className="rounded-lg bg-muted p-2">
                                 {iconMap[room.icon] ? React.createElement(iconMap[room.icon], { className: "h-4 w-4" }) : <Sofa className="h-4 w-4" />}
@@ -1574,7 +1761,6 @@ export default function App() {
                             onToggle={handleToggle}
                             onValueChange={handleValueChange}
                             onStatusChange={handleStatusChange}
-                            onDelete={handleDeleteDevice}
                             onClick={(d) => {
                               if (d.type === 'camera') {
                                 setSelectedCamera(d);
@@ -2025,27 +2211,56 @@ export default function App() {
       <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Section</DialogTitle>
-            <DialogDescription>Update the details of this section.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit3 className="h-5 w-5 text-primary" />
+              Edit Home Section
+            </DialogTitle>
+            <DialogDescription>Update the details and visibility of this section.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-sec-name">Section Name</Label>
+              <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
+                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                Section Name
+              </Label>
               <Input 
                 id="edit-sec-name" 
                 value={editingSection?.name || ''}
                 onChange={(e) => setEditingSection(prev => prev ? { ...prev, name: e.target.value } : null)}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-sec-type" className="flex items-center gap-2">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                Section Type
+              </Label>
+              <Select 
+                value={editingSection?.type || 'general'} 
+                onValueChange={(v: 'general' | 'secretive') => setEditingSection(prev => prev ? { ...prev, type: v } : null)}
+              >
+                <SelectTrigger id="edit-sec-type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="secretive">Secretive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditSectionOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsEditSectionOpen(false)} className="flex items-center gap-2">
+              Cancel
+            </Button>
             <Button onClick={() => {
               if (editingSection?.id && editingSection.name) {
-                setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name! } : s));
+                setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type } : s));
                 setIsEditSectionOpen(false);
               }
-            }}>Save Changes</Button>
+            }} className="flex items-center gap-2 bg-primary text-primary-foreground">
+              <Save className="h-4 w-4" />
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2429,14 +2644,17 @@ export default function App() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
+              <PlusCircle className="h-5 w-5 text-primary" />
               Add New Section
             </DialogTitle>
             <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="sec-name">Section Name</Label>
+              <Label htmlFor="sec-name" className="flex items-center gap-2">
+                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                Section Name
+              </Label>
               <Input 
                 id="sec-name" 
                 placeholder="e.g. Backyard, Garage, Attic" 
@@ -2445,7 +2663,10 @@ export default function App() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="sec-type">Section Type</Label>
+              <Label htmlFor="sec-type" className="flex items-center gap-2">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                Section Type
+              </Label>
               <Select 
                 value={newSectionType} 
                 onValueChange={(v: 'general' | 'secretive') => setNewSectionType(v)}
@@ -2461,8 +2682,13 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddSectionOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddSection}>Add Section</Button>
+            <Button variant="outline" onClick={() => setIsAddSectionOpen(false)} className="flex items-center gap-2">
+              Cancel
+            </Button>
+            <Button onClick={handleAddSection} className="flex items-center gap-2 bg-primary text-primary-foreground">
+              <PlusCircle className="h-4 w-4" />
+              Add Section
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2715,7 +2941,7 @@ export default function App() {
 
       {/* Camera Feed Modal */}
       <Dialog open={isCameraModalOpen} onOpenChange={setIsCameraModalOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-[75vw] w-full">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Camera className="h-5 w-5 text-primary" />

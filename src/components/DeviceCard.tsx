@@ -22,7 +22,8 @@ import {
   ChevronRight,
   Trash2,
   Edit3,
-  AppWindow as WindowIcon
+  AppWindow as WindowIcon,
+  Maximize2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
@@ -119,9 +120,13 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
         className={cn(
           "group relative overflow-hidden transition-all duration-300 hover:shadow-md",
           isActive ? "border-primary/50 bg-primary/5" : "bg-card",
-          onClick ? "cursor-pointer" : ""
+          (onClick && device.type !== 'camera') ? "cursor-pointer" : ""
         )}
-        onClick={() => onClick?.(device)}
+        onClick={() => {
+          if (device.type !== 'camera') {
+            onClick?.(device);
+          }
+        }}
       >
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <div className="flex items-center gap-2">
@@ -269,15 +274,26 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
             )}
 
             {device.type === 'camera' && isActive && (
-              <div className="relative mt-2 aspect-video overflow-hidden rounded-lg bg-black">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                  <span className="ml-2 text-[10px] font-mono text-white/70 uppercase">Live Feed</span>
+              <div 
+                className="relative mt-2 aspect-video overflow-hidden rounded-lg bg-black cursor-pointer group/camera"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClick?.(device);
+                }}
+              >
+                <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover/camera:opacity-100 transition-opacity bg-black/40">
+                  <div className="rounded-full bg-white/20 p-3 backdrop-blur-sm">
+                    <Maximize2 className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+                <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-2 py-1 backdrop-blur-md">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+                  <span className="text-[8px] font-bold text-white uppercase tracking-wider">Live Feed</span>
                 </div>
                 <img 
                   src={`https://picsum.photos/seed/${device.id}/400/225`} 
                   alt="Camera Feed" 
-                  className="h-full w-full object-cover opacity-60 grayscale"
+                  className="h-full w-full object-cover opacity-60 grayscale group-hover/camera:scale-105 transition-transform duration-500"
                   referrerPolicy="no-referrer"
                 />
               </div>

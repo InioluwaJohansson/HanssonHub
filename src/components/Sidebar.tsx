@@ -79,7 +79,7 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
   ];
 
   const facilityItems = [
-    { id: 'facility-overview', label: 'Overview', icon: Layers },
+    { id: 'facilities', label: 'Overview', icon: Layers },
     { id: 'facility-appliances', label: 'Appliances', icon: Power },
     { id: 'facility-cameras', label: 'Cameras', icon: Camera },
     { id: 'facility-doors', label: 'Doors', icon: Lock },
