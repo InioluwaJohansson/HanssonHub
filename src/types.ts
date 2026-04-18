@@ -13,7 +13,7 @@ export interface Device {
   status: string; // Using string to accommodate various statuses
   value?: number; // For dimmers, volume, etc.
   room?: string; // Optional if attached directly to a section
-  section: string;
+  section?: string;
   doorType?: 'exterior' | 'interior';
   powerUsage?: number; // in Watts
 }
@@ -71,6 +71,8 @@ export interface Contact {
 export interface ContactCategory {
   id: string;
   name: string;
+  description?: string;
+  icon?: string;
 }
 
 export interface UserProfile {

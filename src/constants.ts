@@ -92,9 +92,9 @@ export const INITIAL_LOGS: LogEntry[] = [
 ];
 
 export const CONTACT_CATEGORIES: ContactCategory[] = [
-  { id: 'family', name: 'Family' },
-  { id: 'friends', name: 'Friends' },
-  { id: 'emergency', name: 'Emergency' },
+  { id: 'family', name: 'Family', description: 'Immediate and extended family members', icon: 'UserCircle' },
+  { id: 'friends', name: 'Friends', description: 'Close friends and colleagues', icon: 'Users' },
+  { id: 'emergency', name: 'Emergency', description: 'Critical security and health contacts', icon: 'ShieldAlert' },
 ];
 
 export const INITIAL_CONTACTS: Contact[] = [

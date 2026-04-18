@@ -92,6 +92,9 @@ import {
   ShieldAlert,
   MoreVertical,
   User as UserIcon,
+  Users,
+  Heart,
+  Wrench,
   Save,
   CheckCircle2,
   Smartphone
@@ -110,7 +113,23 @@ const iconMap: Record<string, any> = {
   Car,
   Trees,
   Shield,
-  Layers
+  Layers,
+  UserCircle,
+  Users,
+  ShieldAlert,
+  Key,
+  Heart,
+  Wrench,
+  Contact,
+  Phone,
+  Mail,
+  MapPin,
+  Camera,
+  Zap,
+  Bell,
+  Search,
+  Building2,
+  Smartphone
 };
 
 import { ImageCropperModal } from './components/ImageCropperModal';
@@ -169,6 +188,7 @@ export default function App() {
 
   // Add Room State
   const [isAddRoomOpen, setIsAddRoomOpen] = React.useState(false);
+  const [isAddSceneOpen, setIsAddSceneOpen] = React.useState(false);
   const [newRoom, setNewRoom] = React.useState<Partial<Room>>({
     name: '',
     section: '',
@@ -190,6 +210,10 @@ export default function App() {
   const [contactToDelete, setContactToDelete] = React.useState<ContactType | null>(null);
   const [editingContactId, setEditingContactId] = React.useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = React.useState('');
+  const [newCategoryDescription, setNewCategoryDescription] = React.useState('');
+  const [newCategoryIcon, setNewCategoryIcon] = React.useState('UserCircle');
+  const [isEditCategoryOpen, setIsEditCategoryOpen] = React.useState(false);
+  const [editingCategory, setEditingCategory] = React.useState<ContactCategory | null>(null);
   const [isCropperOpen, setIsCropperOpen] = React.useState(false);
   const [cropImageSrc, setCropImageSrc] = React.useState('');
   const [cropTarget, setCropTarget] = React.useState<'contact' | 'profile'>('contact');
@@ -269,11 +293,36 @@ export default function App() {
     if (!newCategoryName.trim()) return;
     const newCat: ContactCategory = {
       id: newCategoryName.toLowerCase().replace(/\s+/g, '-'),
-      name: newCategoryName
+      name: newCategoryName,
+      description: newCategoryDescription,
+      icon: newCategoryIcon
     };
     setContactCategories(prev => [...prev, newCat]);
     setNewCategoryName('');
+    setNewCategoryDescription('');
+    setNewCategoryIcon('UserCircle');
     setIsAddCategoryOpen(false);
+  };
+
+  const handleEditCategory = () => {
+    if (!editingCategory || !newCategoryName.trim()) return;
+    setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
+      ...cat,
+      name: newCategoryName,
+      description: newCategoryDescription,
+      icon: newCategoryIcon
+    } : cat));
+    setNewCategoryName('');
+    setNewCategoryDescription('');
+    setNewCategoryIcon('UserCircle');
+    setIsEditCategoryOpen(false);
+    setEditingCategory(null);
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    setContactCategories(prev => prev.filter(cat => cat.id !== id));
+    // Reset contacts in this category to other?
+    setContacts(prev => prev.map(c => c.category === id ? { ...c, category: 'other' } : c));
   };
 
   const handleAddContact = () => {
@@ -437,7 +486,7 @@ export default function App() {
     requestDelete(() => {
       setRooms(prev => prev.filter(r => r.id !== id));
       if (activeView === `room-${id}`) {
-        setActiveView('rooms');
+        setActiveView('facility-rooms');
       }
     });
   };
@@ -457,7 +506,7 @@ export default function App() {
   };
 
   const handleAddDevice = () => {
-    if (!newDevice.name || !newDevice.section) return;
+    if (!newDevice.name) return;
     
     let inferredType = newDevice.type;
     if (activeView.startsWith('facility-')) {
@@ -473,8 +522,8 @@ export default function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: newDevice.name,
       type: inferredType as any,
-      room: newDevice.room === 'none' ? undefined : newDevice.room,
-      section: newDevice.section,
+      room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
+      section: newDevice.section || undefined,
       status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : (inferredType === 'camera' ? 'active' : 'off'),
       value: inferredType === 'light' ? 0 : undefined,
       doorType: inferredType === 'door' ? 'interior' : undefined,
@@ -487,18 +536,36 @@ export default function App() {
   };
 
   const handleAddRoom = () => {
-    if (!newRoom.name || !newRoom.section) return;
+    if (!newRoom.name) return;
 
     const room: Room = {
       id: newRoom.name.toLowerCase().replace(/\s+/g, '-'),
       name: newRoom.name,
-      section: newRoom.section,
+      section: newRoom.section || '',
       icon: newRoom.icon || 'Sofa'
     };
 
     setRooms(prev => [...prev, room]);
     setIsAddRoomOpen(false);
     setNewRoom({ name: '', section: '', icon: 'Sofa' });
+  };
+
+  const [newScene, setNewScene] = React.useState<Partial<Scene>>({
+    name: '',
+    icon: 'Film'
+  });
+
+  const handleAddScene = () => {
+    if (!newScene.name) return;
+    const scene: Scene = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: newScene.name,
+      icon: newScene.icon as any || 'Film',
+      actions: []
+    };
+    setScenes(prev => [...prev, scene]);
+    setNewScene({ name: '', icon: 'Film' });
+    setIsAddSceneOpen(false);
   };
 
   const getFilteredDevices = () => {
@@ -983,12 +1050,51 @@ export default function App() {
               <Card className="p-6">
                 <h3 className="text-lg font-bold mb-4">Categories</h3>
                 <div className="space-y-2">
-                  {contactCategories.map(cat => (
-                    <div key={cat.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
-                      <span className="text-sm font-medium">{cat.name}</span>
-                      <Badge variant="secondary">{contacts.filter(c => c.category === cat.id).length}</Badge>
-                    </div>
-                  ))}
+                  {contactCategories.map(cat => {
+                    const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
+                    return (
+                      <div key={cat.id} className="group relative">
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                              <CategoryIcon className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{cat.name}</p>
+                              {cat.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</p>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="h-5">{contacts.filter(c => c.category === cat.id).length}</Badge>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                onClick={() => {
+                                  setEditingCategory(cat);
+                                  setNewCategoryName(cat.name);
+                                  setNewCategoryDescription(cat.description || '');
+                                  setNewCategoryIcon(cat.icon || 'UserCircle');
+                                  setIsEditCategoryOpen(true);
+                                }}
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleDeleteCategory(cat.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <Button variant="outline" className="w-full mt-4" size="sm" onClick={() => setIsAddCategoryOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" /> Add Category
@@ -1402,146 +1508,152 @@ export default function App() {
             </Card>
           </div>
 
-          <div className="space-y-12">
-            {/* Row 1: Doors & Windows */}
-            <div className="flex flex-col md:flex-row gap-12">
-              <div className="md:w-2/3 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Lock className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-bold">Doors</h2>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {doors.map(device => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onToggle={handleToggle}
-                      onStatusChange={handleStatusChange}
-                      onValueChange={handleValueChange}
-                    />
-                  ))}
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            {/* Doors */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Lock className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Doors</h2>
               </div>
-              <div className="md:w-1/3 space-y-4">
-                <div className="flex items-center gap-2">
-                  <WindowIcon className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-bold">Windows</h2>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-1 gap-4">
-                  {windows.map(device => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onToggle={handleToggle}
-                      onStatusChange={handleStatusChange}
-                      onValueChange={handleValueChange}
-                    />
-                  ))}
-                </div>
+              <Separator />
+              <div className="grid grid-cols-1 gap-4">
+                {doors.map(device => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={handleToggle}
+                    onStatusChange={handleStatusChange}
+                    onValueChange={handleValueChange}
+                  />
+                ))}
               </div>
             </div>
 
-            {/* Row 2: Lights, Appliances, Cameras */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Lightbulb className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-bold">Lights</h2>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-1 gap-4">
-                  {lights.map(device => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onToggle={handleToggle}
-                      onStatusChange={handleStatusChange}
-                      onValueChange={handleValueChange}
-                    />
-                  ))}
-                </div>
+            {/* Windows */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <WindowIcon className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Windows</h2>
               </div>
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Power className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-bold">Appliances</h2>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-1 gap-4">
-                  {appliances.map(device => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onToggle={handleToggle}
-                      onStatusChange={handleStatusChange}
-                      onValueChange={handleValueChange}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Camera className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-bold">Cameras</h2>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-1 gap-4">
-                  {cameras.map(device => (
-                    <DeviceCard
-                      key={device.id}
-                      device={device}
-                      onToggle={handleToggle}
-                      onStatusChange={handleStatusChange}
-                      onValueChange={handleValueChange}
-                      onClick={(d) => {
-                        if (d.type === 'camera') {
-                          setSelectedCamera(d);
-                          setIsCameraModalOpen(true);
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
+              <Separator />
+              <div className="grid grid-cols-1 gap-4">
+                {windows.map(device => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={handleToggle}
+                    onStatusChange={handleStatusChange}
+                    onValueChange={handleValueChange}
+                  />
+                ))}
               </div>
             </div>
 
-            {/* Row 3: Scenes */}
-            <div className="space-y-4 pt-4">
+            {/* Lights */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Lightbulb className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Lights</h2>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-1 gap-4">
+                {lights.map(device => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={handleToggle}
+                    onStatusChange={handleStatusChange}
+                    onValueChange={handleValueChange}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Appliances */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Power className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Appliances</h2>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-1 gap-4">
+                {appliances.map(device => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={handleToggle}
+                    onStatusChange={handleStatusChange}
+                    onValueChange={handleValueChange}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Room Scenes */}
+            <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Film className="h-5 w-5 text-primary" />
                 <h2 className="text-xl font-bold">Room Scenes</h2>
               </div>
               <Separator />
-              {roomScenes.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {roomScenes.map(scene => (
-                    <Card 
-                      key={scene.id} 
-                      className="p-6 flex flex-col gap-4 hover:bg-accent transition-all cursor-pointer group relative"
-                      onClick={() => triggerScene(scene)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                          {scene.icon === 'Film' ? <Film className="h-5 w-5" /> : scene.icon === 'Sun' ? <Sun className="h-5 w-5" /> : <HomeIcon className="h-5 w-5" />}
-                        </div>
-                        <Button size="icon" variant="ghost" className="rounded-full h-8 w-8">
-                          <Play className="h-4 w-4 fill-current" />
-                        </Button>
+              <div className="grid grid-cols-1 gap-4">
+                {roomScenes.map(scene => (
+                  <Card 
+                    key={scene.id} 
+                    className="p-4 flex flex-col gap-3 hover:bg-accent transition-all cursor-pointer group relative"
+                    onClick={() => triggerScene(scene)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                        {scene.icon === 'Film' ? <Film className="h-4 w-4" /> : scene.icon === 'Sun' ? <Sun className="h-4 w-4" /> : <HomeIcon className="h-4 w-4" />}
                       </div>
-                      <div>
-                        <h3 className="text-sm font-bold">{scene.name}</h3>
-                        <p className="text-[10px] text-muted-foreground">{scene.actions.length} Actions</p>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex h-32 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
-                  <p className="text-xs text-muted-foreground">No specific scenes for this room.</p>
-                </div>
-              )}
+                      <Button size="icon" variant="ghost" className="rounded-full h-6 w-6">
+                        <Play className="h-3 w-3 fill-current" />
+                      </Button>
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold truncate">{scene.name}</h3>
+                      <p className="text-[10px] text-muted-foreground">{scene.actions.length} Actions</p>
+                    </div>
+                  </Card>
+                ))}
+                {roomScenes.length === 0 && (
+                  <p className="text-xs text-muted-foreground italic">No specific scenes for this room.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-12">
+            {/* Cameras (Full Width) */}
+            <div className="space-y-4 pt-4">
+              <div className="flex items-center gap-2">
+                <Camera className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-bold">Cameras</h2>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {cameras.map(device => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={handleToggle}
+                    onStatusChange={handleStatusChange}
+                    onValueChange={handleValueChange}
+                    onClick={(d) => {
+                      if (d.type === 'camera') {
+                        setSelectedCamera(d);
+                        setIsCameraModalOpen(true);
+                      }
+                    }}
+                  />
+                ))}
+                {cameras.length === 0 && (
+                  <div className="col-span-full flex h-32 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
+                    <p className="text-xs text-muted-foreground">No cameras in this room.</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -1565,7 +1677,7 @@ export default function App() {
               <p className="text-muted-foreground">Overview of all rooms in your home.</p>
             </div>
             <Button onClick={() => setIsAddRoomOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add Room
+              <Plus className="mr-2 h-4 w-4" /> Add New Room
             </Button>
           </div>
 
@@ -1623,8 +1735,8 @@ export default function App() {
               </div>
               <p className="text-muted-foreground">Automate your home with custom scenes.</p>
             </div>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" /> Create Scene
+            <Button onClick={() => setIsAddSceneOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Add New Scene
             </Button>
           </div>
 
@@ -1682,7 +1794,7 @@ export default function App() {
               <p className="text-muted-foreground">Manage devices and rooms grouped by section.</p>
             </div>
             <Button onClick={() => setIsAddSectionOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add Section
+              <Plus className="mr-2 h-4 w-4" /> Add New Section
             </Button>
           </div>
 
@@ -1862,6 +1974,14 @@ export default function App() {
     const room = isRoom ? rooms.find(r => r.id === roomId) : null;
     
     const facilityType = activeView.replace('facility-', '');
+    const singularTypeMap: Record<string, string> = {
+      'appliances': 'Appliance',
+      'lights': 'Light',
+      'cameras': 'Camera',
+      'doors': 'Door',
+      'windows': 'Window'
+    };
+    const singularName = singularTypeMap[facilityType] || 'Device';
     const title = isRoom ? room?.name : facilityType.charAt(0).toUpperCase() + facilityType.slice(1);
     
     const TitleIcon = isRoom 
@@ -1879,7 +1999,7 @@ export default function App() {
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => setActiveView(isRoom ? 'rooms' : 'facilities')}>
+              <Button variant="ghost" size="icon" onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facilities')}>
                 <ChevronRight className="h-5 w-5 rotate-180" />
               </Button>
               <HeaderIcon className="h-8 w-8 text-primary" />
@@ -1948,14 +2068,14 @@ export default function App() {
           </div>
         )}
 
-        {!isRoom && (
+        {(!isRoom && facilityType !== 'overview') && (
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
+              <Input
                 type="text"
                 placeholder={`Search ${title?.toLowerCase()}...`}
-                className="h-10 w-full rounded-xl border bg-card pl-10 pr-4 text-sm outline-none transition-all focus:ring-2 focus:ring-primary/20"
+                className="pl-10 h-10"
                 value={facilitySearchQuery}
                 onChange={(e) => setFacilitySearchQuery(e.target.value)}
               />
@@ -1983,14 +2103,19 @@ export default function App() {
               </div>
               <Button onClick={() => setIsAddDeviceOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
-                Add {title}
+                Add New {singularName}
               </Button>
             </div>
           </div>
         )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredDevices.map(device => (
+        <div className={cn(
+          "grid grid-cols-1 gap-4 sm:grid-cols-2",
+          activeView === 'facility-appliances' 
+            ? (isSidebarCollapsed ? "lg:grid-cols-4" : "lg:grid-cols-3") 
+            : "lg:grid-cols-3 xl:grid-cols-4"
+        )}>
+          {filteredDevices.map(device => (
               <DeviceCard 
                 key={device.id} 
                 device={device} 
@@ -2076,8 +2201,22 @@ export default function App() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <PlusCircle className="h-5 w-5 text-primary" />
-              Add New Device
+              {(() => {
+                const type = activeView.replace('facility-', '');
+                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : PlusCircle;
+                return <Icon className="h-5 w-5 text-primary" />;
+              })()}
+              Add New {(() => {
+                const type = activeView.replace('facility-', '');
+                const map: Record<string, string> = {
+                  'appliances': 'Appliance',
+                  'lights': 'Light',
+                  'cameras': 'Camera',
+                  'doors': 'Door',
+                  'windows': 'Window'
+                };
+                return map[type] || 'Device';
+              })()}
             </DialogTitle>
             <DialogDescription>
               Connect a new smart device to your HanssonHub.
@@ -2099,16 +2238,17 @@ export default function App() {
             <div className="grid gap-2">
               <Label htmlFor="section" className="flex items-center gap-2">
                 <Layers className="h-3 w-3 text-muted-foreground" />
-                Section
+                Section (Optional)
               </Label>
               <Select 
                 value={newDevice.section} 
-                onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v, room: '' }))}
+                onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select section" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">No Section</SelectItem>
                   {sections.map(section => (
                     <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
                   ))}
@@ -2122,15 +2262,14 @@ export default function App() {
               </Label>
               <Select 
                 value={newDevice.room} 
-                onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v }))}
-                disabled={!newDevice.section}
+                onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v === 'none' ? undefined : v }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select room" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Room (Section Only)</SelectItem>
-                  {rooms.filter(r => r.section === newDevice.section).map(room => (
+                  <SelectItem value="none">No Room</SelectItem>
+                  {rooms.filter(r => !newDevice.section || r.section === newDevice.section).map(room => (
                     <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2151,7 +2290,10 @@ export default function App() {
       <Dialog open={isAddRoomOpen} onOpenChange={setIsAddRoomOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New Room</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Sofa className="h-5 w-5 text-primary" />
+              Add New Room
+            </DialogTitle>
             <DialogDescription>
               Create a new room in your HanssonHub.
             </DialogDescription>
@@ -2167,15 +2309,16 @@ export default function App() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="section">Section</Label>
+              <Label htmlFor="section">Section (Optional)</Label>
               <Select 
                 value={newRoom.section} 
-                onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v }))}
+                onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select section" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">No Section</SelectItem>
                   {sections.map(section => (
                     <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
                   ))}
@@ -2366,7 +2509,10 @@ export default function App() {
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New Category</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <PlusCircle className="h-5 w-5 text-primary" />
+              Add New Category
+            </DialogTitle>
             <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -2379,10 +2525,99 @@ export default function App() {
                 onChange={(e) => setNewCategoryName(e.target.value)}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cat-desc">Description (Optional)</Label>
+              <Input 
+                id="cat-desc" 
+                placeholder="Brief description of this category" 
+                value={newCategoryDescription}
+                onChange={(e) => setNewCategoryDescription(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/10">
+                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
+                  const Icon = iconMap[iconName];
+                  return (
+                    <Button
+                      key={iconName}
+                      variant="outline"
+                      size="icon"
+                      className={cn(
+                        "h-10 w-10 transition-all",
+                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                      )}
+                      onClick={() => setNewCategoryIcon(iconName)}
+                    >
+                      {Icon && <Icon className="h-5 w-5" />}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddCategoryOpen(false)}>Cancel</Button>
             <Button onClick={handleAddCategory}>Add Category</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit3 className="h-5 w-5 text-primary" />
+              Edit Category
+            </DialogTitle>
+            <DialogDescription>Update category details and icon.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-cat-name">Category Name</Label>
+              <Input 
+                id="edit-cat-name" 
+                placeholder="e.g. Emergency, Family, Services" 
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-cat-desc">Description (Optional)</Label>
+              <Input 
+                id="edit-cat-desc" 
+                placeholder="Brief description of this category" 
+                value={newCategoryDescription}
+                onChange={(e) => setNewCategoryDescription(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/10">
+                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
+                  const Icon = iconMap[iconName];
+                  return (
+                    <Button
+                      key={iconName}
+                      variant="outline"
+                      size="icon"
+                      className={cn(
+                        "h-10 w-10 transition-all",
+                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                      )}
+                      onClick={() => setNewCategoryIcon(iconName)}
+                    >
+                      {Icon && <Icon className="h-5 w-5" />}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsEditCategoryOpen(false); setEditingCategory(null); }}>Cancel</Button>
+            <Button onClick={handleEditCategory}>Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2640,11 +2875,58 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isAddSceneOpen} onOpenChange={setIsAddSceneOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Film className="h-5 w-5 text-primary" />
+              Add New Scene
+            </DialogTitle>
+            <DialogDescription>
+              Create a new automated scene for your home.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="scene-name">Scene Name</Label>
+              <Input 
+                id="scene-name" 
+                placeholder="e.g. Movie Night" 
+                value={newScene.name}
+                onChange={(e) => setNewScene(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="scene-icon">Icon</Label>
+              <Select 
+                value={newScene.icon} 
+                onValueChange={(v) => setNewScene(prev => ({ ...prev, icon: v }))}
+              >
+                <SelectTrigger id="scene-icon">
+                  <SelectValue placeholder="Select icon" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Film">Movie (Film)</SelectItem>
+                  <SelectItem value="Sun">Day (Sun)</SelectItem>
+                  <SelectItem value="HomeIcon">Home (Home)</SelectItem>
+                  <SelectItem value="Shield">Security (Shield)</SelectItem>
+                  <SelectItem value="Zap">Energy (Zap)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddSceneOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddScene}>Add Scene</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isAddSectionOpen} onOpenChange={setIsAddSectionOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <PlusCircle className="h-5 w-5 text-primary" />
+              <Layers className="h-5 w-5 text-primary" />
               Add New Section
             </DialogTitle>
             <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
@@ -2941,28 +3223,47 @@ export default function App() {
 
       {/* Camera Feed Modal */}
       <Dialog open={isCameraModalOpen} onOpenChange={setIsCameraModalOpen}>
-        <DialogContent className="max-w-[75vw] w-full">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5 text-primary" />
-              {selectedCamera?.name || 'Camera Feed'}
-            </DialogTitle>
-            <DialogDescription>Live view from the selected camera.</DialogDescription>
-          </DialogHeader>
-          {selectedCamera && (
-            <div className="relative aspect-video overflow-hidden rounded-lg bg-black mt-4">
-              <div className="absolute inset-0 flex items-center justify-center z-10">
-                <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-                <span className="ml-2 text-sm font-mono text-white/70 uppercase tracking-widest">Live</span>
+        <DialogContent className="max-w-[75vw] w-[75vw] sm:max-w-[75vw] h-auto aspect-video p-0 overflow-hidden">
+          <div className="flex flex-col h-full bg-black">
+            <div className="p-6 bg-background/80 backdrop-blur-md border-b z-20">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Camera className="h-5 w-5 text-primary" />
+                  {selectedCamera?.name || 'Camera Feed'}
+                </DialogTitle>
+                <DialogDescription>Live view from the selected camera.</DialogDescription>
+              </DialogHeader>
+            </div>
+            
+            <div className="relative flex-1 overflow-hidden">
+              <div className="absolute top-4 left-4 flex items-center gap-2 z-10 bg-black/50 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-sm">
+                <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+                <span className="text-xs font-mono text-white font-bold uppercase tracking-widest">Live Feed</span>
               </div>
+              
+              <div className="absolute top-4 right-4 z-10 bg-black/50 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-sm">
+                <span className="text-[10px] font-mono text-white/70">REC • 1080p • 60fps</span>
+              </div>
+              
               <img 
-                src={`https://picsum.photos/seed/${selectedCamera.id}/1280/720`} 
+                src={`https://picsum.photos/seed/${selectedCamera?.id || 'default'}/1920/1080`} 
                 alt="Camera Feed" 
-                className="h-full w-full object-cover opacity-80"
+                className="h-full w-full object-cover"
                 referrerPolicy="no-referrer"
               />
+              
+              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end z-10 pointer-events-none">
+                <div className="bg-black/50 p-2 rounded border border-white/10 backdrop-blur-sm">
+                  <p className="text-[10px] font-mono text-white/50">{new Date().toLocaleString()}</p>
+                </div>
+                <div className="flex gap-2 pointer-events-auto">
+                  <div className="bg-primary/20 p-2 rounded-full border border-primary/30 backdrop-blur-sm">
+                    <ShieldCheck className="h-4 w-4 text-primary" />
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

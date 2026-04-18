@@ -97,7 +97,10 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
       className="flex h-full flex-col border-r bg-card/50 backdrop-blur-xl transition-all duration-300 overflow-hidden"
     >
       <ScrollArea className="flex-1 px-3 min-h-0">
-        <div className="space-y-4 py-4">
+        <div className={cn(
+          "space-y-4 py-4 min-h-full flex flex-col transition-all duration-500",
+          !isFacilitiesOpen && "justify-center"
+        )}>
           <div className="px-3 py-2 space-y-1">
             {navItems.map((item) => (
               <button
