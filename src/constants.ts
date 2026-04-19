@@ -1,4 +1,4 @@
-import { Device, Room, Section, Scene, LogEntry, Contact, ContactCategory, UserProfile, User } from './types';
+import { Device, Room, Section, Scene, LogEntry, Contact, ContactCategory, UserProfile, User, GetPersonDto, Gender, Role } from './types';
 
 export const SECTIONS: Section[] = [
   { id: 'indoor', name: 'Indoor' },
@@ -92,36 +92,112 @@ export const INITIAL_LOGS: LogEntry[] = [
 ];
 
 export const CONTACT_CATEGORIES: ContactCategory[] = [
-  { id: 'family', name: 'Family', description: 'Immediate and extended family members', icon: 'UserCircle' },
-  { id: 'friends', name: 'Friends', description: 'Close friends and colleagues', icon: 'Users' },
-  { id: 'emergency', name: 'Emergency', description: 'Critical security and health contacts', icon: 'ShieldAlert' },
+  { id: 1, name: 'Family', description: 'Immediate and extended family members', icon: 'UserCircle', personId: 1 },
+  { id: 2, name: 'Friends', description: 'Close friends and colleagues', icon: 'Users', personId: 1 },
+  { id: 3, name: 'Emergency', description: 'Critical security and health contacts', icon: 'ShieldAlert', personId: 1 },
 ];
 
 export const INITIAL_CONTACTS: Contact[] = [
   {
-    id: '1',
+    id: 1,
     firstName: 'John',
     lastName: 'Doe',
-    category: 'friends',
-    emails: [{ label: 'Personal', email: 'john@example.com' }],
-    phones: [{ label: 'Mobile', phone: '+1234567890' }],
-    addresses: [{ label: 'Home', address: '123 Smart St, Tech City' }],
+    getContactCategoryDto: CONTACT_CATEGORIES[1],
+    imageUrl: 'https://picsum.photos/seed/contact1/100/100',
+    contactDetails: [
+      { id: 1, phoneNumber: '+1234567890', email: 'john@example.com', contactId: 1, personDetailsId: 1 }
+    ],
+    address: [
+      { 
+        id: 1, 
+        numberLine: '123', 
+        street: 'Smart St', 
+        city: 'Tech City', 
+        region: 'North', 
+        state: 'TC', 
+        country: 'Techland', 
+        postalCode: '12345',
+        contactId: 1,
+        personId: 1
+      }
+    ],
   },
 ];
 
 export const INITIAL_USER: UserProfile = {
-  name: 'Inioluwa Makinde',
-  email: 'inioluwa.makinde10@gmail.com',
-  avatar: 'https://picsum.photos/seed/ini/200/200',
-  phone: '+234 800 000 0000',
-  address: 'Lagos, Nigeria',
-  cameraAccess: ['14', 'c-gate'],
+  id: 1,
+  personId: "P-001",
+  disabled: false,
+  getPersonDetailsDto: {
+    id: 1,
+    firstName: "Inioluwa",
+    lastName: "Makinde",
+    gender: Gender.Male,
+    imageUrl: "https://picsum.photos/seed/ini/200/200",
+    disabled: false,
+    getAddressDtos: [
+      { id: 1, contactId: 0, personId: 1, numberLine: "Plot 12", street: "Smart Avenue", city: "Lagos", region: "Lekki", state: "Lagos", country: "Nigeria", postalCode: "100001" }
+    ],
+    getContactDetailsDtos: [
+      { id: 1, contactId: 0, personDetailsId: 1, email: "inioluwa.makinde10@gmail.com", phoneNumber: "+234 800 000 0000" }
+    ]
+  },
+  getUserDto: {
+    id: 1,
+    userName: "ini_makinde",
+    roleName: "Owner",
+    role: Role.Owner,
+    personId: 1
+  },
+  cameraAccess: ['14', 'c-gate']
 };
 
-export const INITIAL_USERS: User[] = [
-  { id: '1', name: 'Inioluwa Makinde', email: 'inioluwa.makinde10@gmail.com', role: 'admin', avatar: 'https://picsum.photos/seed/ini/100/100', lastActive: new Date().toISOString() },
-  { id: '2', name: 'Jane Doe', email: 'jane@example.com', role: 'user', avatar: 'https://picsum.photos/seed/jane/100/100', lastActive: new Date(Date.now() - 86400000).toISOString() },
-  { id: '3', name: 'Bob Smith', email: 'bob@example.com', role: 'guest', avatar: 'https://picsum.photos/seed/bob/100/100', lastActive: new Date(Date.now() - 3600000).toISOString() },
+export const INITIAL_USERS: GetPersonDto[] = [
+  INITIAL_USER,
+  {
+    id: 2,
+    personId: "P-002",
+    disabled: false,
+    getPersonDetailsDto: {
+      id: 2,
+      firstName: "Jane",
+      lastName: "Doe",
+      gender: Gender.Female,
+      imageUrl: "https://picsum.photos/seed/jane/100/100",
+      disabled: false,
+      getAddressDtos: [],
+      getContactDetailsDtos: [{ id: 2, contactId: 0, personDetailsId: 2, email: "jane@example.com", phoneNumber: "+234 801 111 2222" }]
+    },
+    getUserDto: {
+      id: 2,
+      userName: "jane_doe",
+      roleName: "Wife",
+      role: Role.Wife,
+      personId: 2
+    }
+  },
+  {
+    id: 3,
+    personId: "P-003",
+    disabled: true,
+    getPersonDetailsDto: {
+      id: 3,
+      firstName: "Bob",
+      lastName: "Smith",
+      gender: Gender.Male,
+      imageUrl: "https://picsum.photos/seed/bob/100/100",
+      disabled: true,
+      getAddressDtos: [],
+      getContactDetailsDtos: [{ id: 3, contactId: 0, personDetailsId: 3, email: "bob@example.com", phoneNumber: "+234 802 333 4444" }]
+    },
+    getUserDto: {
+      id: 3,
+      userName: "bob_smith",
+      roleName: "Visitor",
+      role: Role.Visitor,
+      personId: 3
+    }
+  }
 ];
 
 export const GENERAL_CAMERAS = [

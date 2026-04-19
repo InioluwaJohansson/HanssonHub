@@ -158,3 +158,12 @@
   scrollbar-width: thin;
   scrollbar-color: var(--muted-foreground) transparent;
 }
+
+@keyframes spotify-bounce {
+  0%, 100% { height: 30%; }
+  50% { height: 100%; }
+}
+
+.spotify-bar {
+  animation: spotify-bounce 0.8s ease-in-out infinite;
+}

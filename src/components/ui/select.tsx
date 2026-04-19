@@ -37,12 +37,13 @@ function SelectTrigger({
   size?: "sm" | "default"
 }) {
   return (
-    <div className="relative w-fit group">
+    <div className="relative w-full group">
       <SelectPrimitive.Trigger
         data-slot="select-trigger"
         data-size={size}
         className={cn(
-          "flex w-full items-center justify-between gap-1.5 rounded-none border-b-2 border-t-0 border-l-0 border-r-0 border-border bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-all outline-none select-none focus:border-border disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "peer flex w-full items-center justify-between gap-1.5 rounded-none border-b-2 border-t-0 border-l-0 border-r-0 border-border bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-all outline-none select-none focus:border-border disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "[&:not([data-placeholder])]:border-emerald-500/30",
           className
         )}
         {...props}
@@ -54,7 +55,10 @@ function SelectTrigger({
           }
         />
       </SelectPrimitive.Trigger>
-      <div className="absolute bottom-0 left-0 h-[2px] w-0 bg-primary transition-all duration-500 ease-in-out group-focus-within:w-full" />
+      <div className={cn(
+        "absolute bottom-0 left-0 h-[2px] w-0 bg-primary transition-all duration-500 ease-in-out group-focus-within:w-full",
+        "peer-[:not([data-placeholder])]:w-full peer-[:not([data-placeholder])]:bg-emerald-500"
+      )} />
     </div>
   )
 }

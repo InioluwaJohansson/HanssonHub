@@ -73,9 +73,13 @@ const iconMap: Record<string, any> = {
 export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile, isCollapsed }: SidebarProps) {
   const [isFacilitiesOpen, setIsFacilitiesOpen] = React.useState(true);
 
+  const firstName = userProfile.getPersonDetailsDto.firstName;
+  const lastName = userProfile.getPersonDetailsDto.lastName;
+  const roleName = userProfile.getUserDto.roleName;
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'user-room', label: `${userProfile.name.split(' ')[0]}'s Room`, icon: HomeIcon },
+    { id: 'user-room', label: `${firstName}'s Room`, icon: HomeIcon },
   ];
 
   const facilityItems = [
@@ -195,12 +199,12 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           title={isCollapsed ? "Profile" : undefined}
         >
           <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
-            <img src={userProfile.avatar} alt="Profile" className="h-full w-full object-cover" />
+            <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Profile" className="h-full w-full object-cover" />
           </div>
           {!isCollapsed && (
             <div className="flex flex-col text-left">
-              <span className="text-xs font-medium">{userProfile.name.split(' ')[0]} {userProfile.name.split(' ')[1]?.[0]}.</span>
-              <span className="text-[10px] text-muted-foreground">Home Owner</span>
+              <span className="text-xs font-medium">{firstName} {lastName[0]}.</span>
+              <span className="text-[10px] text-muted-foreground">{roleName}</span>
             </div>
           )}
           {!isCollapsed && (

@@ -22,7 +22,18 @@ import {
   Contact as ContactType, 
   ContactCategory, 
   UserProfile,
-  User
+  User,
+  CreatePersonDto,
+  UpdateUserDto,
+  UpdateUserPasswordDto,
+  UpdateUserAuthorizationCode,
+  GetPersonDto,
+  Role,
+  Gender,
+  UpdatePersonDto,
+  PersonResponseModel,
+  GetAddressDto,
+  GetContactDetailsDto
 } from './types';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Badge } from './components/ui/badge';
@@ -48,7 +59,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./components/ui/select";
+import { Slider } from "./components/ui/slider";
+import { Calendar } from "./components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { 
+  RefreshCw,
   Bell, 
   Search, 
   Cloud, 
@@ -97,10 +112,34 @@ import {
   Wrench,
   Save,
   CheckCircle2,
-  Smartphone
+  Smartphone,
+  MessageSquare,
+  Send,
+  Paperclip,
+  Mic,
+  Image as ImageIcon,
+  FileText,
+  Download,
+  CalendarDays,
+  X,
+  Filter,
+  CheckCheck,
+  Video,
+  ImagePlus,
+  History,
+  Smile,
+  MessageSquarePlus,
+  XCircle,
+  Pause,
+  Reply,
+  CornerUpLeft,
+  Settings,
+  UserPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { io } from 'socket.io-client';
+import { format, subHours, subSeconds } from 'date-fns';
 
 const iconMap: Record<string, any> = {
   Film,
@@ -154,6 +193,37 @@ export default function App() {
   const [contactView, setContactView] = React.useState<'overview' | 'all'>('overview');
   const [allUsers, setAllUsers] = React.useState<User[]>(INITIAL_USERS);
 
+  // Person/User Modals
+  const [isAddPersonOpen, setIsAddPersonOpen] = React.useState(false);
+  const [isEditPersonRoleOpen, setIsEditPersonRoleOpen] = React.useState(false);
+  const [isViewPersonDetailsOpen, setIsViewPersonDetailsOpen] = React.useState(false);
+  const [viewingPerson, setViewingPerson] = React.useState<GetPersonDto | null>(null);
+  const [pendingUserAction, setPendingUserAction] = React.useState<{ type: 'disable' | 'delete' | 'toggle-disable' | 'delete-address' | 'delete-contact' | 'update-role', userId?: number, index?: number, targetRole?: Role } | null>(null);
+  const [editingPersonId, setEditingPersonId] = React.useState<number | null>(null);
+  const [newPerson, setNewPerson] = React.useState<CreatePersonDto>({
+    relation: 'Relative',
+    createPersonDetailsDto: {
+      firstName: '',
+      lastName: '',
+      dateOfBirth: '',
+      age: 0,
+      gender: Gender.Male,
+      imageUrl: null
+    },
+    createUserDto: {
+      userName: '',
+      password: '',
+      authorizationCode: '',
+      role: Role.Visitor
+    }
+  });
+  const [updateUserRoleData, setUpdateUserRoleData] = React.useState<UpdateUserDto>({
+    id: 0,
+    userName: '',
+    password: '',
+    role: Role.Visitor
+  });
+
   // Logs Filter
   const [logStartDate, setLogStartDate] = React.useState<string>('');
   const [logEndDate, setLogEndDate] = React.useState<string>('');
@@ -161,8 +231,20 @@ export default function App() {
   // Profile Modals
   const [isPasswordModalOpen, setIsPasswordModalOpen] = React.useState(false);
   const [isAuthCodeModalOpen, setIsAuthCodeModalOpen] = React.useState(false);
-  const [passwordData, setPasswordData] = React.useState({ old: '', new: '', confirm: '', token: '' });
-  const [authCodeData, setAuthCodeData] = React.useState({ code: '', token: '' });
+  const [passwordData, setPasswordData] = React.useState<UpdateUserPasswordDto>({ 
+    id: 1, 
+    userName: 'ini_makinde', 
+    token: '', 
+    newPassword: '', 
+    authorizationCode: '' 
+  });
+  const [authCodeData, setAuthCodeData] = React.useState<UpdateUserAuthorizationCode>({ 
+    id: 1, 
+    userName: 'ini_makinde', 
+    password: '', 
+    token: '', 
+    newAuthorizationCode: '' 
+  });
 
   // Add Device State
   const [isAddDeviceOpen, setIsAddDeviceOpen] = React.useState(false);
@@ -170,7 +252,8 @@ export default function App() {
     name: '',
     type: 'light',
     room: '',
-    section: ''
+    section: '',
+    doorType: 'interior'
   });
 
   // Pre-select room/section when opening Add Device dialog
@@ -208,7 +291,7 @@ export default function App() {
   const [viewingContact, setViewingContact] = React.useState<ContactType | null>(null);
   const [isDeleteContactOpen, setIsDeleteContactOpen] = React.useState(false);
   const [contactToDelete, setContactToDelete] = React.useState<ContactType | null>(null);
-  const [editingContactId, setEditingContactId] = React.useState<string | null>(null);
+  const [editingContactId, setEditingContactId] = React.useState<number | null>(null);
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [newCategoryDescription, setNewCategoryDescription] = React.useState('');
   const [newCategoryIcon, setNewCategoryIcon] = React.useState('UserCircle');
@@ -217,14 +300,33 @@ export default function App() {
   const [isCropperOpen, setIsCropperOpen] = React.useState(false);
   const [cropImageSrc, setCropImageSrc] = React.useState('');
   const [cropTarget, setCropTarget] = React.useState<'contact' | 'profile'>('contact');
-  const [newContact, setNewContact] = React.useState<Partial<ContactType>>({
+  const [newContact, setNewContact] = React.useState<{
+    firstName: string;
+    lastName: string;
+    imageUrl: string;
+    contactCategory: number;
+    personId: number;
+    contactDetails: { phoneNumber: string; email: string; id?: number; contactId?: number; personDetailsId?: number }[];
+    address: { 
+      numberLine: string; 
+      street: string; 
+      city: string; 
+      region: string; 
+      state: string; 
+      country: string; 
+      postalCode: string;
+      id?: number;
+      contactId?: number;
+      personId?: number;
+    }[];
+  }>({
     firstName: '',
     lastName: '',
-    category: '',
-    avatar: '',
-    emails: [{ label: 'Work', email: '' }],
-    phones: [{ label: 'Mobile', phone: '' }],
-    addresses: [{ label: 'Home', address: '' }]
+    imageUrl: '',
+    contactCategory: 0,
+    personId: 1,
+    contactDetails: [{ phoneNumber: '', email: '', personDetailsId: 0 }],
+    address: [{ numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' }]
   });
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>, target: 'contact' | 'profile') => {
@@ -241,9 +343,12 @@ export default function App() {
 
   const handleCropComplete = (croppedImageUrl: string) => {
     if (cropTarget === 'contact') {
-      setNewContact(prev => ({ ...prev, avatar: croppedImageUrl }));
+      setNewContact(prev => ({ ...prev, imageUrl: croppedImageUrl }));
     } else {
-      setUserProfile(prev => ({ ...prev, avatar: croppedImageUrl }));
+      setUserProfile(prev => ({ 
+        ...prev, 
+        getPersonDetailsDto: { ...prev.getPersonDetailsDto, imageUrl: croppedImageUrl } 
+      }));
     }
   };
 
@@ -262,6 +367,133 @@ export default function App() {
   // Camera Modal
   const [isCameraModalOpen, setIsCameraModalOpen] = React.useState(false);
   const [selectedCamera, setSelectedCamera] = React.useState<Device | null>(null);
+  const [cameraPlaybackOffset, setCameraPlaybackOffset] = React.useState(0); // seconds from now
+  const [modalCurrentTime, setModalCurrentTime] = React.useState(new Date());
+
+  // Chat State
+  const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
+  const [chatMessages, setChatMessages] = React.useState<any[]>([]);
+  const [chatInput, setChatInput] = React.useState("");
+  const socketRef = React.useRef<any>(null);
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [recordingTime, setRecordingTime] = React.useState(0);
+  const [playingAudioId, setPlayingAudioId] = React.useState<string | null>(null);
+  const [playingProgress, setPlayingProgress] = React.useState(0);
+  const [replyingTo, setReplyingTo] = React.useState<any>(null);
+  const recordingTimerRef = React.useRef<any>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [activeChatId, setActiveChatId] = React.useState<string | null>(null);
+  const [chatSearchQuery, setChatSearchQuery] = React.useState("");
+  const [isChatSearchVisible, setIsChatSearchVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    if (isRecording) {
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      clearInterval(recordingTimerRef.current);
+      setRecordingTime(0);
+    }
+    return () => clearInterval(recordingTimerRef.current);
+  }, [isRecording]);
+
+  React.useEffect(() => {
+    let interval: any;
+    if (playingAudioId) {
+      interval = setInterval(() => {
+        setPlayingProgress(prev => {
+          const currentMsg = chatMessages.find(m => m.id === playingAudioId);
+          const duration = currentMsg?.duration || 10; // Fallback
+          if (prev >= duration) {
+            setPlayingAudioId(null);
+            return 0;
+          }
+          return prev + 0.1;
+        });
+      }, 100);
+    } else {
+      setPlayingProgress(0);
+    }
+    return () => clearInterval(interval);
+  }, [playingAudioId, chatMessages]);
+
+  React.useEffect(() => {
+    socketRef.current = io();
+
+    socketRef.current.on("chat:history", (history: any[]) => {
+      setChatMessages(history);
+    });
+
+    socketRef.current.on("chat:message", (msg: any) => {
+      setChatMessages(prev => [...prev, msg]);
+    });
+
+    return () => {
+      if (socketRef.current) socketRef.current.disconnect();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setModalCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  React.useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, isChatModalOpen]);
+
+  const handleSendMessage = () => {
+    if (!chatInput.trim() || !activeChatId) return;
+    const msg = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: userProfile.id.toString(),
+      userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+      userAvatar: userProfile.getPersonDetailsDto.imageUrl,
+      text: chatInput,
+      type: "text",
+      chatId: activeChatId,
+      timestamp: new Date().toISOString(),
+      replyTo: replyingTo ? {
+        id: replyingTo.id,
+        text: replyingTo.text,
+        userName: replyingTo.userName
+      } : null
+    };
+    socketRef.current.emit("chat:message", msg);
+    setChatInput("");
+    setReplyingTo(null);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'file') => {
+    if (e.target.files && e.target.files[0] && activeChatId) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const msg = {
+          id: Math.random().toString(36).substr(2, 9),
+          userId: userProfile.id.toString(),
+          userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+          userAvatar: userProfile.getPersonDetailsDto.imageUrl,
+          text: `Sent a ${type}`,
+          mediaUrl: reader.result?.toString(),
+          fileName: file.name,
+          type: type,
+          chatId: activeChatId,
+          timestamp: new Date().toISOString()
+        };
+        socketRef.current.emit("chat:message", msg);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Room Lock State
   const [roomLocked, setRoomLocked] = React.useState(false);
@@ -283,19 +515,69 @@ export default function App() {
       id: Date.now().toString(),
       timestamp: new Date().toISOString(),
       action: `${nextState ? 'locked' : 'unlocked'} all security points in ${rooms.find(r => r.id === roomId)?.name || 'the room'}`,
-      userName: userProfile.name,
-      userAvatar: userProfile.avatar
+      userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+      userAvatar: userProfile.getPersonDetailsDto.imageUrl
     };
     setLogs(prev => [newLog, ...prev]);
+  };
+
+  const handleUpdateProfile = () => {
+    // Construct UpdatePersonDto for logic demonstration
+    const updateData: UpdatePersonDto = {
+      id: userProfile.id,
+      updatePersonDetailsDto: {
+        firstName: userProfile.getPersonDetailsDto.firstName,
+        lastName: userProfile.getPersonDetailsDto.lastName,
+        gender: userProfile.getPersonDetailsDto.gender,
+        imageUrl: userProfile.getPersonDetailsDto.imageUrl,
+        getContactDetailsDtos: userProfile.getPersonDetailsDto.getContactDetailsDtos,
+        updateAddressDtos: userProfile.getPersonDetailsDto.getAddressDtos.map(a => ({
+          id: a.id,
+          numberLine: a.numberLine,
+          street: a.street,
+          city: a.city,
+          region: a.region,
+          state: a.state,
+          country: a.country,
+          postalCode: a.postalCode || ''
+        }))
+      },
+      updateUserDto: {
+        id: userProfile.getUserDto.id,
+        userName: userProfile.getUserDto.userName,
+        password: '', 
+        role: userProfile.getUserDto.role
+      }
+    };
+
+    // Simulate wrapping in PersonResponseModel
+    const mockResponse: PersonResponseModel = {
+      isSuccess: true,
+      message: 'Profile synchronization successful',
+      errors: [],
+      data: userProfile
+    };
+
+    if (mockResponse.isSuccess) {
+      const newLog: LogEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        action: 'Updated profile identity (Synced with UpdatePersonDto)',
+        userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        userAvatar: userProfile.getPersonDetailsDto.imageUrl
+      };
+      setLogs(prev => [newLog, ...prev]);
+    }
   };
 
   const handleAddCategory = () => {
     if (!newCategoryName.trim()) return;
     const newCat: ContactCategory = {
-      id: newCategoryName.toLowerCase().replace(/\s+/g, '-'),
+      id: Math.floor(Math.random() * 1000),
       name: newCategoryName,
       description: newCategoryDescription,
-      icon: newCategoryIcon
+      icon: newCategoryIcon,
+      personId: 1
     };
     setContactCategories(prev => [...prev, newCat]);
     setNewCategoryName('');
@@ -310,7 +592,7 @@ export default function App() {
       ...cat,
       name: newCategoryName,
       description: newCategoryDescription,
-      icon: newCategoryIcon
+      icon: newCategoryIcon,
     } : cat));
     setNewCategoryName('');
     setNewCategoryDescription('');
@@ -319,37 +601,62 @@ export default function App() {
     setEditingCategory(null);
   };
 
-  const handleDeleteCategory = (id: string) => {
+  const handleDeleteCategory = (id: number) => {
     setContactCategories(prev => prev.filter(cat => cat.id !== id));
     // Reset contacts in this category to other?
-    setContacts(prev => prev.map(c => c.category === id ? { ...c, category: 'other' } : c));
+    const otherCat = contactCategories.find(c => c.name.toLowerCase() === 'other');
+    if (otherCat) {
+      setContacts(prev => prev.map(c => c.getContactCategoryDto.id === id ? { ...c, getContactCategoryDto: otherCat } : c));
+    }
   };
 
   const handleAddContact = () => {
     if (!newContact.firstName || !newContact.lastName) return;
     
-    if (editingContactId) {
+    const selectedCategory = contactCategories.find(c => c.id === newContact.contactCategory) || contactCategories[0];
+
+    if (editingContactId !== null) {
       setContacts(prev => prev.map(c => c.id === editingContactId ? {
         ...c,
-        firstName: newContact.firstName!,
-        lastName: newContact.lastName!,
-        category: newContact.category || 'other',
-        avatar: newContact.avatar || '',
-        emails: (newContact.emails || []).filter(e => e.email),
-        phones: (newContact.phones || []).filter(p => p.phone),
-        addresses: (newContact.addresses || []).filter(a => a.address),
+        firstName: newContact.firstName,
+        lastName: newContact.lastName,
+        getContactCategoryDto: selectedCategory,
+        imageUrl: newContact.imageUrl || '',
+        contactDetails: newContact.contactDetails.map((d, i) => ({
+          ...d,
+          id: d.id || i + 1,
+          contactId: editingContactId,
+          personDetailsId: d.personDetailsId || 0
+        })),
+        address: newContact.address.map((a, i) => ({
+          ...a,
+          id: a.id || i + 1,
+          contactId: editingContactId,
+          personId: newContact.personId
+        })),
       } : c));
       setEditingContactId(null);
     } else {
+      const newId = Math.floor(Math.random() * 10000);
       const contact: ContactType = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: newId,
         firstName: newContact.firstName,
         lastName: newContact.lastName,
-        category: newContact.category || 'other',
-        avatar: newContact.avatar || '',
-        emails: (newContact.emails || []).filter(e => e.email),
-        phones: (newContact.phones || []).filter(p => p.phone),
-        addresses: (newContact.addresses || []).filter(a => a.address),
+        getContactCategoryDto: selectedCategory,
+        imageUrl: newContact.imageUrl || '',
+        contactDetails: newContact.contactDetails.map((d, i) => ({
+          phoneNumber: d.phoneNumber,
+          email: d.email,
+          id: i + 1,
+          contactId: newId,
+          personDetailsId: d.personDetailsId || 0
+        })),
+        address: newContact.address.map((a, i) => ({
+          ...a,
+          id: i + 1,
+          contactId: newId,
+          personId: newContact.personId
+        })),
       };
       setContacts(prev => [...prev, contact]);
     }
@@ -358,11 +665,11 @@ export default function App() {
     setNewContact({
       firstName: '',
       lastName: '',
-      category: '',
-      avatar: '',
-      emails: [{ label: 'Work', email: '' }],
-      phones: [{ label: 'Mobile', phone: '' }],
-      addresses: [{ label: 'Home', address: '' }]
+      imageUrl: '',
+      contactCategory: 0,
+      personId: 1,
+      contactDetails: [{ phoneNumber: '', email: '', personDetailsId: 0 }],
+      address: [{ numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' }]
     });
   };
 
@@ -370,11 +677,15 @@ export default function App() {
     setNewContact({
       firstName: contact.firstName,
       lastName: contact.lastName,
-      category: contact.category,
-      avatar: contact.avatar || '',
-      emails: contact.emails.length > 0 ? contact.emails : [{ label: 'Work', email: '' }],
-      phones: contact.phones.length > 0 ? contact.phones : [{ label: 'Mobile', phone: '' }],
-      addresses: contact.addresses.length > 0 ? contact.addresses : [{ label: 'Home', address: '' }]
+      contactCategory: contact.getContactCategoryDto.id,
+      imageUrl: contact.imageUrl || '',
+      personId: contact.address[0]?.personId || 1,
+      contactDetails: contact.contactDetails.length > 0 
+        ? contact.contactDetails.map(d => ({ ...d })) 
+        : [{ phoneNumber: '', email: '', personDetailsId: 0 }],
+      address: contact.address.length > 0 
+        ? contact.address.map(a => ({ ...a })) 
+        : [{ numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' }]
     });
     setEditingContactId(contact.id);
     setIsAddContactOpen(true);
@@ -519,20 +830,20 @@ export default function App() {
     }
 
     const device: Device = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).substring(2, 9),
       name: newDevice.name,
       type: inferredType as any,
       room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
       section: newDevice.section || undefined,
       status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : (inferredType === 'camera' ? 'active' : 'off'),
       value: inferredType === 'light' ? 0 : undefined,
-      doorType: inferredType === 'door' ? 'interior' : undefined,
+      doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
       powerUsage: inferredType === 'appliance' ? 0 : undefined
     };
 
     setDevices(prev => [...prev, device]);
     setIsAddDeviceOpen(false);
-    setNewDevice({ name: '', type: 'light', room: '', section: '' });
+    setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior' });
   };
 
   const handleAddRoom = () => {
@@ -629,7 +940,7 @@ export default function App() {
       title = 'Dashboard';
     } else if (activeView === 'user-room') {
       Icon = HomeIcon;
-      title = `${userProfile.name.split(' ')[0]}'s Room`;
+      title = `${userProfile.getPersonDetailsDto.firstName}'s Room`;
     } else if (activeView === 'facilities' || activeView === 'facility-overview') {
       Icon = Layers;
       title = 'Facilities Overview';
@@ -691,7 +1002,7 @@ export default function App() {
           className="space-y-8"
         >
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-bold tracking-tight">Welcome home, {userProfile.name.split(' ')[0]}!</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Welcome home, {userProfile.getPersonDetailsDto.firstName}!</h1>
             <p className="text-muted-foreground">Everything is looking good. You have {activeDevices} active devices.</p>
           </div>
 
@@ -960,29 +1271,67 @@ export default function App() {
               <p className="text-muted-foreground">Recent actions and events in your smart home.</p>
             </div>
             
-            <div className="flex items-center gap-2 bg-card p-2 rounded-xl border">
-              <div className="flex flex-col gap-1">
-                <Label className="text-[10px] uppercase ml-1">From</Label>
-                <Input 
-                  type="date" 
-                  className="h-8 text-xs" 
-                  value={logStartDate}
-                  onChange={(e) => setLogStartDate(e.target.value)}
-                />
+            <div className="flex items-center gap-4 bg-card p-3 rounded-2xl border shadow-sm">
+              <div className="flex flex-col gap-1.5 prose-sm">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">From</Label>
+                <Popover>
+                  <PopoverTrigger 
+                    render={
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "h-10 justify-start text-left font-normal w-[160px] rounded-xl border-dashed hover:border-solid transition-all",
+                          !logStartDate && "text-muted-foreground"
+                        )}
+                      />
+                    }
+                  >
+                    <CalendarDays className="mr-2 h-4 w-4 text-primary" />
+                    {logStartDate ? format(new Date(logStartDate), "PPP") : <span>Pick a date</span>}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-2xl border shadow-2xl" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={logStartDate ? new Date(logStartDate) : undefined}
+                      onSelect={(date) => setLogStartDate(date ? date.toISOString() : '')}
+                      initialFocus
+                      className="rounded-2xl"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-[10px] uppercase ml-1">To</Label>
-                <Input 
-                  type="date" 
-                  className="h-8 text-xs" 
-                  value={logEndDate}
-                  onChange={(e) => setLogEndDate(e.target.value)}
-                />
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">To</Label>
+                <Popover>
+                  <PopoverTrigger 
+                    render={
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "h-10 justify-start text-left font-normal w-[160px] rounded-xl border-dashed hover:border-solid transition-all",
+                          !logEndDate && "text-muted-foreground"
+                        )}
+                      />
+                    }
+                  >
+                    <CalendarDays className="mr-2 h-4 w-4 text-primary" />
+                    {logEndDate ? format(new Date(logEndDate), "PPP") : <span>Pick a date</span>}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-2xl border shadow-2xl" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={logEndDate ? new Date(logEndDate) : undefined}
+                      onSelect={(date) => setLogEndDate(date ? date.toISOString() : '')}
+                      initialFocus
+                      className="rounded-2xl"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="mt-4 h-8 w-8"
+                className="mt-5 h-10 w-10 hover:bg-destructive/10 hover:text-destructive rounded-xl transition-colors"
                 onClick={() => { setLogStartDate(''); setLogEndDate(''); }}
               >
                 <Trash2 className="h-4 w-4" />
@@ -1020,7 +1369,7 @@ export default function App() {
     if (activeView === 'contacts') {
       const filteredContacts = contacts.filter(c => {
         const matchesSearch = `${c.firstName} ${c.lastName}`.toLowerCase().includes(contactSearchQuery.toLowerCase());
-        const matchesCategory = contactSortCategory === 'all' || c.category === contactSortCategory;
+        const matchesCategory = contactSortCategory === 'all' || c.getContactCategoryDto.id.toString() === contactSortCategory;
         return matchesSearch && matchesCategory;
       });
 
@@ -1065,7 +1414,7 @@ export default function App() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="h-5">{contacts.filter(c => c.category === cat.id).length}</Badge>
+                            <Badge variant="secondary" className="h-5">{contacts.filter(c => c.getContactCategoryDto.id === cat.id).length}</Badge>
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button 
                                 variant="ghost" 
@@ -1111,15 +1460,15 @@ export default function App() {
                       onClick={() => { setViewingContact(contact); setIsViewContactOpen(true); }}
                     >
                       <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
-                        {contact.avatar ? (
-                          <img src={contact.avatar} alt={contact.firstName} className="h-full w-full object-cover" />
+                        {contact.imageUrl ? (
+                          <img src={contact.imageUrl} alt={contact.firstName} className="h-full w-full object-cover" />
                         ) : (
                           `${contact.firstName[0]}${contact.lastName[0]}`
                         )}
                       </div>
                       <div className="flex flex-col">
                         <span className="text-sm font-bold">{contact.firstName} {contact.lastName}</span>
-                        <span className="text-xs text-muted-foreground capitalize">{contact.category}</span>
+                        <span className="text-xs text-muted-foreground capitalize">{contact.getContactCategoryDto.name}</span>
                       </div>
                     </div>
                   ))}
@@ -1146,7 +1495,7 @@ export default function App() {
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
                       {contactCategories.map(cat => (
-                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                        <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1167,15 +1516,15 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary text-lg font-bold overflow-hidden">
-                            {contact.avatar ? (
-                              <img src={contact.avatar} alt={contact.firstName} className="h-full w-full object-cover" />
+                            {contact.imageUrl ? (
+                              <img src={contact.imageUrl} alt={contact.firstName} className="h-full w-full object-cover" />
                             ) : (
                               `${contact.firstName[0]}${contact.lastName[0]}`
                             )}
                           </div>
                           <div>
                             <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
-                            <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wider">{contact.category}</Badge>
+                            <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wider">{contact.getContactCategoryDto.name}</Badge>
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -1186,26 +1535,24 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="grid gap-3 text-sm">
-                        {contact.emails.map((e, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-muted-foreground">
-                            <Mail className="h-4 w-4" />
-                            <span className="font-medium text-foreground">{e.email}</span>
-                            <span className="text-[10px] uppercase tracking-wider">({e.label})</span>
+                        {contact.contactDetails.map((d, idx) => (
+                          <div key={idx} className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Mail className="h-4 w-4" />
+                              <span className="font-medium text-foreground">{d.email}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Phone className="h-4 w-4" />
+                              <span className="font-medium text-foreground">{d.phoneNumber}</span>
+                            </div>
                           </div>
                         ))}
-                        {contact.phones.map((p, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-muted-foreground">
-                            <Phone className="h-4 w-4" />
-                            <span className="font-medium text-foreground">{p.phone}</span>
-                            <span className="text-[10px] uppercase tracking-wider">({p.label})</span>
-                          </div>
-                        ))}
-                        {contact.addresses.map((a, idx) => (
+                        {contact.address.map((a, idx) => (
                           <div key={idx} className="flex items-start gap-2 text-muted-foreground">
                             <MapPin className="h-4 w-4 mt-0.5" />
                             <div className="flex flex-col">
-                              <span className="font-medium text-foreground">{a.address}</span>
-                              <span className="text-[10px] uppercase tracking-wider">({a.label})</span>
+                              <span className="font-medium text-foreground">{a.numberLine} {a.street}, {a.city}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{a.state}, {a.country}</span>
                             </div>
                           </div>
                         ))}
@@ -1226,93 +1573,342 @@ export default function App() {
           key="profile"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-4xl mx-auto space-y-8"
+          className="max-w-7xl mx-auto space-y-8"
         >
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
               <UserCircle className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">User Profile</h1>
+              <h1 className="text-3xl font-bold tracking-tight">
+                {userProfile.getPersonDetailsDto.firstName} {userProfile.getPersonDetailsDto.lastName} Profile
+              </h1>
             </div>
             <p className="text-muted-foreground">Manage your account information and security settings.</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-            <Card className="p-6 flex flex-col items-center text-center space-y-4">
-              <div className="relative group">
-                <div className="h-32 w-32 rounded-full overflow-hidden border-4 border-primary/10">
-                  <img src={userProfile.avatar} alt={userProfile.name} className="h-full w-full object-cover" />
+          <Card className="overflow-hidden border-none shadow-2xl bg-card/50 backdrop-blur-md">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-0">
+              {/* Left Column: Form Details */}
+              <div className="md:col-span-3 p-8 space-y-8 order-2 md:order-1">
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <UserIcon className="h-3 w-3 text-muted-foreground" />
+                      Full Name
+                    </Label>
+                    <Input 
+                      className={userProfile.getPersonDetailsDto.firstName ? "border-b-green-400 text-lg font-medium bg-transparent text-black" : "text-lg font-medium bg-transparent text-black"} 
+                      value={userProfile.getPersonDetailsDto.firstName} 
+                      onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, firstName: e.target.value } }))} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <UserIcon className="h-3 w-3 text-muted-foreground" />
+                      Last Name
+                    </Label>
+                    <Input 
+                      className={userProfile.getPersonDetailsDto.lastName ? "border-b-green-400 text-lg font-medium bg-transparent text-black" : "text-lg font-medium bg-transparent text-black"} 
+                      value={userProfile.getPersonDetailsDto.lastName} 
+                      onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, lastName: e.target.value } }))} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <ShieldCheck className="h-3 w-3 text-muted-foreground" />
+                      Username
+                    </Label>
+                    <Input 
+                      className={userProfile.getUserDto.userName ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      value={userProfile.getUserDto.userName} 
+                      onChange={(e) => setUserProfile(p => ({ ...p, getUserDto: { ...p.getUserDto, userName: e.target.value } }))} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Mail className="h-3 w-3 text-muted-foreground" />
+                      Email Address
+                    </Label>
+                    <Input 
+                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email || ''} 
+                      onChange={(e) => {
+                        const email = e.target.value;
+                        setUserProfile(p => {
+                          const details = [...p.getPersonDetailsDto.getContactDetailsDtos];
+                          if (details[0]) details[0] = { ...details[0], email };
+                          else details[0] = { id: 0, contactId: 0, personDetailsId: p.getPersonDetailsDto.id, email, phoneNumber: '' };
+                          return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: details } };
+                        });
+                      }} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Smartphone className="h-3 w-3 text-muted-foreground" />
+                      Phone Number
+                    </Label>
+                    <Input 
+                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber || ''} 
+                      onChange={(e) => {
+                        const phoneNumber = e.target.value;
+                        setUserProfile(p => {
+                          const details = [...p.getPersonDetailsDto.getContactDetailsDtos];
+                          if (details[0]) details[0] = { ...details[0], phoneNumber };
+                          else details[0] = { id: 0, contactId: 0, personDetailsId: p.getPersonDetailsDto.id, email: '', phoneNumber };
+                          return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: details } };
+                        });
+                      }} 
+                    />
+                  </div>
                 </div>
-                <button 
-                  className="absolute bottom-0 right-0 rounded-full bg-primary p-2 text-primary-foreground shadow-lg hover:scale-110 transition-transform"
-                  onClick={() => document.getElementById('profile-avatar-upload')?.click()}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </button>
-                <input 
-                  type="file" 
-                  id="profile-avatar-upload" 
-                  className="hidden" 
-                  accept="image/*"
-                  onChange={(e) => handleImageSelect(e, 'profile')}
-                />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold">{userProfile.name}</h2>
-                <p className="text-sm text-muted-foreground">Home Owner</p>
-              </div>
-              <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                Verified Account
-              </Badge>
-            </Card>
 
-            <Card className="p-6 md:col-span-2 space-y-6">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <UserIcon className="h-3 w-3 text-muted-foreground" />
-                    Full Name
-                  </Label>
-                  <Input value={userProfile.name} onChange={(e) => setUserProfile(p => ({ ...p, name: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Mail className="h-3 w-3 text-muted-foreground" />
-                    Email Address
-                  </Label>
-                  <Input value={userProfile.email} onChange={(e) => setUserProfile(p => ({ ...p, email: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Smartphone className="h-3 w-3 text-muted-foreground" />
-                    Phone Number
-                  </Label>
-                  <Input value={userProfile.phone} onChange={(e) => setUserProfile(p => ({ ...p, phone: e.target.value }))} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <MapPin className="h-3 w-3 text-muted-foreground" />
-                    Home Address
-                  </Label>
-                  <Input value={userProfile.address} onChange={(e) => setUserProfile(p => ({ ...p, address: e.target.value }))} />
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button className="bg-green-600 hover:bg-green-700 text-white">
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Changes
-                </Button>
-              </div>
+                <Separator className="opacity-50" />
 
-              <Separator />
+                {/* Editable Linked Addresses */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider">
+                      <MapPin className="h-4 w-4" />
+                      Manage Addresses ({userProfile.getPersonDetailsDto.getAddressDtos.length})
+                    </h3>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-black hover:bg-primary/5"
+                      onClick={() => {
+                        const newAddr: GetAddressDto = { 
+                          id: Date.now(), contactId: 0, personId: userProfile.id, 
+                          numberLine: '', street: '', city: '', region: '', state: '', 
+                          country: 'United Kingdom', postalCode: '' 
+                        };
+                        setUserProfile(p => ({
+                          ...p,
+                          getPersonDetailsDto: {
+                            ...p.getPersonDetailsDto,
+                            getAddressDtos: [...p.getPersonDetailsDto.getAddressDtos, newAddr]
+                          }
+                        }));
+                      }}
+                    >
+                      <Plus className="mr-1 h-3 w-3" /> Add Address
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4">
+                    {userProfile.getPersonDetailsDto.getAddressDtos.map((addr, idx) => (
+                      <div key={idx} className="p-4 rounded-2xl border bg-muted/20 space-y-4 relative group">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-6 w-6 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => {
+                            setPendingUserAction({ type: 'delete-address', index: idx });
+                            setIsAuthCodeModalOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Number/Line</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.numberLine}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], numberLine: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Street</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.street}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], street: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">City</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.city}
+                               onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], city: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Region</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.region}
+                               onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], region: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">State</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.state}
+                               onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], state: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                           <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Country</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.country}
+                               onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], country: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Postal Code</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={addr.postalCode || ''}
+                               onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const addrs = [...p.getPersonDetailsDto.getAddressDtos];
+                                  addrs[idx] = { ...addrs[idx], postalCode: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: addrs } };
+                                });
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <Camera className="h-5 w-5 text-primary" />
-                  Camera Access
-                </h3>
-                <Card className="p-4 bg-muted/30">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Separator className="opacity-50" />
+
+                {/* Editable Linked Contacts */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider">
+                      <Mail className="h-4 w-4" />
+                      Manage Contacts ({userProfile.getPersonDetailsDto.getContactDetailsDtos.length})
+                    </h3>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-black hover:bg-primary/5"
+                      onClick={() => {
+                        const newContact: GetContactDetailsDto = { 
+                          id: Date.now(), contactId: 0, personDetailsId: userProfile.getPersonDetailsDto.id, 
+                          email: '', phoneNumber: '' 
+                        };
+                        setUserProfile(p => ({
+                          ...p,
+                          getPersonDetailsDto: {
+                            ...p.getPersonDetailsDto,
+                            getContactDetailsDtos: [...p.getPersonDetailsDto.getContactDetailsDtos, newContact]
+                          }
+                        }));
+                      }}
+                    >
+                      <Plus className="mr-1 h-3 w-3" /> Add Contact
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {userProfile.getPersonDetailsDto.getContactDetailsDtos.map((contact, idx) => (
+                      <div key={idx} className="p-4 rounded-2xl border bg-muted/20 flex flex-col gap-4 relative group">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-6 w-6 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => {
+                            setPendingUserAction({ type: 'delete-contact', index: idx });
+                            setIsAuthCodeModalOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Email Address</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={contact.email}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const details = [...p.getPersonDetailsDto.getContactDetailsDtos];
+                                  details[idx] = { ...details[idx], email: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: details } };
+                                });
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-muted-foreground uppercase">Phone Number</Label>
+                            <Input 
+                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              value={contact.phoneNumber}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile(p => {
+                                  const details = [...p.getPersonDetailsDto.getContactDetailsDtos];
+                                  details[idx] = { ...details[idx], phoneNumber: val };
+                                  return { ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: details } };
+                                });
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Separator className="opacity-50" />
+
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider">
+                    <Camera className="h-4 w-4" />
+                    Camera Access
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 p-4 rounded-2xl border bg-muted/20">
                     {GENERAL_CAMERAS.map(camera => (
                       <div key={camera.id} className="flex items-center space-x-2">
                         <Checkbox 
@@ -1327,41 +1923,98 @@ export default function App() {
                             }));
                           }}
                         />
-                        <Label htmlFor={`cam-${camera.id}`} className="text-sm font-medium leading-none cursor-pointer">
+                        <Label htmlFor={`cam-${camera.id}`} className="text-xs font-medium leading-none cursor-pointer">
                           {camera.name}
                         </Label>
                       </div>
                     ))}
                   </div>
-                </Card>
-              </div>
+                </div>
 
-              <Separator />
+                <Separator className="opacity-50" />
 
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-primary" />
-                  Security Settings
-                </h3>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Button variant="outline" className="justify-start h-auto p-4 border-blue-200 hover:bg-blue-50 hover:text-blue-700 transition-colors" onClick={() => setIsPasswordModalOpen(true)}>
-                    <Key className="mr-4 h-5 w-5 text-blue-500" />
-                    <div className="flex flex-col items-start">
-                      <span className="font-bold">Change Password</span>
-                      <span className="text-[10px] text-muted-foreground">Update your login credentials</span>
-                    </div>
-                  </Button>
-                  <Button variant="outline" className="justify-start h-auto p-4 border-orange-200 hover:bg-orange-50 hover:text-orange-700 transition-colors" onClick={() => setIsAuthCodeModalOpen(true)}>
-                    <ShieldAlert className="mr-4 h-5 w-5 text-orange-500" />
-                    <div className="flex flex-col items-start">
-                      <span className="font-bold">Authorization Code</span>
-                      <span className="text-[10px] text-muted-foreground">Manage your 6-digit secure code</span>
-                    </div>
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider">
+                    <Shield className="h-4 w-4" />
+                    Security Settings
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-blue-200 text-black hover:bg-blue-50 hover:text-blue-700 transition-colors rounded-2xl" onClick={() => setIsPasswordModalOpen(true)}>
+                      <Key className="mr-4 h-5 w-5 text-blue-500" />
+                      <div className="flex flex-col items-start">
+                        <span className="font-bold text-xs uppercase tracking-wider">Change Password</span>
+                        <span className="text-[10px] text-muted-foreground">Update your login credentials</span>
+                      </div>
+                    </Button>
+                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-orange-200 text-black hover:bg-orange-50 hover:text-orange-700 transition-colors rounded-2xl" onClick={() => setIsAuthCodeModalOpen(true)}>
+                      <ShieldAlert className="mr-4 h-5 w-5 text-orange-500" />
+                      <div className="flex flex-col items-start">
+                        <span className="font-bold text-xs uppercase tracking-wider">Authorization Code</span>
+                        <span className="text-[10px] text-muted-foreground">Manage your 6-digit secure code</span>
+                      </div>
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-8">
+                  <Button 
+                    className="bg-transparent border-2 border-green-300 text-black hover:bg-green-50 rounded-full px-8 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto"
+                    onClick={handleUpdateProfile}
+                  >
+                    <Save className="mr-2 h-4 w-4 text-green-600" />
+                    Save Changes
                   </Button>
                 </div>
               </div>
-            </Card>
-          </div>
+
+              {/* Right Column: Avatar & Summary */}
+              <div className="bg-muted/30 border-l p-8 flex flex-col items-center text-center space-y-6 order-1 md:order-2">
+                <div className="relative group">
+                  <div className="h-40 w-40 rounded-3xl overflow-hidden border-8 border-background shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
+                    <img src={userProfile.getPersonDetailsDto.imageUrl} alt={`${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`} className="h-full w-full object-cover" />
+                  </div>
+                  <button 
+                    className="absolute -bottom-2 -right-2 rounded-2xl bg-primary p-3 text-primary-foreground shadow-xl hover:scale-110 transition-transform"
+                    onClick={() => document.getElementById('profile-avatar-upload')?.click()}
+                  >
+                    <Camera className="h-5 w-5" />
+                  </button>
+                  <input 
+                    type="file" 
+                    id="profile-avatar-upload" 
+                    className="hidden" 
+                    accept="image/*"
+                    onChange={(e) => handleImageSelect(e, 'profile')}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="text-2xl font-black tracking-tight">{userProfile.getPersonDetailsDto.firstName} {userProfile.getPersonDetailsDto.lastName}</h2>
+                  <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-3 py-1 uppercase tracking-widest text-[9px] font-bold">
+                    {userProfile.getUserDto.roleName}
+                  </Badge>
+                </div>
+                
+                <div className="w-full pt-6 space-y-3">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-widest pb-2 border-b">
+                    <span>Identity Status</span>
+                    <CheckCircle2 className="h-3 w-3 text-green-500" />
+                  </div>
+                  <div className="flex flex-col gap-1 text-left">
+                    <span className="text-[10px] text-muted-foreground uppercase">System Role</span>
+                    <span className="text-xs font-medium">{userProfile.getUserDto.roleName}</span>
+                  </div>
+                  <div className="flex flex-col gap-1 text-left">
+                    <span className="text-[10px] text-muted-foreground uppercase">Member Since</span>
+                    <span className="text-xs font-medium">October 2023</span>
+                  </div>
+                  <div className="flex flex-col gap-1 text-left">
+                    <span className="text-[10px] text-muted-foreground uppercase">Access Level</span>
+                    <span className="text-xs font-medium">Standard Homeowner</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
         </motion.div>
       );
     }
@@ -1383,22 +2036,36 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {allUsers.map(user => (
-              <Card key={user.id} className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-full overflow-hidden">
-                    <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
+            {allUsers.map(person => {
+              const details = person.getPersonDetailsDto;
+              const user = person.getUserDto;
+              return (
+                <Card 
+                  key={person.id} 
+                  className={`p-4 flex items-center justify-between group hover:shadow-md transition-shadow cursor-pointer ${person.disabled ? 'opacity-50 grayscale' : ''}`}
+                  onClick={() => {
+                    setViewingPerson(person);
+                    setIsViewPersonDetailsOpen(true);
+                  }}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
+                      <img src={details.imageUrl} alt={`${details.firstName} ${details.lastName}`} className="h-full w-full object-cover" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold">{details.firstName} {details.lastName}</h3>
+                      <p className="text-xs text-muted-foreground">{details.getContactDetailsDtos[0]?.email}</p>
+                      <Badge variant="secondary" className="mt-1 text-[10px] uppercase tracking-wider">{user.roleName}</Badge>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold">{user.name}</h3>
-                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                    <Badge variant="secondary" className="mt-1 text-[10px] uppercase">{user.role}</Badge>
-                  </div>
-                </div>
-                <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
-              </Card>
-            ))}
-            <Button variant="outline" className="h-full border-dashed flex flex-col gap-2 py-8">
+                </Card>
+              );
+            })}
+            <Button 
+              variant="outline" 
+              className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
+              onClick={() => setIsAddPersonOpen(true)}
+            >
               <PlusCircle className="h-6 w-6 text-muted-foreground" />
               <span className="text-sm font-medium text-muted-foreground">Add New User</span>
             </Button>
@@ -1444,7 +2111,7 @@ export default function App() {
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
               <HomeIcon className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">{userProfile.name.split(' ')[0]}'s Room</h1>
+              <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s Room</h1>
             </div>
             <p className="text-muted-foreground">Manage devices in your personal space.</p>
           </div>
@@ -2179,8 +2846,11 @@ export default function App() {
               <span>24°C Sunny</span>
             </div>
             <div className="flex items-center gap-4">
-              <button className="relative rounded-full p-2 hover:bg-muted">
-                <Bell className="h-5 w-5" />
+              <button 
+                className="relative rounded-full p-2 hover:bg-muted"
+                onClick={() => setIsChatModalOpen(true)}
+              >
+                <MessageSquare className="h-5 w-5" />
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
               </button>
             </div>
@@ -2198,7 +2868,7 @@ export default function App() {
 
       {/* Add Device Dialog */}
       <Dialog open={isAddDeviceOpen} onOpenChange={setIsAddDeviceOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {(() => {
@@ -2213,7 +2883,7 @@ export default function App() {
                   'lights': 'Light',
                   'cameras': 'Camera',
                   'doors': 'Door',
-                  'windows': 'Window'
+                  'windows': 'Light'
                 };
                 return map[type] || 'Device';
               })()}
@@ -2225,16 +2895,69 @@ export default function App() {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="name" className="flex items-center gap-2">
-                <Edit3 className="h-3 w-3 text-muted-foreground" />
-                Device Name
+                {(() => {
+                  const type = activeView.replace('facility-', '');
+                  const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
+                  return <Icon className="h-3 w-3 text-muted-foreground" />;
+                })()}
+                {(() => {
+                  const type = activeView.replace('facility-', '');
+                  const map: Record<string, string> = {
+                    'appliances': 'Appliance Name',
+                    'lights': 'Light Name',
+                    'cameras': 'Camera Name',
+                    'doors': 'Door Name',
+                    'windows': 'Room Name'
+                  };
+                  return map[type] || 'Device Name';
+                })()}
               </Label>
               <Input 
                 id="name" 
-                placeholder="e.g. Desk Lamp" 
+                placeholder={`e.g. ${(() => {
+                  const type = activeView.replace('facility-', '');
+                  if (type === 'lights') return 'Desk Lamp';
+                  if (type === 'doors') return 'Main Entrance';
+                  if (type === 'cameras') return 'Backyard Camera';
+                  if (type === 'appliances') return 'Coffee Maker';
+                  return 'My Device';
+                })()}`}
                 value={newDevice.name}
                 onChange={(e) => setNewDevice(prev => ({ ...prev, name: e.target.value }))}
               />
             </div>
+
+            {activeView === 'facility-doors' && (
+              <div className="grid gap-2">
+                <Label htmlFor="door-type" className="flex items-center gap-2">
+                  <Building2 className="h-3 w-3 text-muted-foreground" />
+                  Door Type
+                </Label>
+                <Select 
+                  value={newDevice.doorType} 
+                  onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: v }))}
+                >
+                  <SelectTrigger id="door-type">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="interior">
+                      <div className="flex items-center gap-2">
+                        <HomeIcon className="h-4 w-4" />
+                        <span>Interior</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="exterior">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4" />
+                        <span>Exterior</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="section" className="flex items-center gap-2">
                 <Layers className="h-3 w-3 text-muted-foreground" />
@@ -2244,7 +2967,7 @@ export default function App() {
                 value={newDevice.section} 
                 onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="section">
                   <SelectValue placeholder="Select section" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2264,7 +2987,7 @@ export default function App() {
                 value={newDevice.room} 
                 onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v === 'none' ? undefined : v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="room">
                   <SelectValue placeholder="Select room" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2280,7 +3003,17 @@ export default function App() {
             <Button variant="outline" onClick={() => setIsAddDeviceOpen(false)}>Cancel</Button>
             <Button onClick={handleAddDevice} className="bg-primary text-primary-foreground">
               <Plus className="mr-2 h-4 w-4" />
-              Add Device
+              Add {(() => {
+                const type = activeView.replace('facility-', '');
+                const map: Record<string, string> = {
+                  'appliances': 'Appliance',
+                  'lights': 'Light',
+                  'cameras': 'Camera',
+                  'doors': 'Door',
+                  'windows': 'Light'
+                };
+                return map[type] || 'Device';
+              })()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2288,7 +3021,7 @@ export default function App() {
 
       {/* Add Room Dialog */}
       <Dialog open={isAddRoomOpen} onOpenChange={setIsAddRoomOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
@@ -2300,7 +3033,10 @@ export default function App() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="room-name">Room Name</Label>
+              <Label htmlFor="room-name" className="flex items-center gap-2">
+                <Edit3 className="h-3 w-3 text-muted-foreground" />
+                Room Name
+              </Label>
               <Input 
                 id="room-name" 
                 placeholder="e.g. Study" 
@@ -2309,12 +3045,15 @@ export default function App() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="section">Section (Optional)</Label>
+              <Label htmlFor="room-section" className="flex items-center gap-2">
+                <Layers className="h-3 w-3 text-muted-foreground" />
+                Section (Optional)
+              </Label>
               <Select 
                 value={newRoom.section} 
                 onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="room-section">
                   <SelectValue placeholder="Select section" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2326,12 +3065,15 @@ export default function App() {
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="icon">Icon</Label>
+              <Label htmlFor="room-icon" className="flex items-center gap-2">
+                <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                Icon
+              </Label>
               <Select 
                 value={newRoom.icon} 
                 onValueChange={(v) => setNewRoom(prev => ({ ...prev, icon: v }))}
               >
-                <SelectTrigger>
+                <SelectTrigger id="room-icon">
                   <SelectValue placeholder="Select icon" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2347,12 +3089,15 @@ export default function App() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddRoomOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddRoom}>Add Room</Button>
+            <Button onClick={handleAddRoom} className="bg-primary text-primary-foreground">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Add Room
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
@@ -2409,24 +3154,25 @@ export default function App() {
       </Dialog>
       {/* Password Change Dialog */}
       <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Key className="h-5 w-5 text-blue-500" />
               Change Password
             </DialogTitle>
             <DialogDescription>
-              Update your account password. You will need your current password and a valid 16-character token.
+              Update your account password. You will need your current password and your authorization code.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="old-password">Current Password</Label>
+              <Label htmlFor="password-token">Security Token</Label>
               <Input 
-                id="old-password" 
-                type="password"
-                value={passwordData.old}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, old: e.target.value }))}
+                id="password-token" 
+                placeholder="XXXX-XXXX-XXXX-XXXX"
+                className={passwordData.token ? "border-b-green-400" : ""}
+                value={passwordData.token}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, token: e.target.value }))}
               />
             </div>
             <div className="grid gap-2">
@@ -2434,80 +3180,425 @@ export default function App() {
               <Input 
                 id="new-password" 
                 type="password"
-                value={passwordData.new}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, new: e.target.value }))}
+                className={passwordData.newPassword ? "border-b-green-400" : ""}
+                value={passwordData.newPassword}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="confirm-password">Confirm New Password</Label>
+              <Label htmlFor="password-auth-code">Authorization Code</Label>
               <Input 
-                id="confirm-password" 
-                type="password"
-                value={passwordData.confirm}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, confirm: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password-token">16-Character Token</Label>
-              <Input 
-                id="password-token" 
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                maxLength={19}
-                value={passwordData.token}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, token: e.target.value }))}
+                id="password-auth-code" 
+                placeholder="000000"
+                maxLength={6}
+                className={passwordData.authorizationCode.length === 6 ? "border-b-green-400" : ""}
+                value={passwordData.authorizationCode}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, authorizationCode: e.target.value }))}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPasswordModalOpen(false)}>Cancel</Button>
-            <Button onClick={() => setIsPasswordModalOpen(false)} className="bg-blue-600 hover:bg-blue-700 text-white">Update Password</Button>
+            <Button onClick={() => setIsPasswordModalOpen(false)} className="bg-transparent border-2 border-blue-600 text-black hover:bg-blue-50 flex items-center gap-2">
+              <RefreshCw className="h-4 w-4 text-blue-600" />
+              Update Password
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Authorization Code Dialog */}
       <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 shadow-lg shadow-yellow-100/50">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className="h-5 w-5 text-orange-500" />
-              Update Authorization Code
+            <DialogTitle className="flex items-center gap-2 text-yellow-700">
+              <ShieldAlert className="h-5 w-5" />
+              Authorization Required
             </DialogTitle>
-            <DialogDescription>
-              Change your 6-digit secure authorization code. A 16-character token is required.
+            <DialogDescription className="text-yellow-800/70">
+              This is a sensitive operation. Please enter your credentials to authorize the action.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="auth-code">New 6-Digit Code</Label>
-              <Input 
-                id="auth-code" 
-                placeholder="000000"
-                maxLength={6}
-                value={authCodeData.code}
-                onChange={(e) => setAuthCodeData(prev => ({ ...prev, code: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="auth-token">16-Character Token</Label>
-              <Input 
-                id="auth-token" 
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                maxLength={19}
-                value={authCodeData.token}
-                onChange={(e) => setAuthCodeData(prev => ({ ...prev, token: e.target.value }))}
-              />
-            </div>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="auth-pwd">Login Password</Label>
+            <Input 
+              id="auth-pwd" 
+              type="password"
+              className={authCodeData.password ? "border-b-green-400" : ""}
+              value={authCodeData.password}
+              onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
+            />
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="auth-token">Security Token</Label>
+            <Input 
+              id="auth-token" 
+              placeholder="XXXX-XXXX-XXXX-XXXX"
+              className={authCodeData.token ? "border-b-green-400" : ""}
+              value={authCodeData.token}
+              onChange={(e) => setAuthCodeData(prev => ({ ...prev, token: e.target.value }))}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-auth">New Authorization Code</Label>
+            <Input 
+              id="new-auth" 
+              placeholder="000000"
+              maxLength={6}
+              className={authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : ""}
+              value={authCodeData.newAuthorizationCode}
+              onChange={(e) => setAuthCodeData(prev => ({ ...prev, newAuthorizationCode: e.target.value }))}
+            />
+          </div>
+        </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAuthCodeModalOpen(false)}>Cancel</Button>
-            <Button onClick={() => setIsAuthCodeModalOpen(false)} className="bg-orange-600 hover:bg-orange-700 text-white">Update Code</Button>
+            <Button 
+               onClick={() => {
+                // In a real app, verify the auth code here
+                if (pendingUserAction) {
+                  if (pendingUserAction.type === 'delete') {
+                    setAllUsers(prev => prev.filter(u => u.id !== pendingUserAction.userId));
+                  } else if (pendingUserAction.type === 'disable') {
+                    setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { ...u, disabled: true, getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: true } } : u));
+                  } else if (pendingUserAction.type === 'toggle-disable') {
+                    setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { 
+                      ...u, 
+                      disabled: !u.disabled, 
+                      getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
+                    } : u));
+                  } else if (pendingUserAction.type === 'delete-address') {
+                    setUserProfile(p => ({
+                      ...p,
+                      getPersonDetailsDto: {
+                        ...p.getPersonDetailsDto,
+                        getAddressDtos: p.getPersonDetailsDto.getAddressDtos.filter((_, i) => i !== pendingUserAction.index)
+                      }
+                    }));
+                  } else if (pendingUserAction.type === 'delete-contact') {
+                    setUserProfile(p => ({
+                      ...p,
+                      getPersonDetailsDto: {
+                        ...p.getPersonDetailsDto,
+                        getContactDetailsDtos: p.getPersonDetailsDto.getContactDetailsDtos.filter((_, i) => i !== pendingUserAction.index)
+                      }
+                    }));
+                  } else if (pendingUserAction.type === 'update-role' && pendingUserAction.targetRole) {
+                    const targetRole = pendingUserAction.targetRole;
+                    setAllUsers(prev => prev.map(u => u.getUserDto.id === pendingUserAction.userId ? {
+                      ...u,
+                      getUserDto: {
+                        ...u.getUserDto,
+                        role: targetRole,
+                        roleName: Role[targetRole]
+                      }
+                    } : u));
+                  }
+                  setPendingUserAction(null);
+                  setIsViewPersonDetailsOpen(false);
+                }
+                setIsAuthCodeModalOpen(false);
+              }} 
+              className="bg-transparent border-2 border-yellow-600 text-black hover:bg-yellow-50 flex items-center gap-2"
+            >
+              <Key className="h-4 w-4 text-yellow-600" />
+              Authorize Action
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Modals */}
+      {/* Add New Person Dialog */}
+      <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-primary" />
+              Add New Household Member
+            </DialogTitle>
+            <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[80vh] px-1">
+            <div className="grid gap-6 py-4">
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
+                  <UserIcon className="h-4 w-4" />
+                  Personal Information
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-fname">First Name</Label>
+                    <Input id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-green-400" : ""} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-lname">Last Name</Label>
+                    <Input id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-green-400" : ""} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-dob">Date of Birth</Label>
+                    <Input id="p-dob" type="date" value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-gender">Gender</Label>
+                    <Select value={newPerson.createPersonDetailsDto.gender.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, gender: parseInt(v) } }))}>
+                      <SelectTrigger id="p-gender">
+                        <SelectValue placeholder="Select gender" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">Male</SelectItem>
+                        <SelectItem value="2">Female</SelectItem>
+                        <SelectItem value="3">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="p-relation">Relation to Owner</Label>
+                  <Input id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-green-400" : ""} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
+                  <Key className="h-4 w-4" />
+                  User Account & Security
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-uname">Username</Label>
+                    <Input id="p-uname" className={newPerson.createUserDto.userName ? "border-b-green-400" : ""} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-role">System Role</Label>
+                    <Select value={newPerson.createUserDto.role.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, role: parseInt(v) } }))}>
+                      <SelectTrigger id="p-role">
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="2">Wife</SelectItem>
+                        <SelectItem value="3">Child</SelectItem>
+                        <SelectItem value="4">Relative</SelectItem>
+                        <SelectItem value="5">Visitor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-pwd">Password</Label>
+                    <Input id="p-pwd" type="password" className={newPerson.createUserDto.password ? "border-b-green-400" : ""} value={newPerson.createUserDto.password} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="p-auth">Initial Auth Code (6 digits)</Label>
+                    <Input id="p-auth" placeholder="000000" maxLength={6} className={newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-green-400" : ""} value={newPerson.createUserDto.authorizationCode} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddPersonOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              const newId = Math.floor(Math.random() * 1000);
+              const added: GetPersonDto = {
+                id: newId,
+                personId: `P-${newId}`,
+                disabled: false,
+                getPersonDetailsDto: {
+                  id: newId,
+                  firstName: newPerson.createPersonDetailsDto.firstName,
+                  lastName: newPerson.createPersonDetailsDto.lastName,
+                  gender: newPerson.createPersonDetailsDto.gender,
+                  imageUrl: `https://picsum.photos/seed/${newId}/200/200`,
+                  disabled: false,
+                  getAddressDtos: [],
+                  getContactDetailsDtos: []
+                },
+                getUserDto: {
+                  id: newId,
+                  userName: newPerson.createUserDto.userName,
+                  roleName: Role[newPerson.createUserDto.role],
+                  role: newPerson.createUserDto.role,
+                  personId: newId
+                }
+              };
+              setAllUsers(prev => [...prev, added]);
+              setIsAddPersonOpen(false);
+            }} className="bg-primary text-primary-foreground">
+              Create Member
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Person Role Dialog */}
+      <Dialog open={isEditPersonRoleOpen} onOpenChange={setIsEditPersonRoleOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Update User Role
+            </DialogTitle>
+            <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-role-select">Select New Role</Label>
+              <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
+                <SelectTrigger id="edit-role-select" className="bg-transparent text-black border-primary/20">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Owner</SelectItem>
+                  <SelectItem value="2">Wife</SelectItem>
+                  <SelectItem value="3">Child</SelectItem>
+                  <SelectItem value="4">Relative</SelectItem>
+                  <SelectItem value="5">Visitor</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" className="border-primary/20 text-black hover:bg-muted" onClick={() => setIsEditPersonRoleOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              setPendingUserAction({ type: 'update-role', userId: updateUserRoleData.id, targetRole: updateUserRoleData.role });
+              setIsEditPersonRoleOpen(false);
+              setIsAuthCodeModalOpen(true);
+            }} className="bg-transparent border-2 border-primary text-black hover:bg-primary/5 flex items-center gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Update Access
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Person Details Dialog */}
+      <Dialog open={isViewPersonDetailsOpen} onOpenChange={setIsViewPersonDetailsOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <DialogTitle className="flex items-center gap-2">
+                  <UserCircle className="h-5 w-5 text-primary" />
+                  User Profile: {viewingPerson?.getPersonDetailsDto.firstName} {viewingPerson?.getPersonDetailsDto.lastName}
+                </DialogTitle>
+                <DialogDescription className="mt-0">Detailed view of user properties and system settings.</DialogDescription>
+              </div>
+              <div className="flex items-center gap-2 pr-6">
+                <Button 
+                   variant="ghost" 
+                   size="icon" 
+                   className="h-8 w-8 bg-transparent border border-blue-200 text-black hover:bg-blue-50"
+                  onClick={() => {
+                    if (viewingPerson) {
+                      setUpdateUserRoleData({
+                        id: viewingPerson.getUserDto.id,
+                        userName: viewingPerson.getUserDto.userName,
+                        password: '',
+                        role: viewingPerson.getUserDto.role
+                      });
+                      setIsEditPersonRoleOpen(true);
+                    }
+                  }}
+                >
+                  <Settings2 className="h-4 w-4 text-blue-500" />
+                </Button>
+                <Button 
+                   variant="ghost" 
+                   size="icon" 
+                   className={cn(
+                    "h-8 w-8 bg-transparent border hover:bg-muted",
+                    viewingPerson?.disabled ? "text-green-600 border-green-200" : "text-yellow-600 border-yellow-200"
+                  )}
+                  onClick={() => {
+                    if (viewingPerson) {
+                      setPendingUserAction({ type: 'toggle-disable', userId: viewingPerson.id });
+                      setIsAuthCodeModalOpen(true);
+                    }
+                  }}
+                >
+                  {viewingPerson?.disabled ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                </Button>
+                <Button 
+                   variant="ghost" 
+                   size="icon" 
+                   className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
+                  onClick={() => {
+                    if (viewingPerson) {
+                      setPendingUserAction({ type: 'delete', userId: viewingPerson.id });
+                      setIsAuthCodeModalOpen(true);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+          <ScrollArea className="max-h-[70vh]">
+            <div className="space-y-6 py-4">
+              {viewingPerson && (
+                <>
+                  {/* Identity Section */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Core Identity</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground uppercase">Username</Label>
+                        <p className="font-medium font-mono">{viewingPerson.getUserDto.userName}</p>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground uppercase">System Role</Label>
+                        <Badge variant="outline" className="mt-1">{viewingPerson.getUserDto.roleName}</Badge>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground uppercase">Internal ID</Label>
+                        <p className="font-medium font-mono text-muted-foreground text-xs">{viewingPerson.personId}</p>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground uppercase">Gender</Label>
+                        <p className="font-medium">{Gender[viewingPerson.getPersonDetailsDto.gender]}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contact Section */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Contact Channels</h4>
+                    {viewingPerson.getPersonDetailsDto.getContactDetailsDtos.map((c, i) => (
+                      <div key={i} className="bg-muted/30 p-3 rounded-lg grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">Email</Label>
+                          <p className="truncate" title={c.email}>{c.email}</p>
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">Phone</Label>
+                          <p>{c.phoneNumber}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {viewingPerson.getPersonDetailsDto.getContactDetailsDtos.length === 0 && <p className="text-xs text-muted-foreground italic">No contact channels defined.</p>}
+                  </div>
+
+                  {/* Address Section */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Physical Addresses</h4>
+                    {viewingPerson.getPersonDetailsDto.getAddressDtos.map((a, i) => (
+                      <div key={i} className="bg-muted/30 p-3 rounded-lg space-y-1 text-sm">
+                        <p className="font-medium">{a.numberLine} {a.street}</p>
+                        <p className="text-muted-foreground text-xs">{a.city}, {a.state}, {a.country}</p>
+                        {a.postalCode && <p className="text-muted-foreground text-[10px]">Postal: {a.postalCode}</p>}
+                      </div>
+                    ))}
+                    {viewingPerson.getPersonDetailsDto.getAddressDtos.length === 0 && <p className="text-xs text-muted-foreground italic">No addresses saved.</p>}
+                  </div>
+                </>
+              )}
+            </div>
+          </ScrollArea>
+          <DialogFooter className="sm:justify-end">
+            {/* Removed Close View button as per request */}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <PlusCircle className="h-5 w-5 text-primary" />
@@ -2565,7 +3656,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
@@ -2623,13 +3714,13 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) setEditingContactId(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
               {editingContactId ? 'Edit Contact' : 'Add New Contact'}
             </DialogTitle>
-            <DialogDescription>Add a new contact with multiple details.</DialogDescription>
+            <DialogDescription>Fill in the contact details and addresses.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh]">
             <div className="grid gap-6 py-4">
@@ -2661,8 +3752,8 @@ export default function App() {
                   <Camera className="h-4 w-4" /> Avatar
                 </Label>
                 <div className="flex items-center gap-4">
-                  {newContact.avatar && (
-                    <img src={newContact.avatar} alt="Avatar Preview" className="h-12 w-12 rounded-full object-cover" />
+                  {newContact.imageUrl && (
+                    <img src={newContact.imageUrl} alt="Avatar Preview" className="h-12 w-12 rounded-full object-cover" />
                   )}
                   <Input 
                     type="file"
@@ -2677,15 +3768,15 @@ export default function App() {
                   <Layers className="h-4 w-4" /> Category
                 </Label>
                 <Select 
-                  value={newContact.category} 
-                  onValueChange={(val) => setNewContact(prev => ({ ...prev, category: val }))}
+                  value={newContact.contactCategory.toString()} 
+                  onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
                   <SelectContent>
                     {contactCategories.map(cat => (
-                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2694,101 +3785,58 @@ export default function App() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-bold flex items-center gap-2">
-                    <Mail className="h-4 w-4" /> Emails
+                    <Phone className="h-4 w-4" /> Contact Details (Phone & Email)
                   </Label>
                   <Button 
                     variant="ghost" 
                     size="sm" 
                     onClick={() => setNewContact(prev => ({ 
                       ...prev, 
-                      emails: [...(prev.emails || []), { label: 'Work', email: '' }] 
+                      contactDetails: [...prev.contactDetails, { phoneNumber: '', email: '', personDetailsId: 0 }] 
                     }))}
                   >
                     <Plus className="h-4 w-4 mr-1" /> Add
                   </Button>
                 </div>
-                {(newContact.emails || []).map((email, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <Input 
-                      className="w-24" 
-                      value={email.label} 
-                      onChange={(e) => {
-                        const emails = [...(newContact.emails || [])];
-                        emails[idx].label = e.target.value;
-                        setNewContact(prev => ({ ...prev, emails }));
-                      }}
-                    />
-                    <Input 
-                      className="flex-1" 
-                      placeholder="email@example.com" 
-                      value={email.email}
-                      onChange={(e) => {
-                        const emails = [...(newContact.emails || [])];
-                        emails[idx].email = e.target.value;
-                        setNewContact(prev => ({ ...prev, emails }));
-                      }}
-                    />
+                {newContact.contactDetails.map((detail, idx) => (
+                  <div key={idx} className="p-4 rounded-xl border bg-muted/20 space-y-4 relative group">
                     <Button 
                       variant="ghost" 
                       size="icon"
+                      className="absolute top-2 right-2 h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={() => {
-                        const emails = (newContact.emails || []).filter((_, i) => i !== idx);
-                        setNewContact(prev => ({ ...prev, emails }));
+                        const contactDetails = newContact.contactDetails.filter((_, i) => i !== idx);
+                        setNewContact(prev => ({ ...prev, contactDetails }));
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold flex items-center gap-2">
-                    <Phone className="h-4 w-4" /> Phone Numbers
-                  </Label>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setNewContact(prev => ({ 
-                      ...prev, 
-                      phones: [...(prev.phones || []), { label: 'Mobile', phone: '' }] 
-                    }))}
-                  >
-                    <Plus className="h-4 w-4 mr-1" /> Add
-                  </Button>
-                </div>
-                {(newContact.phones || []).map((phone, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <Input 
-                      className="w-24" 
-                      value={phone.label} 
-                      onChange={(e) => {
-                        const phones = [...(newContact.phones || [])];
-                        phones[idx].label = e.target.value;
-                        setNewContact(prev => ({ ...prev, phones }));
-                      }}
-                    />
-                    <Input 
-                      className="flex-1" 
-                      placeholder="+1 (555) 000-0000" 
-                      value={phone.phone}
-                      onChange={(e) => {
-                        const phones = [...(newContact.phones || [])];
-                        phones[idx].phone = e.target.value;
-                        setNewContact(prev => ({ ...prev, phones }));
-                      }}
-                    />
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      onClick={() => {
-                        const phones = (newContact.phones || []).filter((_, i) => i !== idx);
-                        setNewContact(prev => ({ ...prev, phones }));
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Phone</Label>
+                        <Input 
+                          placeholder="+123..." 
+                          value={detail.phoneNumber}
+                          onChange={(e) => {
+                            const details = [...newContact.contactDetails];
+                            details[idx].phoneNumber = e.target.value;
+                            setNewContact(prev => ({ ...prev, contactDetails: details }));
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Email</Label>
+                        <Input 
+                          placeholder="email@example.com" 
+                          value={detail.email}
+                          onChange={(e) => {
+                            const details = [...newContact.contactDetails];
+                            details[idx].email = e.target.value;
+                            setNewContact(prev => ({ ...prev, contactDetails: details }));
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2803,43 +3851,85 @@ export default function App() {
                     size="sm" 
                     onClick={() => setNewContact(prev => ({ 
                       ...prev, 
-                      addresses: [...(prev.addresses || []), { label: 'Home', address: '' }] 
+                      address: [...prev.address, { 
+                        numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' 
+                      }] 
                     }))}
                   >
                     <Plus className="h-4 w-4 mr-1" /> Add
                   </Button>
                 </div>
-                {(newContact.addresses || []).map((addr, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <Input 
-                      className="w-24" 
-                      value={addr.label} 
-                      onChange={(e) => {
-                        const addresses = [...(newContact.addresses || [])];
-                        addresses[idx].label = e.target.value;
-                        setNewContact(prev => ({ ...prev, addresses }));
-                      }}
-                    />
-                    <Input 
-                      className="flex-1" 
-                      placeholder="123 Main St, City, State" 
-                      value={addr.address}
-                      onChange={(e) => {
-                        const addresses = [...(newContact.addresses || [])];
-                        addresses[idx].address = e.target.value;
-                        setNewContact(prev => ({ ...prev, addresses }));
-                      }}
-                    />
+                {newContact.address.map((addr, idx) => (
+                  <div key={idx} className="p-4 rounded-xl border bg-muted/20 space-y-4 relative group">
                     <Button 
                       variant="ghost" 
                       size="icon"
+                      className="absolute top-2 right-2 h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={() => {
-                        const addresses = (newContact.addresses || []).filter((_, i) => i !== idx);
-                        setNewContact(prev => ({ ...prev, addresses }));
+                        const address = newContact.address.filter((_, i) => i !== idx);
+                        setNewContact(prev => ({ ...prev, address }));
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Number Line</Label>
+                        <Input value={addr.numberLine} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].numberLine = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Street</Label>
+                        <Input value={addr.street} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].street = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">City</Label>
+                        <Input value={addr.city} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].city = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Region</Label>
+                        <Input value={addr.region} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].region = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">State</Label>
+                        <Input value={addr.state} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].state = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Country</Label>
+                        <Input value={addr.country} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].country = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Postal Code</Label>
+                        <Input value={addr.postalCode} onChange={(e) => {
+                          const list = [...newContact.address];
+                          list[idx].postalCode = e.target.value;
+                          setNewContact(prev => ({ ...prev, address: list }));
+                        }} />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2858,7 +3948,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isDeleteContactOpen} onOpenChange={setIsDeleteContactOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <ShieldAlert className="h-5 w-5" />
@@ -2876,7 +3966,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddSceneOpen} onOpenChange={setIsAddSceneOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Film className="h-5 w-5 text-primary" />
@@ -2923,7 +4013,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddSectionOpen} onOpenChange={setIsAddSectionOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-primary" />
@@ -2976,7 +4066,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[400px] border-2 border-red-500">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Key className="h-5 w-5 text-primary" />
@@ -3016,26 +4106,88 @@ export default function App() {
 
       {/* Edit Device Dialog */}
       <Dialog open={isEditDeviceOpen} onOpenChange={setIsEditDeviceOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Edit3 className="h-5 w-5 text-primary" />
-              Edit Device
+              {editingDevice && (() => {
+                const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
+                return <Icon className="h-5 w-5 text-primary" />;
+              })()}
+              Edit {editingDevice && (() => {
+                if (editingDevice.type === 'window') return 'Light';
+                const map: Record<string, string> = {
+                  'appliance': 'Appliance',
+                  'light': 'Light',
+                  'camera': 'Camera',
+                  'door': 'Door'
+                };
+                return map[editingDevice.type] || 'Device';
+              })()}
             </DialogTitle>
-            <DialogDescription>Update the details of this device.</DialogDescription>
+            <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
           </DialogHeader>
           {editingDevice && (
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-device-name">Device Name</Label>
+                <Label htmlFor="edit-device-name" className="flex items-center gap-2">
+                  {(() => {
+                    const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
+                    return <Icon className="h-3 w-3 text-muted-foreground" />;
+                  })()}
+                  {(() => {
+                    if (editingDevice.type === 'window') return 'Room Name';
+                    const map: Record<string, string> = {
+                      'appliance': 'Appliance Name',
+                      'light': 'Light Name',
+                      'camera': 'Camera Name',
+                      'door': 'Door Name'
+                    };
+                    return map[editingDevice.type] || 'Device Name';
+                  })()}
+                </Label>
                 <Input 
                   id="edit-device-name" 
                   value={editingDevice.name || ''}
                   onChange={(e) => setEditingDevice({ ...editingDevice, name: e.target.value })}
                 />
               </div>
+
+              {editingDevice.type === 'door' && (
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-door-type" className="flex items-center gap-2">
+                    <Building2 className="h-3 w-3 text-muted-foreground" />
+                    Door Type
+                  </Label>
+                  <Select 
+                    value={editingDevice.doorType || 'interior'} 
+                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: v })}
+                  >
+                    <SelectTrigger id="edit-door-type">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="interior">
+                        <div className="flex items-center gap-2">
+                          <HomeIcon className="h-4 w-4" />
+                          <span>Interior</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="exterior">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4" />
+                          <span>Exterior</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div className="grid gap-2">
-                <Label htmlFor="edit-device-room">Room</Label>
+                <Label htmlFor="edit-device-room" className="flex items-center gap-2">
+                  <Sofa className="h-3 w-3 text-muted-foreground" />
+                  Room
+                </Label>
                 <Select 
                   value={editingDevice.room || 'none'} 
                   onValueChange={(v) => setEditingDevice({ ...editingDevice, room: v === 'none' ? undefined : v })}
@@ -3052,7 +4204,10 @@ export default function App() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-device-section">Section</Label>
+                <Label htmlFor="edit-device-section" className="flex items-center gap-2">
+                  <Layers className="h-3 w-3 text-muted-foreground" />
+                  Section
+                </Label>
                 <Select 
                   value={editingDevice.section || ''} 
                   onValueChange={(v) => setEditingDevice({ ...editingDevice, section: v })}
@@ -3071,17 +4226,20 @@ export default function App() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDeviceOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveDevice}>Save Changes</Button>
+            <Button onClick={handleSaveDevice} className="bg-primary text-primary-foreground">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Edit Room Dialog */}
       <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Edit3 className="h-5 w-5 text-primary" />
+              <Sofa className="h-5 w-5 text-primary" />
               Edit Room
             </DialogTitle>
             <DialogDescription>Update the details of this room.</DialogDescription>
@@ -3089,7 +4247,10 @@ export default function App() {
           {editingRoom && (
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-room-name">Room Name</Label>
+                <Label htmlFor="edit-room-name" className="flex items-center gap-2">
+                  <Edit3 className="h-3 w-3 text-muted-foreground" />
+                  Room Name
+                </Label>
                 <Input 
                   id="edit-room-name" 
                   value={editingRoom.name || ''}
@@ -3097,7 +4258,10 @@ export default function App() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-room-section">Section</Label>
+                <Label htmlFor="edit-room-section" className="flex items-center gap-2">
+                  <Layers className="h-3 w-3 text-muted-foreground" />
+                  Section
+                </Label>
                 <Select 
                   value={editingRoom.section || ''} 
                   onValueChange={(v) => setEditingRoom({ ...editingRoom, section: v })}
@@ -3113,7 +4277,10 @@ export default function App() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-room-icon">Icon</Label>
+                <Label htmlFor="edit-room-icon" className="flex items-center gap-2">
+                  <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                  Icon
+                </Label>
                 <Select 
                   value={editingRoom.icon || 'Sofa'} 
                   onValueChange={(v) => setEditingRoom({ ...editingRoom, icon: v })}
@@ -3135,14 +4302,16 @@ export default function App() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditRoomOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveRoom}>Save Changes</Button>
+            <Button onClick={handleSaveRoom} className="bg-primary text-primary-foreground">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* View Contact Dialog */}
       <Dialog open={isViewContactOpen} onOpenChange={setIsViewContactOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
@@ -3150,63 +4319,60 @@ export default function App() {
             </DialogTitle>
           </DialogHeader>
           {viewingContact && (
-            <div className="flex flex-col gap-6 py-4">
+            <div className="flex flex-col gap-6 py-4 overflow-y-auto max-h-[70vh] pr-2">
               <div className="flex items-center gap-4">
-                <div className="h-16 w-16 rounded-full overflow-hidden bg-muted flex items-center justify-center text-2xl font-bold">
-                  {viewingContact.avatar ? (
-                    <img src={viewingContact.avatar} alt={viewingContact.firstName} className="h-full w-full object-cover" />
+                <div className="h-20 w-20 rounded-full overflow-hidden bg-muted flex items-center justify-center text-3xl font-bold border-4 border-primary/10">
+                  {viewingContact.imageUrl ? (
+                    <img src={viewingContact.imageUrl} alt={viewingContact.firstName} className="h-full w-full object-cover" />
                   ) : (
                     viewingContact.firstName.charAt(0)
                   )}
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold">{viewingContact.firstName} {viewingContact.lastName}</h3>
-                  <Badge variant="secondary" className="mt-1">{viewingContact.category}</Badge>
+                  <h3 className="text-2xl font-bold tracking-tight">{viewingContact.firstName} {viewingContact.lastName}</h3>
+                  <Badge variant="secondary" className="mt-1 bg-primary/10 text-primary hover:bg-primary/20 border-0">{viewingContact.getContactCategoryDto.name}</Badge>
                 </div>
               </div>
               
-              <div className="space-y-4">
-                {viewingContact.phones.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground"><Phone className="h-4 w-4" /> Phone Numbers</h4>
-                    {viewingContact.phones.map((p, i) => (
-                      <div key={i} className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">{p.label}</span>
-                        <span className="font-medium">{p.phone}</span>
-                      </div>
-                    ))}
+              <div className="space-y-6">
+                {viewingContact.contactDetails.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-muted-foreground"><Phone className="h-3 w-3" /> Communication</h4>
+                    <div className="grid gap-2">
+                      {viewingContact.contactDetails.map((d, i) => (
+                        <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
+                          <div className="flex justify-between items-center text-sm font-bold">
+                            <span className="flex items-center gap-2"><Mail className="h-3 w-3 text-primary/60" /> {d.email}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
+                            <span className="flex items-center gap-2"><Smartphone className="h-3 w-3" /> {d.phoneNumber}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 
-                {viewingContact.emails.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground"><Mail className="h-4 w-4" /> Email Addresses</h4>
-                    {viewingContact.emails.map((e, i) => (
-                      <div key={i} className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">{e.label}</span>
-                        <span className="font-medium">{e.email}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {viewingContact.addresses.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4" /> Addresses</h4>
-                    {viewingContact.addresses.map((a, i) => (
-                      <div key={i} className="flex flex-col text-sm">
-                        <span className="text-muted-foreground">{a.label}</span>
-                        <span className="font-medium">{a.address}</span>
-                      </div>
-                    ))}
+                {viewingContact.address.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-muted-foreground"><MapPin className="h-3 w-3" /> Locations</h4>
+                    <div className="grid gap-2">
+                      {viewingContact.address.map((a, i) => (
+                        <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
+                          <span className="text-sm font-bold">{a.numberLine} {a.street}</span>
+                          <span className="text-xs text-muted-foreground mt-0.5">{a.city}, {a.region}, {a.state}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest mt-1">{a.postalCode} • {a.country}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsViewContactOpen(false)}>Close</Button>
-            <Button onClick={() => {
+          <DialogFooter className="pt-4 border-t">
+            <Button variant="outline" className="rounded-xl" onClick={() => setIsViewContactOpen(false)}>Close</Button>
+            <Button className="rounded-xl shadow-lg shadow-primary/20" onClick={() => {
               setIsViewContactOpen(false);
               handleEditContact(viewingContact!);
             }}>Edit Contact</Button>
@@ -3222,47 +4388,670 @@ export default function App() {
       />
 
       {/* Camera Feed Modal */}
-      <Dialog open={isCameraModalOpen} onOpenChange={setIsCameraModalOpen}>
-        <DialogContent className="max-w-[75vw] w-[75vw] sm:max-w-[75vw] h-auto aspect-video p-0 overflow-hidden">
-          <div className="flex flex-col h-full bg-black">
-            <div className="p-6 bg-background/80 backdrop-blur-md border-b z-20">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Camera className="h-5 w-5 text-primary" />
-                  {selectedCamera?.name || 'Camera Feed'}
-                </DialogTitle>
-                <DialogDescription>Live view from the selected camera.</DialogDescription>
-              </DialogHeader>
-            </div>
-            
-            <div className="relative flex-1 overflow-hidden">
-              <div className="absolute top-4 left-4 flex items-center gap-2 z-10 bg-black/50 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-sm">
-                <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-                <span className="text-xs font-mono text-white font-bold uppercase tracking-widest">Live Feed</span>
+      <Dialog open={isCameraModalOpen} onOpenChange={(open) => {
+        setIsCameraModalOpen(open);
+        if (!open) setCameraPlaybackOffset(0);
+      }}>
+        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] sm:max-w-[85vw] max-h-[90vh] p-0 overflow-hidden rounded-3xl border-0 shadow-2xl">
+          <div className="flex flex-col h-full bg-black relative max-h-[90vh]">
+            {/* Header overlay */}
+            <div className="absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 to-transparent z-40">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Camera className="h-5 w-5 text-primary" />
+                    {selectedCamera?.name || 'Camera Feed'}
+                  </h2>
+                  <p className="text-xs text-white/60 tracking-wide font-mono uppercase">
+                    REC • 1080p • 60fps • {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
+                  </p>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="rounded-full bg-white/10 hover:bg-white/20 text-white"
+                  onClick={() => setIsCameraModalOpen(false)}
+                >
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
-              
-              <div className="absolute top-4 right-4 z-10 bg-black/50 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-sm">
-                <span className="text-[10px] font-mono text-white/70">REC • 1080p • 60fps</span>
+            </div>
+
+            <div className="relative flex-1 overflow-hidden group min-h-[400px]">
+              <div 
+                className="absolute top-24 left-6 flex items-center gap-2 z-30 bg-black/60 px-4 py-2 rounded-full border border-white/20 backdrop-blur-md cursor-pointer hover:bg-black/80 transition-all active:scale-95"
+                onClick={() => setCameraPlaybackOffset(0)}
+              >
+                <div className={cn(
+                  "h-2 w-2 rounded-full",
+                  cameraPlaybackOffset === 0 ? "bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.9)]" : "bg-white/40"
+                )} />
+                <span className={cn(
+                  "text-[10px] font-mono font-black uppercase tracking-[0.2em]",
+                  cameraPlaybackOffset === 0 ? "text-white" : "text-white/60"
+                )}>
+                  {cameraPlaybackOffset === 0 ? 'Live Feed' : 'Jump to Live'}
+                </span>
               </div>
               
               <img 
-                src={`https://picsum.photos/seed/${selectedCamera?.id || 'default'}/1920/1080`} 
+                src={`https://picsum.photos/seed/${selectedCamera?.id || 'default'}-${cameraPlaybackOffset}/1920/1080`} 
                 alt="Camera Feed" 
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover select-none"
                 referrerPolicy="no-referrer"
               />
-              
-              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-end z-10 pointer-events-none">
-                <div className="bg-black/50 p-2 rounded border border-white/10 backdrop-blur-sm">
-                  <p className="text-[10px] font-mono text-white/50">{new Date().toLocaleString()}</p>
+
+              {/* Status HUD */}
+              <div className="absolute top-24 right-6 z-30 flex flex-col gap-2">
+                <div className="bg-black/60 px-3 py-1.5 rounded-lg border border-white/10 backdrop-blur-md flex items-center gap-2">
+                  <ShieldCheck className="h-3 w-3 text-primary" />
+                  <span className="text-[10px] font-mono text-white/80">SECURE STREAM</span>
                 </div>
-                <div className="flex gap-2 pointer-events-auto">
-                  <div className="bg-primary/20 p-2 rounded-full border border-primary/30 backdrop-blur-sm">
-                    <ShieldCheck className="h-4 w-4 text-primary" />
+              </div>
+
+              {/* Controls Footer */}
+              <div className="absolute bottom-0 left-0 right-0 p-8 pt-20 bg-gradient-to-t from-black/90 via-black/40 to-transparent z-40">
+                <div className="space-y-6">
+                  <div className="flex items-center gap-6">
+                    <span className="text-[10px] font-mono text-white/50 w-24">
+                      {format(subSeconds(modalCurrentTime, 24 * 3600), "HH:mm:ss")}
+                    </span>
+                    <div className="flex-1 px-2">
+                      <Slider
+                        defaultValue={[24 * 3600]}
+                        max={24 * 3600}
+                        step={1}
+                        value={[24 * 3600 - cameraPlaybackOffset]}
+                        onValueChange={(vals) => setCameraPlaybackOffset(24 * 3600 - vals[0])}
+                        className="cursor-pointer"
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono text-white font-bold w-24 text-right">
+                      {format(subSeconds(modalCurrentTime, cameraPlaybackOffset), "HH:mm:ss")}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                      <div className="bg-white/10 px-3 py-2 rounded-xl backdrop-blur-md border border-white/10">
+                        <p className="text-[11px] font-mono text-white tracking-widest uppercase">
+                          {format(subSeconds(modalCurrentTime, cameraPlaybackOffset), "MMM dd, yyyy • HH:mm:ss")}
+                        </p>
+                      </div>
+                      {cameraPlaybackOffset > 0 && (
+                        <Badge variant="secondary" className="bg-primary/20 text-primary border-primary/30 animate-in fade-in slide-in-from-left-2">
+                          PLAYBACK: -{Math.floor(cameraPlaybackOffset / 3600)}h {Math.floor((cameraPlaybackOffset % 3600) / 60)}m
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-3">
+                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button className="h-10 px-6 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 transition-all active:scale-95">
+                        Capture Image
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
+        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 flex flex-row overflow-hidden rounded-3xl border-0 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] bg-white">
+          {/* WhatsApp Style Sidebar - List View (Increased width: 25-30%) */}
+          <div className="w-[35%] lg:w-[30%] xl:w-[25%] bg-[#ffffff] flex flex-col shrink-0 border-r-[1px] border-black relative z-10">
+            <div className="p-4 pb-2 bg-[#f0f2f5] space-y-3 shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-slate-300 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
+                    <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                  <h2 className="text-lg font-bold tracking-tight text-[#111b21]">HanssonHub Chats</h2>
+                </div>
+                <div className="flex items-center">
+                  <MessageSquare className="h-5 w-5 text-[#54656f]" />
+                </div>
+              </div>
+            </div>
+
+            <ScrollArea className="flex-1 bg-white">
+              <div className="divide-y divide-slate-50">
+                {[
+                  { id: 'general', name: 'Home Hub', lastMsg: chatMessages.filter(m => m.chatId === 'general').slice(-1)[0]?.text || 'No messages yet', time: 'Now', icon: <HomeIcon className="h-5 w-5" />, online: true, unread: 0 },
+                  { id: 'maint', name: 'Maintenance', lastMsg: 'Your request #231 is processed.', time: '2:45 PM', icon: <Wrench className="h-5 w-5" />, online: true, unread: 2 },
+                  { id: 'family', name: 'Family Group', lastMsg: 'Dinner at 7?', time: 'Yesterday', icon: <Users className="h-5 w-5" />, online: false, unread: 0 },
+                  { id: 'sec', name: 'Security Alerts', lastMsg: 'Front door unlocked.', time: 'Tuesday', icon: <ShieldAlert className="h-5 w-5" />, online: true, unread: 0 },
+                  { id: 'work', name: 'Office Hub', lastMsg: 'Meeting starting in 10.', time: 'Monday', icon: <Building2 className="h-5 w-5" />, online: false, unread: 1 },
+                ].map((item) => (
+                  <button 
+                    key={item.id}
+                    onClick={() => {
+                      setActiveChatId(item.id);
+                      setChatSearchQuery("");
+                      setIsChatSearchVisible(false);
+                    }}
+                    className={cn(
+                      "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] transition-all text-left group relative border-l-4 border-transparent",
+                      activeChatId === item.id && "bg-[#f0f2f5] border-primary"
+                    )}
+                  >
+                    <div className="relative shrink-0 flex items-center">
+                      <div className={cn(
+                        "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden",
+                        activeChatId === item.id ? "bg-primary text-primary-foreground" : "bg-slate-200 text-slate-500 group-hover:bg-white transition-colors"
+                      )}>
+                        {item.icon}
+                      </div>
+                      {item.online && (
+                        <span className="absolute bottom-2 right-0 h-3.5 w-3.5 bg-[#25d366] border-[3px] border-white rounded-full" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
+                      <div className="flex justify-between items-center mb-0.5">
+                        <span className="font-semibold text-[16px] text-[#111b21] truncate">{item.name}</span>
+                        <span className={cn(
+                          "text-[11px] font-medium tracking-tight px-1",
+                          item.unread > 0 ? "text-[#25d366]" : "text-[#667781]"
+                        )}>{item.time}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
+                          {activeChatId === item.id && item.id === 'general' && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
+                          <p className="text-[14px] text-[#667781] truncate leading-relaxed">
+                            {item.id === 'general' ? (chatMessages.filter(m => m.chatId === 'general').slice(-1)[0]?.text || item.lastMsg) : item.lastMsg}
+                          </p>
+                        </div>
+                        {item.unread > 0 && (
+                          <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm">
+                            {item.unread}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* Chat Box (Proportional 70-75%) */}
+          <div className="flex-1 flex flex-col bg-[#efeae2] relative overflow-hidden">
+            {activeChatId ? (
+              <>
+                {/* Essential Header */}
+                <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner">
+                        {activeChatId === 'general' ? <HomeIcon className="h-5 w-5" /> : 
+                         activeChatId === 'maint' ? <Wrench className="h-5 w-5" /> : 
+                         activeChatId === 'family' ? <Users className="h-5 w-5" /> : 
+                         activeChatId === 'sec' ? <ShieldAlert className="h-5 w-5" /> : <Building2 className="h-5 w-5" />}
+                      </div>
+                      <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-[#f0f2f5] rounded-full" />
+                    </div>
+                    <div>
+                      <h3 className="text-[16px] font-bold text-[#111b21]">
+                        {activeChatId === 'general' ? 'Home Hub' : 
+                         activeChatId === 'maint' ? 'Maintenance' : 
+                         activeChatId === 'family' ? 'Family Group' : 
+                         activeChatId === 'sec' ? 'Security Alerts' : 'Office Hub'}
+                      </h3>
+                      <div className="flex items-center gap-1.5 ">
+                        <span className="text-[12px] text-[#667781] font-medium leading-none">Online • Active now</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {isChatSearchVisible && (
+                      <motion.div 
+                        initial={{ width: 0, opacity: 0 }}
+                        animate={{ width: 200, opacity: 1 }}
+                        className="mr-2"
+                      >
+                        <Input 
+                          placeholder="Search messages..." 
+                          className="h-8 text-xs bg-white border-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded-lg"
+                          value={chatSearchQuery}
+                          onChange={(e) => setChatSearchQuery(e.target.value)}
+                        />
+                      </motion.div>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className={cn("rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50", isChatSearchVisible && "bg-slate-200 text-primary")}
+                      onClick={() => setIsChatSearchVisible(!isChatSearchVisible)}
+                    >
+                      <Search className="h-5 w-5" />
+                    </Button>
+                    <Separator orientation="vertical" className="h-5 mx-2 bg-[#d1d7db]" />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => setIsChatModalOpen(false)} 
+                      className="rounded-full h-10 w-10 hover:bg-destructive/10 hover:text-destructive group/close"
+                      title="Close Chat"
+                    >
+                      <XCircle className="h-6 w-6 text-[#54656f] group-hover/close:text-destructive transition-colors" />
+                    </Button>
+                  </div>
+                </header>
+
+                <div className="flex-1 relative overflow-hidden">
+                  {/* WhatsApp background pattern */}
+                  <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-repeat z-0" />
+                  
+                  <ScrollArea className="h-full w-full chat-scroll-viewport">
+                    <div className="p-6 md:px-12 xl:px-24 relative z-10 flex flex-col min-h-full">
+                      <div className="flex justify-center mb-8 sticky top-0 z-30 pt-2">
+                        <div className="bg-[#fff9c2] border border-[#e8df8a] shadow-sm px-4 py-1.5 rounded-lg flex items-center gap-2 max-w-[80%] mx-auto">
+                          <Lock className="h-3 w-3 text-[#54656f]" />
+                          <span className="text-[11px] font-medium text-[#54656f] leading-relaxed text-center">Messages are end-to-end encrypted. No one outside of this chat can read or listen to them. Click to learn more.</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 flex-1">
+                        {(() => {
+                          const currentMessages = chatMessages.filter(m => 
+                            m.chatId === activeChatId && 
+                            (!chatSearchQuery || m.text?.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                          );
+
+                          if (currentMessages.length === 0) {
+                            return (
+                              <div className="flex flex-col items-center justify-center py-20 text-[#667781]">
+                                <p className="text-sm font-medium">No messages found.</p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <>
+                              <div className="flex justify-center my-6">
+                                <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">Today</span>
+                              </div>
+                              {currentMessages.map((msg, idx) => {
+                                const isMe = msg.userId === userProfile.id.toString();
+                                return (
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
+                                    key={msg.id || idx} 
+                                    className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}
+                                  >
+                                    <div className={cn(
+                                      "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all",
+                                      isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12"
+                                    )}>
+                                      {/* Reply Button on Hover */}
+                                      <button 
+                                        onClick={() => setReplyingTo(msg)}
+                                        className={cn(
+                                          "absolute top-2 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/10 hover:bg-black/20 p-1 rounded-full text-[#54656f] z-20",
+                                          isMe ? "-left-10" : "-right-10"
+                                        )}
+                                      >
+                                        <Reply className="h-5 w-5" />
+                                      </button>
+
+                                      {!isMe && (
+                                        <div className="px-1 mb-1">
+                                          <span className="text-xs font-bold text-primary tracking-tight">{msg.userName}</span>
+                                        </div>
+                                      )}
+
+                                      {/* Quoted Message */}
+                                      {msg.replyTo && (
+                                        <div className="mb-1 p-2 rounded-lg bg-black/5 border-l-4 border-primary/50 text-[13px] opacity-80 overflow-hidden">
+                                          <p className="font-bold text-xs mb-0.5 text-primary">{msg.replyTo.userName}</p>
+                                          <p className="truncate italic">{msg.replyTo.text}</p>
+                                        </div>
+                                      )}
+                                      
+                                      <div className="px-1 py-0.5">
+                                        {msg.type === 'text' && (
+                                          <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.text}</p>
+                                        )}
+                                        {msg.type === 'image' && (
+                                          <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
+                                            <img 
+                                              src={msg.mediaUrl} 
+                                              alt="uploaded" 
+                                              className="rounded-lg w-full h-auto max-h-[400px] object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm" 
+                                              referrerPolicy="no-referrer"
+                                            />
+                                            <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.text}</p>
+                                          </div>
+                                        )}
+                                        {msg.type === 'file' && (
+                                          <div className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
+                                            <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
+                                              <FileText className="h-7 w-7 text-white" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-bold truncate text-[#111b21]">{msg.fileName}</p>
+                                              <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">PDF • 1.2 MB</p>
+                                            </div>
+                                            <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
+                                              <Download className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                        {msg.type === 'audio' && (
+                                          <div className="flex items-center gap-4 w-72 bg-[#f0f2f5]/40 p-2.5 rounded-xl border border-black/5">
+                                            <div className="relative shrink-0">
+                                              <Button 
+                                                size="icon" 
+                                                variant="ghost" 
+                                                className="h-12 w-12 rounded-full bg-white shadow-sm shrink-0 text-primary"
+                                                onClick={() => {
+                                                  if (playingAudioId === msg.id) {
+                                                    if (audioRef.current) {
+                                                      audioRef.current.pause();
+                                                    }
+                                                    setPlayingAudioId(null);
+                                                  } else {
+                                                    if (audioRef.current) {
+                                                      audioRef.current.pause();
+                                                    }
+                                                    const audio = new Audio(msg.mediaUrl);
+                                                    audioRef.current = audio;
+                                                    setPlayingAudioId(msg.id);
+                                                    setPlayingProgress(0);
+                                                    audio.play();
+                                                    
+                                                    audio.ontimeupdate = () => {
+                                                      setPlayingProgress(audio.currentTime);
+                                                    };
+                                                    
+                                                    audio.onended = () => {
+                                                      setPlayingAudioId(null);
+                                                      setPlayingProgress(0);
+                                                    };
+                                                  }
+                                                }}
+                                              >
+                                                {playingAudioId === msg.id ? (
+                                                  <Pause className="h-5 w-5 fill-current" />
+                                                ) : (
+                                                  <Play className="h-5 w-5 fill-current ml-0.5" />
+                                                )}
+                                              </Button>
+                                              <div className="absolute -top-1 -right-1 h-5 w-5 bg-primary rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                                                <Mic className="h-3 w-3 text-white" />
+                                              </div>
+                                            </div>
+                                            <div className="flex-1 flex flex-col gap-1.5">
+                                              <div className="flex items-end gap-[1px] h-8 pt-2">
+                                                {Array.from({length: 32}).map((_, i) => {
+                                                  const isPlayed = playingAudioId === msg.id && (i / 32) < (playingProgress / (msg.duration || 1));
+                                                  return (
+                                                    <div 
+                                                      key={i} 
+                                                      className={cn(
+                                                        "flex-1 rounded-full transition-all duration-300",
+                                                        isPlayed ? "bg-primary h-[80%]" : "bg-slate-300 h-[40%]"
+                                                      )} 
+                                                      style={{ 
+                                                        height: isPlayed ? `${40 + Math.random() * 40}%` : `${20 + Math.random() * 20}%`
+                                                      }} 
+                                                    />
+                                                  );
+                                                })}
+                                              </div>
+                                              <div className="flex justify-between items-center text-[10px] font-bold text-[#667781]">
+                                                <span>
+                                                  {playingAudioId === msg.id 
+                                                    ? `${Math.floor(playingProgress / 60)}:${Math.floor(playingProgress % 60).toString().padStart(2, '0')}`
+                                                    : `${Math.floor((msg.duration || 0) / 60)}:${Math.floor((msg.duration || 0) % 60).toString().padStart(2, '0')}`
+                                                  }
+                                                </span>
+                                                <span>Voice Note</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center justify-end gap-1 px-1 mt-0.5 h-4">
+                                        <span className={cn(
+                                          "text-[10px] font-medium leading-none text-[#667781]"
+                                        )}>
+                                          {format(new Date(msg.timestamp || Date.now()), "HH:mm")}
+                                        </span>
+                                        {isMe && <CheckCheck className="h-4 w-4 text-[#53bdeb] ml-0.5" />}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
+                        <div ref={chatEndRef} />
+                      </div>
+                    </div>
+                  </ScrollArea>
+                  
+                  {/* Bottom Scroll Mask */}
+                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#efeae2] to-transparent z-10 pointer-events-none" />
+                </div>
+
+                <footer className="p-3.5 bg-[#f0f2f5] border-t shrink-0 z-50">
+                  <div className="flex flex-col gap-2 relative">
+                    {/* Replying UI */}
+                    {replyingTo && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mx-auto w-[95%] bg-white/80 backdrop-blur-sm p-3 rounded-t-xl border-t border-l border-r border-[#d1d7db] flex items-center justify-between gap-3 shadow-sm"
+                      >
+                        <div className="border-l-4 border-primary pl-3 flex-1 overflow-hidden">
+                          <p className="text-xs font-bold text-primary mb-0.5">{replyingTo.userName}</p>
+                          <p className="text-sm text-[#667781] truncate">{replyingTo.text}</p>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => setReplyingTo(null)}
+                          className="h-8 w-8 rounded-full hover:bg-slate-200"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </motion.div>
+                    )}
+
+                    <div className="flex items-center gap-2 max-w-[95%] mx-auto relative w-full">
+                      <div className="flex items-center shrink-0">
+                        <Popover>
+                          <PopoverTrigger 
+                            render={
+                              <Button variant="ghost" size="icon" className="rounded-full h-11 w-11 text-[#54656f] hover:bg-slate-200/50" />
+                            }
+                          >
+                            <Smile className="h-7 w-7" />
+                          </PopoverTrigger>
+                          <PopoverContent side="top" align="start" className="w-[320px] p-2 rounded-2xl border shadow-xl bg-white mb-2">
+                             <div className="grid grid-cols-6 gap-1 p-2">
+                                {['😀', '😂', '😍', '👍', '🙏', '🔥', '✨', '💯', '🏠', '🔑', '🚨', '🛠️'].map(emoji => (
+                                   <button 
+                                      key={emoji} 
+                                      className="h-10 w-10 flex items-center justify-center text-2xl hover:bg-slate-100 rounded-lg transition-colors"
+                                      onClick={() => setChatInput(prev => prev + emoji)}
+                                   >
+                                      {emoji}
+                                   </button>
+                                ))}
+                             </div>
+                             <div className="p-2 border-t text-[11px] text-center text-muted-foreground uppercase font-bold tracking-widest text-[#111b21]">Emoji Panel</div>
+                          </PopoverContent>
+                        </Popover>
+                        
+                        <label htmlFor="file-upload" className="cursor-pointer">
+                          <input type="file" id="file-upload" className="hidden" onChange={(e) => handleFileUpload(e, 'file')} />
+                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
+                            <Paperclip className="h-6 w-6" />
+                          </div>
+                        </label>
+
+                        <label htmlFor="image-upload" className="cursor-pointer">
+                          <input type="file" id="image-upload" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'image')} />
+                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
+                            <ImageIcon className="h-6 w-6" />
+                          </div>
+                        </label>
+                      </div>
+
+                    <div className="flex-1 relative">
+                      {isRecording ? (
+                        <div className="flex-1 h-12 flex items-center px-4 bg-white rounded-xl shadow-sm border animate-in fade-in slide-in-from-bottom-2">
+                          <div className="flex items-center gap-3 w-full">
+                            <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse shrink-0" />
+                            <span className="text-sm font-bold text-[#111b21] min-w-[50px] shrink-0">
+                              {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                            </span>
+                            <div className="flex-1 flex items-center justify-center gap-1.5 h-8">
+                               {Array.from({length: 16}).map((_, i) => (
+                                 <div 
+                                   key={i} 
+                                   className="w-1.5 bg-[#1DB954] rounded-full spotify-bar" 
+                                   style={{ 
+                                      animationDelay: `${i * 0.08}s`,
+                                      animationDuration: `${0.6 + Math.random() * 0.4}s`
+                                   }} 
+                                 />
+                               ))}
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="text-destructive font-bold h-8 px-2 shrink-0"
+                              onClick={() => setIsRecording(false)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Input 
+                          placeholder="Type a message" 
+                          className="py-6 px-4 rounded-xl border-none bg-white focus-visible:ring-0 shadow-sm text-[16px] placeholder:text-[#667781]"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                        />
+                      )}
+                    </div>
+
+                    <div className="flex items-center shrink-0">
+                      {isRecording ? (
+                        <Button 
+                          onClick={() => {
+                            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                              mediaRecorderRef.current.stop();
+                              // The actual message sending will happen in onstop event
+                            } else {
+                              setIsRecording(false);
+                            }
+                          }}
+                          className="rounded-full h-11 w-11 bg-primary text-white shadow-lg flex items-center justify-center p-0 animate-in zoom-in"
+                        >
+                          <Send className="h-6 w-6 fill-current" />
+                        </Button>
+                      ) : chatInput.trim() ? (
+                        <Button 
+                          onClick={handleSendMessage}
+                          className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
+                        >
+                          <Send className="h-7 w-7 fill-current" />
+                        </Button>
+                      ) : (
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn(
+                            "rounded-full h-11 w-11 text-[#54656f] transition-all relative overflow-hidden",
+                            isRecording && "bg-destructive text-white scale-110 shadow-lg"
+                          )}
+                          onMouseDown={async () => {
+                            try {
+                              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                              setIsRecording(true);
+                              
+                              const recorder = new MediaRecorder(stream);
+                              mediaRecorderRef.current = recorder;
+                              audioChunksRef.current = [];
+                              
+                              recorder.ondataavailable = (e) => {
+                                if (e.data.size > 0) {
+                                  audioChunksRef.current.push(e.data);
+                                }
+                              };
+                              
+                              recorder.onstop = () => {
+                                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  const base64Audio = reader.result?.toString();
+                                  const msg = {
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    userId: userProfile.id.toString(),
+                                    userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+                                    userAvatar: userProfile.getPersonDetailsDto.imageUrl,
+                                    text: `Sent a voice note (${recordingTime}s)`,
+                                    type: "audio",
+                                    mediaUrl: base64Audio,
+                                    chatId: activeChatId,
+                                    duration: recordingTime,
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  socketRef.current.emit("chat:message", msg);
+                                  setIsRecording(false);
+                                };
+                                reader.readAsDataURL(audioBlob);
+                                
+                                // Stop all tracks
+                                stream.getTracks().forEach(track => track.stop());
+                              };
+                              
+                              recorder.start();
+                            } catch (err) {
+                              console.error("Microphone permission denied:", err);
+                            }
+                          }}
+                        >
+                          <Mic className="h-6 w-6" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </footer>
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] text-[#667781] p-12 text-center space-y-6">
+                <div className="h-48 w-48 rounded-full bg-slate-200 flex items-center justify-center shadow-inner relative">
+                  <div className="absolute inset-0 rounded-full border-4 border-white/50 border-dashed animate-[spin_20s_linear_infinite]" />
+                  <MessageSquare className="h-24 w-24 text-slate-400" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-bold text-[#111b21]">HanssonHub Chats</h3>
+                  <p className="text-[#667781] max-w-md mx-auto">
+                    Select a conversation to continue. Send and receive messages without keeping your phone online.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-medium text-[#8696a0] pt-12">
+                  <Lock className="h-3 w-3" />
+                  <span>End-to-end encrypted</span>
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
