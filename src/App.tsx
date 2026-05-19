@@ -11,7 +11,10 @@ import {
   CONTACT_CATEGORIES,
   INITIAL_USER,
   INITIAL_USERS,
-  GENERAL_CAMERAS
+  GENERAL_CAMERAS,
+  INITIAL_HARDWARES,
+  INITIAL_EXTERNALS,
+  INITIAL_RECORDINGS
 } from './constants';
 import { 
   Device, 
@@ -33,7 +36,14 @@ import {
   UpdatePersonDto,
   PersonResponseModel,
   GetAddressDto,
-  GetContactDetailsDto
+  GetContactDetailsDto,
+  GetHardwareDto,
+  GetExternalDto,
+  Recording,
+  UpdateHardwareDto,
+  CreateHardwareDto,
+  UpdateExternalDto,
+  CreateExternalDto
 } from './types';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Badge } from './components/ui/badge';
@@ -134,7 +144,9 @@ import {
   Reply,
   CornerUpLeft,
   Settings,
-  UserPlus
+  UserPlus,
+  Cpu,
+  Radio
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
@@ -176,6 +188,9 @@ import { ImageCropperModal } from './components/ImageCropperModal';
 export default function App() {
   const [devices, setDevices] = React.useState<Device[]>(INITIAL_DEVICES);
   const [scenes, setScenes] = React.useState<Scene[]>(INITIAL_SCENES);
+  const [hardwares, setHardwares] = React.useState<GetHardwareDto[]>(INITIAL_HARDWARES);
+  const [externals, setExternals] = React.useState<GetExternalDto[]>(INITIAL_EXTERNALS);
+  const [recordings, setRecordings] = React.useState<Recording[]>(INITIAL_RECORDINGS);
   const [rooms, setRooms] = React.useState<Room[]>(ROOMS);
   const [sections, setSections] = React.useState<Section[]>(SECTIONS);
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
@@ -223,6 +238,18 @@ export default function App() {
     password: '',
     role: Role.Visitor
   });
+
+  // Hardware and Externals Modals
+  const [selectedHardware, setSelectedHardware] = React.useState<GetHardwareDto | null>(null);
+  const [isHardwareDetailOpen, setIsHardwareDetailOpen] = React.useState(false);
+  const [isAddHardwareOpen, setIsAddHardwareOpen] = React.useState(false);
+  const [isEditHardwareOpen, setIsEditHardwareOpen] = React.useState(false);
+  const [hardwareForm, setHardwareForm] = React.useState<Partial<GetHardwareDto>>({});
+
+  const [selectedExternal, setSelectedExternal] = React.useState<GetExternalDto | null>(null);
+  const [isAddExternalOpen, setIsAddExternalOpen] = React.useState(false);
+  const [isEditExternalOpen, setIsEditExternalOpen] = React.useState(false);
+  const [externalForm, setExternalForm] = React.useState<Partial<GetExternalDto>>({});
 
   // Logs Filter
   const [logStartDate, setLogStartDate] = React.useState<string>('');
@@ -950,9 +977,18 @@ export default function App() {
     } else if (activeView === 'facility-sections') {
       Icon = LayoutGrid;
       title = 'Sections';
-    } else if (activeView === 'facility-scenes') {
-      Icon = Film;
-      title = 'Scenes';
+    } else if (activeView === 'facility-actions') {
+      Icon = Zap;
+      title = 'Actions';
+    } else if (activeView === 'facility-hardware') {
+      Icon = Cpu;
+      title = 'Hardware';
+    } else if (activeView === 'facility-externals') {
+      Icon = Radio;
+      title = 'Externals';
+    } else if (activeView === 'facility-recordings') {
+      Icon = Video;
+      title = 'Recordings';
     } else if (activeView === 'facility-doors') {
       Icon = Lock;
       title = 'Doors';
@@ -1153,9 +1189,12 @@ export default function App() {
         { id: 'facility-doors', name: 'Doors', icon: Lock, type: 'door' },
         { id: 'facility-lights', name: 'Lights', icon: Lightbulb, type: 'light' },
         { id: 'facility-rooms', name: 'Rooms', icon: Sofa, type: 'room' },
-        { id: 'facility-scenes', name: 'Scenes', icon: Film, type: 'scene' },
+        { id: 'facility-actions', name: 'Actions', icon: Zap, type: 'action' },
         { id: 'facility-sections', name: 'Sections', icon: LayoutGrid, type: 'section' },
         { id: 'facility-windows', name: 'Windows', icon: WindowIcon, type: 'window' },
+        { id: 'facility-hardware', name: 'Hardware', icon: Cpu, type: 'hardware' },
+        { id: 'facility-externals', name: 'Externals', icon: Radio, type: 'externals' },
+        { id: 'facility-recordings', name: 'Recordings', icon: Video, type: 'recordings' },
       ].sort((a, b) => a.name.localeCompare(b.name));
 
       return (
@@ -1184,11 +1223,23 @@ export default function App() {
               if (cat.type === 'room') {
                 total = rooms.length;
                 statusSummary = `${total} Total Rooms`;
-              } else if (cat.type === 'scene') {
+              } else if (cat.type === 'action') {
                 total = scenes.length;
-                active = scenes.filter(s => s.isActive).length;
+                active = scenes.length; // all are available to activate
+                statusSummary = `${total} Active Actions`;
+              } else if (cat.type === 'hardware') {
+                total = hardwares.length;
+                active = hardwares.filter(h => h.isActive).length;
                 inactive = total - active;
-                statusSummary = `${active} Active • ${inactive} Inactive`;
+                statusSummary = `${active} Active • ${inactive} Off`;
+              } else if (cat.type === 'externals') {
+                total = externals.length;
+                active = externals.filter(e => e.isTriggered).length;
+                inactive = total - active;
+                statusSummary = `${active} Triggered • ${inactive} OK`;
+              } else if (cat.type === 'recordings') {
+                total = recordings.length;
+                statusSummary = `${total} Cloud Backups`;
               } else if (cat.type === 'section') {
                 total = sections.length;
                 statusSummary = `${total} Total Sections`;
@@ -2386,10 +2437,10 @@ export default function App() {
       );
     }
 
-    if (activeView === 'facility-scenes') {
+    if (activeView === 'facility-actions') {
       return (
         <motion.div
-          key="facility-scenes"
+          key="facility-actions"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
@@ -2397,13 +2448,13 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
-                <Film className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Scenes</h1>
+                <Zap className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-bold tracking-tight">Actions & Automation</h1>
               </div>
-              <p className="text-muted-foreground">Automate your home with custom scenes.</p>
+              <p className="text-muted-foreground">Automate your home with custom triggered Actions.</p>
             </div>
             <Button onClick={() => setIsAddSceneOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Scene
+              <Plus className="mr-2 h-4 w-4" /> Add New Action
             </Button>
           </div>
 
@@ -2411,8 +2462,20 @@ export default function App() {
             {scenes.map(scene => (
               <Card 
                 key={scene.id} 
-                className="p-6 flex flex-col gap-4 hover:bg-accent transition-all cursor-pointer group relative"
-                onClick={() => triggerScene(scene)}
+                className="p-6 flex flex-col gap-4 hover:bg-accent/50 hover:border-primary/40 transition-all cursor-pointer group relative"
+                onClick={() => {
+                  triggerScene(scene);
+                  setLogs(prev => [
+                    {
+                      id: Math.random().toString(),
+                      timestamp: new Date().toISOString(),
+                      action: `Triggered Action: ${scene.name}`,
+                      userName: userProfile.getPersonDetailsDto.firstName,
+                      userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                    },
+                    ...prev
+                  ]);
+                }}
               >
                 <Button 
                   variant="ghost" 
@@ -2435,7 +2498,207 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold">{scene.name}</h3>
-                  <p className="text-sm text-muted-foreground">{scene.actions.length} Actions</p>
+                  <p className="text-sm text-muted-foreground">{scene.actions.length} Commands</p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </motion.div>
+      );
+    }
+
+    if (activeView === 'facility-hardware') {
+      return (
+        <motion.div
+          key="facility-hardware"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-8"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <Cpu className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-bold tracking-tight">Hardware Systems</h1>
+              </div>
+              <p className="text-muted-foreground">Manage and monitor hardware hubs and integration controllers.</p>
+            </div>
+            <Button onClick={() => {
+              setHardwareForm({ hardwareName: '' });
+              setIsAddHardwareOpen(true);
+            }}>
+              <Plus className="mr-2 h-4 w-4" /> Add New Controller
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {hardwares.map(hw => (
+              <Card 
+                key={hw.id} 
+                className="p-6 space-y-4 hover:shadow-lg hover:border-primary/50 transition-all cursor-pointer bg-card"
+                onClick={() => {
+                  setSelectedHardware(hw);
+                  setIsHardwareDetailOpen(true);
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-5 w-5 text-primary" />
+                      <h3 className="text-lg font-bold">{hw.hardwareName}</h3>
+                    </div>
+                  </div>
+                  <Badge variant={hw.isActive ? 'default' : 'secondary'}>
+                    {hw.isActive ? 'ONLINE' : 'OFFLINE'}
+                  </Badge>
+                </div>
+
+                <div className="space-y-2 text-sm pt-2 border-t">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground font-medium">Hardware ID</span>
+                    <span className="font-mono text-xs font-semibold">{hw.hardwareId}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground font-medium">Auth Key</span>
+                    <span className="font-mono text-xs select-all text-primary font-medium truncate max-w-[150px]">{hw.authKey}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 text-[11px] text-muted-foreground text-center italic bg-muted/30 rounded-md py-1">
+                  Click to view full details & manage links
+                </div>
+              </Card>
+            ))}
+          </div>
+        </motion.div>
+      );
+    }
+
+    if (activeView === 'facility-externals') {
+      return (
+        <motion.div
+          key="facility-externals"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-8"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <Radio className="h-8 w-8 text-primary" />
+                <h1 className="text-3xl font-bold tracking-tight">External Systems & Peripherals</h1>
+              </div>
+              <p className="text-muted-foreground">Monitor and trigger auxiliary external interfaces around the property boundary.</p>
+            </div>
+            <Button onClick={() => {
+              setExternalForm({ externalsName: '', actionIds: [] });
+              setIsAddExternalOpen(true);
+            }}>
+              <Plus className="mr-2 h-4 w-4" /> Add External Device
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {externals.map(ext => (
+              <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all bg-card shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg">{ext.externalsName}</h3>
+                    <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalsId}</p>
+                  </div>
+                  <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'}>
+                    {ext.isTriggered ? 'TRIGGERED' : 'NORMAL'}
+                  </Badge>
+                </div>
+                <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-xs">
+                  <span className="text-muted-foreground font-medium">Mapped Automate Triggers:</span>
+                  <div className="flex gap-1.5 flex-wrap mt-1">
+                    {ext.actionIds && ext.actionIds.length > 0 ? (
+                      ext.actionIds.map(aid => {
+                        const sceneName = scenes.find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
+                        return (
+                          <Badge key={aid} variant="outline" className="font-mono text-[10px]">{sceneName}</Badge>
+                        );
+                      })
+                    ) : (
+                      <span className="text-muted-foreground italic">No triggers registered</span>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-auto pt-2 flex gap-2">
+                  <Button 
+                    variant="outline"
+                    className="flex-1 text-xs"
+                    onClick={() => {
+                      setExternalForm(ext);
+                      setIsEditExternalOpen(true);
+                    }}
+                  >
+                    Configure
+                  </Button>
+                  <Button 
+                    variant={ext.isTriggered ? 'destructive' : 'default'}
+                    className="flex-1 text-xs"
+                    onClick={() => {
+                      setExternals(prev => prev.map(item => item.id === ext.id ? { ...item, isTriggered: !item.isTriggered } : item));
+                      setLogs(prev => [
+                        {
+                          id: Math.random().toString(),
+                          timestamp: new Date().toISOString(),
+                          action: `${ext.externalsName} simulation trigger set to ${!ext.isTriggered}`,
+                          userName: userProfile.getPersonDetailsDto.firstName,
+                          userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                        },
+                        ...prev
+                      ]);
+                    }}
+                  >
+                    {ext.isTriggered ? 'Reset Signal' : 'Test Trigger'}
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </motion.div>
+      );
+    }
+
+    if (activeView === 'facility-recordings') {
+      return (
+        <motion.div
+          key="facility-recordings"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-8"
+        >
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <Video className="h-8 w-8 text-primary" />
+              <h1 className="text-3xl font-bold tracking-tight">Security Film & Recordings</h1>
+            </div>
+            <p className="text-muted-foreground">Historical backup recordings from security surveillance captures.</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {recordings.map(rec => (
+              <Card key={rec.id} className="overflow-hidden border hover:shadow-md transition-all">
+                <div className="aspect-video w-full bg-slate-800 relative group overflow-hidden">
+                  <img src={rec.thumbnailUrl} alt={rec.cameraName} className="object-cover w-full h-full opacity-80 group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" />
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="secondary" size="icon" className="rounded-full">
+                      <Play className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <span className="absolute bottom-2 right-2 bg-black/80 font-mono text-[10px] text-white px-1.5 py-0.5 rounded">
+                    {rec.duration}
+                  </span>
+                </div>
+                <div className="p-4 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-bold text-sm">{rec.cameraName}</h3>
+                    <Badge variant="outline" className="font-mono text-[10px]">{rec.size}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{new Date(rec.timestamp).toLocaleString()}</p>
                 </div>
               </Card>
             ))}
@@ -4386,6 +4649,616 @@ export default function App() {
         imageSrc={cropImageSrc}
         onCropComplete={handleCropComplete}
       />
+
+      {/* Hardware Detail Modal */}
+      <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
+        <DialogContent className="sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cpu className="h-6 w-6 text-primary" />
+              Hardware Controller Details
+            </DialogTitle>
+            <DialogDescription>
+              Detailed telemetry and component assignment for the selected system node.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedHardware && (
+            <div className="space-y-6 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-muted/40 rounded-xl space-y-1">
+                  <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Controller Name</span>
+                  <p className="font-bold text-lg">{selectedHardware.hardwareName}</p>
+                </div>
+                <div className="p-4 bg-muted/40 rounded-xl space-y-1">
+                  <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Device ID / Serial</span>
+                  <p className="font-mono font-bold text-sm text-primary">{selectedHardware.hardwareId}</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-muted/20 border rounded-xl space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-semibold">Authentication Key</span>
+                  <Badge variant="outline" className="font-mono text-xs font-semibold px-2 py-0.5 select-all">{selectedHardware.authKey}</Badge>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t">
+                  <span className="text-sm font-medium">Network Link Status</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.isActive ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'}`}></span>
+                    <span className="text-xs font-semibold">{selectedHardware.isActive ? 'ONLINE' : 'OFFLINE'}</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t">
+                  <span className="text-sm font-medium">Power Status</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.powerActive ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    <span className="text-xs font-semibold">{selectedHardware.powerActive ? 'POWERED OK' : 'POWER OUTAGE'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Linked Devices Summary Lists */}
+              <div className="space-y-4">
+                <h3 className="text-xs uppercase font-bold tracking-wider text-muted-foreground border-b pb-1">Assigned Infrastructure Map</h3>
+                
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0})</span>
+                    {selectedHardware.applianceIdNames && selectedHardware.applianceIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.applianceIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No appliances assigned to this controller.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0})</span>
+                    {selectedHardware.cameraIdNames && selectedHardware.cameraIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.cameraIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No cameras assigned to this controller.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0})</span>
+                    {selectedHardware.lightIdNames && selectedHardware.lightIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.lightIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No lights assigned to this controller.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0})</span>
+                    {selectedHardware.doorIdNames && selectedHardware.doorIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.doorIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No door systems assigned.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0})</span>
+                    {selectedHardware.windowIdNames && selectedHardware.windowIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.windowIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No automation windows assigned.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0})</span>
+                    {selectedHardware.externalIdNames && selectedHardware.externalIdNames.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedHardware.externalIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">No external units assigned.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setIsHardwareDetailOpen(false)}>Close</Button>
+            <Button variant="destructive" onClick={() => {
+              if (selectedHardware) {
+                setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
+                setIsHardwareDetailOpen(false);
+              }
+            }}>Remove Hub</Button>
+            <Button onClick={() => {
+              if (selectedHardware) {
+                setHardwareForm({
+                  ...selectedHardware,
+                  applianceIdNames: selectedHardware.applianceIdNames || [],
+                  cameraIdNames: selectedHardware.cameraIdNames || [],
+                  lightIdNames: selectedHardware.lightIdNames || [],
+                  windowIdNames: selectedHardware.windowIdNames || [],
+                  doorIdNames: selectedHardware.doorIdNames || [],
+                  externalIdNames: selectedHardware.externalIdNames || [],
+                });
+                setIsHardwareDetailOpen(false);
+                setIsEditHardwareOpen(true);
+              }
+            }}>Edit Infrastructure</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Hardware Modal */}
+      <Dialog open={isAddHardwareOpen} onOpenChange={setIsAddHardwareOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cpu className="h-6 w-6 text-primary" />
+              Add Hardware Controller
+            </DialogTitle>
+            <DialogDescription>
+              Deploy a new central node or smart bridging unit to link with facilities.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3">
+            <div className="grid gap-2">
+              <Label htmlFor="add-hw-name">Hardware Controller Name</Label>
+              <Input 
+                id="add-hw-name" 
+                placeholder="e.g. Living Room Node Bridge" 
+                value={hardwareForm.hardwareName || ''}
+                onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddHardwareOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              if (!hardwareForm.hardwareName) return;
+              const newId = Math.floor(Math.random() * 9000) + 1000;
+              const newHw: GetHardwareDto = {
+                id: newId,
+                hardwareName: hardwareForm.hardwareName,
+                hardwareId: `HW-CORE-${Math.floor(Math.random() * 80) + 10}`,
+                authKey: `auth_key_${Math.random().toString(16).substring(2, 14)}`,
+                isActive: true,
+                powerActive: true,
+                applianceIdNames: [],
+                cameraIdNames: [],
+                lightIdNames: [],
+                windowIdNames: [],
+                doorIdNames: [],
+                externalIdNames: []
+              };
+              setHardwares(prev => [...prev, newHw]);
+              setIsAddHardwareOpen(false);
+              setLogs(prev => [
+                {
+                  id: Math.random().toString(),
+                  timestamp: new Date().toISOString(),
+                  action: `Created system Controller Node: ${newHw.hardwareName}`,
+                  userName: userProfile.getPersonDetailsDto.firstName,
+                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                },
+                ...prev
+              ]);
+            }}>Deploy Node</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Hardware Map Modal (UpdateHardwareDto wrapper) */}
+      <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-6 w-6 text-primary" />
+              Configure Hardware Infrastructure
+            </DialogTitle>
+            <DialogDescription>
+              Assign physical and virtual peripherals to this system hub.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-hw-name">Hardware Name</Label>
+                <Input 
+                  id="edit-hw-name" 
+                  value={hardwareForm.hardwareName || ''}
+                  onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-hw-auth">Auth Security Key</Label>
+                <Input 
+                  id="edit-hw-auth" 
+                  value={hardwareForm.authKey || ''}
+                  onChange={(e) => setHardwareForm(prev => ({ ...prev, authKey: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* Selection arrays */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide border-b pb-1">Toggle Facility Assignments</h3>
+
+              {/* Appliances Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Connected Appliances</span>
+                <div className="flex flex-wrap gap-2">
+                  {devices.filter(d => d.type === 'appliance').map(dev => {
+                    const isSelected = hardwareForm.applianceIdNames?.some(x => x.id.toString() === dev.id.toString());
+                    return (
+                      <Badge 
+                        key={dev.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.applianceIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                          }
+                        }}
+                      >
+                        {dev.name} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Cameras Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Assigned Security Cameras</span>
+                <div className="flex flex-wrap gap-2">
+                  {devices.filter(d => d.type === 'camera').map(dev => {
+                    const isSelected = hardwareForm.cameraIdNames?.some(x => x.id.toString() === dev.id.toString());
+                    return (
+                      <Badge 
+                        key={dev.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.cameraIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                          }
+                        }}
+                      >
+                        {dev.name} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Lights Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Controlled Lighting</span>
+                <div className="flex flex-wrap gap-2">
+                  {devices.filter(d => d.type === 'light').map(dev => {
+                    const isSelected = hardwareForm.lightIdNames?.some(x => x.id.toString() === dev.id.toString());
+                    return (
+                      <Badge 
+                        key={dev.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.lightIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                          }
+                        }}
+                      >
+                        {dev.name} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Window Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Automated Windows</span>
+                <div className="flex flex-wrap gap-2">
+                  {devices.filter(d => d.type === 'window').map(dev => {
+                    const isSelected = hardwareForm.windowIdNames?.some(x => x.id.toString() === dev.id.toString());
+                    return (
+                      <Badge 
+                        key={dev.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.windowIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                          }
+                        }}
+                      >
+                        {dev.name} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Door Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Automated Doors</span>
+                <div className="flex flex-wrap gap-2">
+                  {devices.filter(d => d.type === 'door').map(dev => {
+                    const isSelected = hardwareForm.doorIdNames?.some(x => x.id.toString() === dev.id.toString());
+                    return (
+                      <Badge 
+                        key={dev.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.doorIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                          }
+                        }}
+                      >
+                        {dev.name} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Externals Selection */}
+              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                <span className="text-xs font-bold text-muted-foreground block">Select Peripheral Auxiliaries</span>
+                <div className="flex flex-wrap gap-2">
+                  {externals.map(ext => {
+                    const isSelected = hardwareForm.externalIdNames?.some(x => x.id.toString() === ext.id.toString());
+                    return (
+                      <Badge 
+                        key={ext.id} 
+                        variant={isSelected ? 'default' : 'outline'}
+                        className="cursor-pointer hover:opacity-85"
+                        onClick={() => {
+                          const currentList = hardwareForm.externalIdNames || [];
+                          if (isSelected) {
+                            setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id.toString() !== ext.id.toString()) }));
+                          } else {
+                            setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalsName }] }));
+                          }
+                        }}
+                      >
+                        {ext.externalsName} {isSelected && '✓'}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditHardwareOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              if (!hardwareForm.id) return;
+              // Pack as UpdateHardwareDto
+              const updateDto: UpdateHardwareDto = {
+                id: hardwareForm.id,
+                hardwareName: hardwareForm.hardwareName || '',
+                authKey: hardwareForm.authKey || '',
+                lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
+                applianceIds: (hardwareForm.applianceIdNames || []).map(x => x.id),
+                cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
+                windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
+                doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
+                externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
+              };
+
+              setHardwares(prev => prev.map(item => item.id === updateDto.id ? {
+                ...item,
+                hardwareName: updateDto.hardwareName,
+                authKey: updateDto.authKey,
+                lightIdNames: hardwareForm.lightIdNames || [],
+                applianceIdNames: hardwareForm.applianceIdNames || [],
+                cameraIdNames: hardwareForm.cameraIdNames || [],
+                windowIdNames: hardwareForm.windowIdNames || [],
+                doorIdNames: hardwareForm.doorIdNames || [],
+                externalIdNames: hardwareForm.externalIdNames || [],
+              } : item));
+
+              setIsEditHardwareOpen(false);
+              setLogs(prev => [
+                {
+                  id: Math.random().toString(),
+                  timestamp: new Date().toISOString(),
+                  action: `Updated hardware infrastructure map for: ${updateDto.hardwareName}`,
+                  userName: userProfile.getPersonDetailsDto.firstName,
+                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                },
+                ...prev
+              ]);
+            }}>Save Configuration</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
+      {/* Add External Device Modal */}
+      <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Radio className="h-6 w-6 text-primary" />
+              Add External System
+            </DialogTitle>
+            <DialogDescription>
+              Deploy a new peripheral automation unit to track custom safety events.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3">
+            <div className="grid gap-2">
+              <Label htmlFor="ext-name">External Device Name</Label>
+              <Input 
+                id="ext-name" 
+                placeholder="e.g. Laser Gate Switch" 
+                value={externalForm.externalsName || ''}
+                onChange={(e) => setExternalForm(prev => ({ ...prev, externalsName: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground block">Link to Trigger Actions ({scenes.length} available)</Label>
+              <div className="flex flex-wrap gap-2">
+                {scenes.map(s => {
+                  const aid = parseInt(s.id) || 101;
+                  const isSelected = externalForm.actionIds?.includes(aid);
+                  return (
+                    <Badge 
+                      key={s.id}
+                      variant={isSelected ? 'default' : 'outline'}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        const ids = externalForm.actionIds || [];
+                        if (isSelected) {
+                          setExternalForm(prev => ({ ...prev, actionIds: ids.filter(id => id !== aid) }));
+                        } else {
+                          setExternalForm(prev => ({ ...prev, actionIds: [...ids, aid] }));
+                        }
+                      }}
+                    >
+                      {s.name}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddExternalOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+              if (!externalForm.externalsName) return;
+              const newExt: GetExternalDto = {
+                id: Math.floor(Math.random() * 9000) + 1000,
+                externalsName: externalForm.externalsName,
+                externalsId: `EXT-DEV-${Math.floor(Math.random() * 80) + 10}`,
+                isTriggered: false,
+                actionIds: externalForm.actionIds || []
+              };
+              setExternals(prev => [...prev, newExt]);
+              setIsAddExternalOpen(false);
+              setLogs(prev => [
+                {
+                  id: Math.random().toString(),
+                  timestamp: new Date().toISOString(),
+                  action: `Added Boundary Device: ${newExt.externalsName}`,
+                  userName: userProfile.getPersonDetailsDto.firstName,
+                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                },
+                ...prev
+              ]);
+            }}>Save External</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
+      {/* Edit External Device Modal */}
+      <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Radio className="h-6 w-6 text-primary" />
+              Edit Boundary Device Config
+            </DialogTitle>
+            <DialogDescription>
+              Modify name pattern and linked trigger actions.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-ext-name">External Name</Label>
+              <Input 
+                id="edit-ext-name" 
+                value={externalForm.externalsName || ''}
+                onChange={(e) => setExternalForm(prev => ({ ...prev, externalsName: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground block">Action Command Triggers</Label>
+              <div className="flex flex-wrap gap-2">
+                {scenes.map(s => {
+                  const aid = parseInt(s.id) || 101;
+                  const isSelected = externalForm.actionIds?.includes(aid);
+                  return (
+                    <Badge 
+                      key={s.id}
+                      variant={isSelected ? 'default' : 'outline'}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        const ids = externalForm.actionIds || [];
+                        if (isSelected) {
+                          setExternalForm(prev => ({ ...prev, actionIds: ids.filter(id => id !== aid) }));
+                        } else {
+                          setExternalForm(prev => ({ ...prev, actionIds: [...ids, aid] }));
+                        }
+                      }}
+                    >
+                      {s.name}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditExternalOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => {
+              if (externalForm.id) {
+                setExternals(prev => prev.filter(x => x.id !== externalForm.id));
+                setIsEditExternalOpen(false);
+              }
+            }}>Remove External</Button>
+            <Button onClick={() => {
+              if (!externalForm.id || !externalForm.externalsName) return;
+              setExternals(prev => prev.map(item => item.id === externalForm.id ? {
+                ...item,
+                externalsName: externalForm.externalsName || '',
+                actionIds: externalForm.actionIds || []
+              } : item));
+              setIsEditExternalOpen(false);
+            }}>Apply Update</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Camera Feed Modal */}
       <Dialog open={isCameraModalOpen} onOpenChange={(open) => {

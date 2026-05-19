@@ -25,7 +25,11 @@ import {
   Home as HomeIcon,
   Film,
   ChevronRight,
-  Settings2
+  Settings2,
+  Cpu,
+  Radio,
+  Video,
+  Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ROOMS, SECTIONS } from '../constants';
@@ -39,7 +43,10 @@ export type NavView =
   | 'user-room'
   | 'facility-overview'
   | 'facility-rooms'
-  | 'facility-scenes'
+  | 'facility-actions'
+  | 'facility-hardware'
+  | 'facility-externals'
+  | 'facility-recordings'
   | 'facility-doors' 
   | 'facility-lights' 
   | 'facility-appliances' 
@@ -84,12 +91,15 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
 
   const facilityItems = [
     { id: 'facilities', label: 'Overview', icon: Layers },
+    { id: 'facility-actions', label: 'Actions', icon: Zap },
     { id: 'facility-appliances', label: 'Appliances', icon: Power },
     { id: 'facility-cameras', label: 'Cameras', icon: Camera },
     { id: 'facility-doors', label: 'Doors', icon: Lock },
+    { id: 'facility-externals', label: 'Externals', icon: Radio },
+    { id: 'facility-hardware', label: 'Hardware', icon: Cpu },
     { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
+    { id: 'facility-recordings', label: 'Recordings', icon: Video },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
-    { id: 'facility-scenes', label: 'Scenes', icon: Film },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
     { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
   ];

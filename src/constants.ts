@@ -1,4 +1,4 @@
-import { Device, Room, Section, Scene, LogEntry, Contact, ContactCategory, UserProfile, User, GetPersonDto, Gender, Role } from './types';
+import { Device, Room, Section, Scene, LogEntry, Contact, ContactCategory, UserProfile, User, GetPersonDto, Gender, Role, GetHardwareDto, GetExternalDto, Recording } from './types';
 
 export const SECTIONS: Section[] = [
   { id: 'indoor', name: 'Indoor' },
@@ -206,3 +206,103 @@ export const GENERAL_CAMERAS = [
   { id: 'c-porch', name: 'Porch Camera' },
   { id: 'c-backyard', name: 'Backyard Camera' },
 ];
+
+export const INITIAL_HARDWARES: GetHardwareDto[] = [
+  {
+    id: 1,
+    hardwareName: "Main Controller Hub",
+    hardwareId: "HW-HUB-01",
+    authKey: "auth_key_6f0a35db9d72",
+    isActive: true,
+    powerActive: true,
+    applianceIdNames: [{ id: 3, name: "Smart TV" }, { id: 6, name: "Refrigerator" }],
+    cameraIdNames: [{ id: 14, name: "Front Door Camera" }],
+    lightIdNames: [{ id: 1, name: "Main Light" }, { id: 5, name: "Ceiling Light" }],
+    windowIdNames: [{ id: 30, name: "Bedroom Window" }],
+    doorIdNames: [{ id: 31, name: "Bedroom Door" }],
+    externalIdNames: [{ id: 1, name: "Outdoor Motion Sensor" }]
+  },
+  {
+    id: 2,
+    hardwareName: "Kitchen Smart Bridge",
+    hardwareId: "HW-KITCH-02",
+    authKey: "auth_key_71be4d193ba2",
+    isActive: true,
+    powerActive: true,
+    applianceIdNames: [{ id: 7, name: "Coffee Maker" }],
+    cameraIdNames: [],
+    lightIdNames: [{ id: 5, name: "Ceiling Light" }],
+    windowIdNames: [],
+    doorIdNames: [],
+    externalIdNames: []
+  },
+  {
+    id: 3,
+    hardwareName: "Garden Irrigation Unit",
+    hardwareId: "HW-GARD-03",
+    authKey: "auth_key_8e4f1a20cd11",
+    isActive: false,
+    powerActive: false,
+    applianceIdNames: [{ id: 12, name: "Sprinklers" }],
+    cameraIdNames: [],
+    lightIdNames: [{ id: 13, name: "Pool Light" }],
+    windowIdNames: [],
+    doorIdNames: [],
+    externalIdNames: [{ id: 2, name: "Driveway Beam Gate" }]
+  }
+];
+
+export const INITIAL_EXTERNALS: GetExternalDto[] = [
+  {
+    id: 1,
+    externalsName: "Outdoor Motion Sensor",
+    externalsId: "EXT-MOT-01",
+    isTriggered: true,
+    actionIds: [101, 102]
+  },
+  {
+    id: 2,
+    externalsName: "Driveway Beam Gate",
+    externalsId: "EXT-BEAM-02",
+    isTriggered: false,
+    actionIds: [103]
+  },
+  {
+    id: 3,
+    externalsName: "Front Boundary Laser Fence",
+    externalsId: "EXT-FENCE-03",
+    isTriggered: false,
+    actionIds: [104, 105]
+  }
+];
+
+export const INITIAL_RECORDINGS: Recording[] = [
+  {
+    id: "rec-01",
+    cameraName: "Front Door Camera",
+    timestamp: new Date(Date.now() - 1800000).toISOString(), // 30 mins ago
+    duration: "00:45",
+    thumbnailUrl: "https://picsum.photos/seed/rec1/320/180",
+    videoUrl: "",
+    size: "12.4 MB"
+  },
+  {
+    id: "rec-02",
+    cameraName: "Gate Camera",
+    timestamp: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
+    duration: "01:20",
+    thumbnailUrl: "https://picsum.photos/seed/rec2/320/180",
+    videoUrl: "",
+    size: "24.1 MB"
+  },
+  {
+    id: "rec-03",
+    cameraName: "Backyard Camera",
+    timestamp: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+    duration: "02:05",
+    thumbnailUrl: "https://picsum.photos/seed/rec3/320/180",
+    videoUrl: "",
+    size: "41.8 MB"
+  }
+];
+

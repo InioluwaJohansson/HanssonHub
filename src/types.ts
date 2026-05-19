@@ -283,3 +283,95 @@ export type ContactCategory = GetContactCategoryDto;
 
 export type UserProfile = GetPersonDto & { cameraAccess?: string[] };
 export type User = GetPersonDto;
+
+// Hardware and Externals Models
+export interface GenericIdNames {
+  id: number;
+  name: string;
+}
+
+export interface GetHardwareDto {
+  id: number;
+  hardwareName: string;
+  hardwareId: string;
+  authKey: string;
+  isActive: boolean;
+  powerActive: boolean;
+  applianceIdNames: GenericIdNames[];
+  cameraIdNames: GenericIdNames[];
+  lightIdNames: GenericIdNames[];
+  windowIdNames: GenericIdNames[];
+  doorIdNames: GenericIdNames[];
+  externalIdNames: GenericIdNames[];
+}
+
+export interface HardwareResponseModel extends BaseResponse {
+  data: GetHardwareDto;
+}
+
+export interface HardwaresResponseModel extends BaseResponse {
+  data: GetHardwareDto[];
+}
+
+export interface BaseDefaultDto {
+  id: number;
+}
+
+export interface GetExternalDto extends BaseDefaultDto {
+  id: number;
+  externalsName: string;
+  externalsId: string;
+  isTriggered: boolean;
+  actionIds: number[];
+}
+
+export interface ExternalResponseModel extends BaseResponse {
+  data: GetExternalDto;
+}
+
+export interface ExternalsResponseModel extends BaseResponse {
+  data: GetExternalDto[];
+}
+
+export interface Recording {
+  id: string;
+  cameraName: string;
+  timestamp: string;
+  duration: string;
+  thumbnailUrl: string;
+  videoUrl: string;
+  size: string;
+}
+
+export interface CreateHardwareDto {
+  hardwareName: string;
+}
+
+export interface UpdateHardwareDto {
+  id: number;
+  hardwareName: string;
+  authKey: string;
+  lightIds: number[];
+  applianceIds: number[];
+  cameraIds: number[];
+  windowIds: number[];
+  doorIds: number[];
+  externalIds: number[];
+}
+
+export interface CreateBaseDefaultDto {
+  // Base default interface
+}
+
+export interface CreateExternalDto extends CreateBaseDefaultDto {
+  externalName: string;
+  actionIds: number[];
+}
+
+export interface UpdateExternalDto extends CreateBaseDefaultDto {
+  id: number;
+  externalName: string;
+  actionIds: number[];
+}
+
+
