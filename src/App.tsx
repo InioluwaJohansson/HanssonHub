@@ -146,7 +146,9 @@ import {
   Settings,
   UserPlus,
   Cpu,
-  Radio
+  Radio,
+  Copy,
+  Trash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
@@ -247,6 +249,7 @@ export default function App() {
   const [hardwareForm, setHardwareForm] = React.useState<Partial<GetHardwareDto>>({});
 
   const [selectedExternal, setSelectedExternal] = React.useState<GetExternalDto | null>(null);
+  const [isViewExternalOpen, setIsViewExternalOpen] = React.useState(false);
   const [isAddExternalOpen, setIsAddExternalOpen] = React.useState(false);
   const [isEditExternalOpen, setIsEditExternalOpen] = React.useState(false);
   const [externalForm, setExternalForm] = React.useState<Partial<GetExternalDto>>({});
@@ -389,6 +392,7 @@ export default function App() {
   // Auth Modal
   const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
   const [authCode, setAuthCode] = React.useState('');
+  const [authError, setAuthError] = React.useState(false);
   const [onAuthSuccess, setOnAuthSuccess] = React.useState<(() => void) | null>(null);
 
   // Camera Modal
@@ -549,7 +553,8 @@ export default function App() {
   };
 
   const handleUpdateProfile = () => {
-    // Construct UpdatePersonDto for logic demonstration
+    requestAuth(() => {
+      // Construct UpdatePersonDto for logic demonstration
     const updateData: UpdatePersonDto = {
       id: userProfile.id,
       updatePersonDetailsDto: {
@@ -595,7 +600,8 @@ export default function App() {
       };
       setLogs(prev => [newLog, ...prev]);
     }
-  };
+  });
+};
 
   const handleAddCategory = () => {
     if (!newCategoryName.trim()) return;
@@ -614,7 +620,8 @@ export default function App() {
   };
 
   const handleEditCategory = () => {
-    if (!editingCategory || !newCategoryName.trim()) return;
+    requestAuth(() => {
+      if (!editingCategory || !newCategoryName.trim()) return;
     setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
       ...cat,
       name: newCategoryName,
@@ -625,7 +632,8 @@ export default function App() {
     setNewCategoryDescription('');
     setNewCategoryIcon('UserCircle');
     setIsEditCategoryOpen(false);
-    setEditingCategory(null);
+      setEditingCategory(null);
+    });
   };
 
   const handleDeleteCategory = (id: number) => {
@@ -739,21 +747,29 @@ export default function App() {
     setIsAddSectionOpen(false);
   };
 
-  const requestDelete = (action: () => void) => {
+  React.useEffect(() => {
+    if (authCode.length === 6 && /^\d+$/.test(authCode)) {
+      // Simulate a request that gives a false response if code is 000000
+      if (authCode === '000000') {
+        setAuthError(true);
+      } else {
+        onAuthSuccess?.();
+        setIsAuthModalOpen(false);
+        setAuthCode('');
+        setAuthError(false);
+        setOnAuthSuccess(null);
+      }
+    }
+  }, [authCode, onAuthSuccess]);
+
+  const requestAuth = (action: () => void) => {
     setOnAuthSuccess(() => action);
     setIsAuthModalOpen(true);
     setAuthCode('');
+    setAuthError(false);
   };
 
-  const handleAuthSubmit = () => {
-    if (authCode.length === 6 && /^\d+$/.test(authCode)) {
-      onAuthSuccess?.();
-      setIsAuthModalOpen(false);
-      setAuthCode('');
-      setOnAuthSuccess(null);
-    }
-  };
-
+  
   const handleToggle = (id: string) => {
     setDevices(prev => prev.map(d => {
       if (d.id !== id) return d;
@@ -786,7 +802,7 @@ export default function App() {
   };
 
   const handleDeleteDevice = (id: string) => {
-    requestDelete(() => {
+    requestAuth(() => {
       setDevices(prev => prev.filter(d => d.id !== id));
     });
   };
@@ -800,11 +816,13 @@ export default function App() {
   };
 
   const handleSaveDevice = () => {
-    if (editingDevice && editingDevice.id) {
-      setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...editingDevice } as Device : d));
-      setIsEditDeviceOpen(false);
-      setEditingDevice(null);
-    }
+    requestAuth(() => {
+      if (editingDevice && editingDevice.id) {
+        setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...editingDevice } as Device : d));
+        setIsEditDeviceOpen(false);
+        setEditingDevice(null);
+      }
+    });
   };
 
   const handleEditRoom = (room: Room) => {
@@ -813,15 +831,17 @@ export default function App() {
   };
 
   const handleSaveRoom = () => {
-    if (editingRoom && editingRoom.id) {
+    requestAuth(() => {
+      if (editingRoom && editingRoom.id) {
       setRooms(prev => prev.map(r => r.id === editingRoom.id ? { ...r, ...editingRoom } as Room : r));
       setIsEditRoomOpen(false);
       setEditingRoom(null);
-    }
+      }
+    });
   };
 
   const handleDeleteRoom = (id: string) => {
-    requestDelete(() => {
+    requestAuth(() => {
       setRooms(prev => prev.filter(r => r.id !== id));
       if (activeView === `room-${id}`) {
         setActiveView('facility-rooms');
@@ -2012,7 +2032,7 @@ export default function App() {
                     className="bg-transparent border-2 border-green-300 text-black hover:bg-green-50 rounded-full px-8 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto"
                     onClick={handleUpdateProfile}
                   >
-                    <Save className="mr-2 h-4 w-4 text-green-600" />
+                    <CheckCheck className="mr-2 h-4 w-4 text-green-600" />
                     Save Changes
                   </Button>
                 </div>
@@ -2483,7 +2503,7 @@ export default function App() {
                   className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                   onClick={(e) => {
                     e.stopPropagation();
-                    requestDelete(() => setScenes(prev => prev.filter(s => s.id !== scene.id)));
+                    requestAuth(() => setScenes(prev => prev.filter(s => s.id !== scene.id)));
                   }}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -2518,6 +2538,9 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
+                <Button variant="ghost" size="icon" onClick={() => setActiveView('facilities')}>
+                  <ChevronRight className="h-5 w-5 rotate-180" />
+                </Button>
                 <Cpu className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">Hardware Systems</h1>
               </div>
@@ -2527,7 +2550,7 @@ export default function App() {
               setHardwareForm({ hardwareName: '' });
               setIsAddHardwareOpen(true);
             }}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Controller
+              <Plus className="mr-2 h-4 w-4" /> Add New Hardware
             </Button>
           </div>
 
@@ -2564,9 +2587,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-2 text-[11px] text-muted-foreground text-center italic bg-muted/30 rounded-md py-1">
-                  Click to view full details & manage links
-                </div>
+                
               </Card>
             ))}
           </div>
@@ -2585,6 +2606,9 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
+                <Button variant="ghost" size="icon" onClick={() => setActiveView('facilities')}>
+                  <ChevronRight className="h-5 w-5 rotate-180" />
+                </Button>
                 <Radio className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">External Systems & Peripherals</h1>
               </div>
@@ -2600,7 +2624,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {externals.map(ext => (
-              <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all bg-card shadow-sm">
+              <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg">{ext.externalsName}</h3>
@@ -2625,37 +2649,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <div className="mt-auto pt-2 flex gap-2">
-                  <Button 
-                    variant="outline"
-                    className="flex-1 text-xs"
-                    onClick={() => {
-                      setExternalForm(ext);
-                      setIsEditExternalOpen(true);
-                    }}
-                  >
-                    Configure
-                  </Button>
-                  <Button 
-                    variant={ext.isTriggered ? 'destructive' : 'default'}
-                    className="flex-1 text-xs"
-                    onClick={() => {
-                      setExternals(prev => prev.map(item => item.id === ext.id ? { ...item, isTriggered: !item.isTriggered } : item));
-                      setLogs(prev => [
-                        {
-                          id: Math.random().toString(),
-                          timestamp: new Date().toISOString(),
-                          action: `${ext.externalsName} simulation trigger set to ${!ext.isTriggered}`,
-                          userName: userProfile.getPersonDetailsDto.firstName,
-                          userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                        },
-                        ...prev
-                      ]);
-                    }}
-                  >
-                    {ext.isTriggered ? 'Reset Signal' : 'Test Trigger'}
-                  </Button>
-                </div>
+                
               </Card>
             ))}
           </div>
@@ -2762,7 +2756,7 @@ export default function App() {
                         className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         onClick={(e) => {
                           e.stopPropagation();
-                          requestDelete(() => setSections(prev => prev.filter(s => s.id !== section.id)));
+                          requestAuth(() => setSections(prev => prev.filter(s => s.id !== section.id)));
                         }}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -2864,7 +2858,7 @@ export default function App() {
                     className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 bg-black/20 text-white hover:text-destructive hover:bg-white"
                     onClick={(e) => {
                       e.stopPropagation();
-                      requestDelete(() => setRooms(prev => prev.filter(r => r.id !== room.id)));
+                      requestAuth(() => setRooms(prev => prev.filter(r => r.id !== room.id)));
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -3263,7 +3257,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddDeviceOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleAddDevice} className="bg-primary text-primary-foreground">
               <Plus className="mr-2 h-4 w-4" />
               Add {(() => {
@@ -3351,7 +3345,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddRoomOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleAddRoom} className="bg-primary text-primary-foreground">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add Room
@@ -3400,16 +3394,16 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditSectionOpen(false)} className="flex items-center gap-2">
-              Cancel
-            </Button>
+            
             <Button onClick={() => {
               if (editingSection?.id && editingSection.name) {
-                setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type } : s));
-                setIsEditSectionOpen(false);
+                requestAuth(() => {
+                  setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type } : s));
+                  setIsEditSectionOpen(false);
+                });
               }
             }} className="flex items-center gap-2 bg-primary text-primary-foreground">
-              <Save className="h-4 w-4" />
+              <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
           </DialogFooter>
@@ -3656,7 +3650,7 @@ export default function App() {
             </div>
           </ScrollArea>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddPersonOpen(false)}>Cancel</Button>
+            
             <Button onClick={() => {
               const newId = Math.floor(Math.random() * 1000);
               const added: GetPersonDto = {
@@ -3718,7 +3712,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" className="border-primary/20 text-black hover:bg-muted" onClick={() => setIsEditPersonRoleOpen(false)}>Cancel</Button>
+            
             <Button onClick={() => {
               setPendingUserAction({ type: 'update-role', userId: updateUserRoleData.id, targetRole: updateUserRoleData.role });
               setIsEditPersonRoleOpen(false);
@@ -3912,7 +3906,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddCategoryOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleAddCategory}>Add Category</Button>
           </DialogFooter>
         </DialogContent>
@@ -3970,8 +3964,8 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsEditCategoryOpen(false); setEditingCategory(null); }}>Cancel</Button>
-            <Button onClick={handleEditCategory}>Save Changes</Button>
+            
+            <Button onClick={handleEditCategory}><CheckCheck className="mr-2 h-4 w-4" />Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4199,9 +4193,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter className="pt-4 border-t">
-            <Button variant="outline" onClick={() => setIsAddContactOpen(false)}>
-              Cancel
-            </Button>
+            
             <Button onClick={handleAddContact}>
               <ShieldCheck className="mr-2 h-4 w-4" />
               {editingContactId ? 'Update Contact' : 'Save Contact'}
@@ -4222,7 +4214,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteContactOpen(false)}>Cancel</Button>
+            
             <Button variant="destructive" onClick={handleDeleteContact}>Delete Contact</Button>
           </DialogFooter>
         </DialogContent>
@@ -4269,7 +4261,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddSceneOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleAddScene}>Add Scene</Button>
           </DialogFooter>
         </DialogContent>
@@ -4317,9 +4309,7 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddSectionOpen(false)} className="flex items-center gap-2">
-              Cancel
-            </Button>
+            
             <Button onClick={handleAddSection} className="flex items-center gap-2 bg-primary text-primary-foreground">
               <PlusCircle className="h-4 w-4" />
               Add Section
@@ -4329,14 +4319,14 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className="sm:max-w-[400px] border-2 border-red-500">
+        <DialogContent className={`sm:max-w-[400px] border-2 transition-colors ${authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50"}`}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Key className="h-5 w-5 text-primary" />
               Authorization Required
             </DialogTitle>
             <DialogDescription>
-              Please enter your 6-digit numerical authorization code to proceed with deletion.
+              Please enter your 6-digit numerical authorization code to proceed with the operation.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-6 py-8">
@@ -4349,20 +4339,15 @@ export default function App() {
                 value={authCode}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '');
-                  if (val.length <= 6) setAuthCode(val);
+                  if (val.length <= 6) { setAuthCode(val); setAuthError(false); }
                 }}
               />
             </div>
             <p className="text-xs text-muted-foreground">This is a sensitive operation.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAuthModalOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={handleAuthSubmit} 
-              disabled={authCode.length !== 6}
-            >
-              Confirm Deletion
-            </Button>
+            
+            
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4488,9 +4473,9 @@ export default function App() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDeviceOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleSaveDevice} className="bg-primary text-primary-foreground">
-              <PlusCircle className="mr-2 h-4 w-4" />
+              <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
           </DialogFooter>
@@ -4564,9 +4549,9 @@ export default function App() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditRoomOpen(false)}>Cancel</Button>
+            
             <Button onClick={handleSaveRoom} className="bg-primary text-primary-foreground">
-              <PlusCircle className="mr-2 h-4 w-4" />
+              <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
           </DialogFooter>
@@ -4634,7 +4619,7 @@ export default function App() {
             </div>
           )}
           <DialogFooter className="pt-4 border-t">
-            <Button variant="outline" className="rounded-xl" onClick={() => setIsViewContactOpen(false)}>Close</Button>
+            
             <Button className="rounded-xl shadow-lg shadow-primary/20" onClick={() => {
               setIsViewContactOpen(false);
               handleEditContact(viewingContact!);
@@ -4652,7 +4637,7 @@ export default function App() {
 
       {/* Hardware Detail Modal */}
       <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
-        <DialogContent className="sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
@@ -4664,41 +4649,54 @@ export default function App() {
           </DialogHeader>
 
           {selectedHardware && (
-            <div className="space-y-6 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                  <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Controller Name</span>
-                  <p className="font-bold text-lg">{selectedHardware.hardwareName}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+              {/* Left Column: Details */}
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-muted/40 rounded-xl space-y-1">
+                    <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Controller Name</span>
+                    <p className="font-bold text-lg">{selectedHardware.hardwareName}</p>
+                  </div>
+                  <div className="p-4 bg-muted/40 rounded-xl space-y-1">
+                    <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Device ID / Serial</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-mono font-bold text-sm text-primary truncate max-w-[100px]">{selectedHardware.hardwareId}</p>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(selectedHardware.hardwareId || '')}>
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                  <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Device ID / Serial</span>
-                  <p className="font-mono font-bold text-sm text-primary">{selectedHardware.hardwareId}</p>
+
+                <div className="p-4 bg-muted/20 border rounded-xl space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold">Authentication Key</span>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="outline" className="font-mono text-xs font-semibold px-2 py-0.5 select-all max-w-[120px] truncate">{selectedHardware.authKey}</Badge>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => navigator.clipboard.writeText(selectedHardware.authKey || '')}>
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t">
+                    <span className="text-sm font-medium">Network Link Status</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.isActive ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'}`}></span>
+                      <span className="text-xs font-semibold">{selectedHardware.isActive ? 'ONLINE' : 'OFFLINE'}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t">
+                    <span className="text-sm font-medium">Power Status</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.powerActive ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                      <span className="text-xs font-semibold">{selectedHardware.powerActive ? 'POWERED OK' : 'POWER OUTAGE'}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-4 bg-muted/20 border rounded-xl space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-semibold">Authentication Key</span>
-                  <Badge variant="outline" className="font-mono text-xs font-semibold px-2 py-0.5 select-all">{selectedHardware.authKey}</Badge>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t">
-                  <span className="text-sm font-medium">Network Link Status</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.isActive ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'}`}></span>
-                    <span className="text-xs font-semibold">{selectedHardware.isActive ? 'ONLINE' : 'OFFLINE'}</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t">
-                  <span className="text-sm font-medium">Power Status</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.powerActive ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    <span className="text-xs font-semibold">{selectedHardware.powerActive ? 'POWERED OK' : 'POWER OUTAGE'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Linked Devices Summary Lists */}
-              <div className="space-y-4">
+              {/* Right Column: Linked Devices Summary Lists */}
+              <div className="space-y-4 md:border-l md:pl-6">
                 <h3 className="text-xs uppercase font-bold tracking-wider text-muted-foreground border-b pb-1">Assigned Infrastructure Map</h3>
                 
                 <div className="space-y-3">
@@ -4772,29 +4770,36 @@ export default function App() {
             </div>
           )}
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setIsHardwareDetailOpen(false)}>Close</Button>
-            <Button variant="destructive" onClick={() => {
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            
+            <Button variant="destructive" size="icon" onClick={() => {
               if (selectedHardware) {
-                setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
-                setIsHardwareDetailOpen(false);
+                requestAuth(() => {
+                  setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
+                  setIsHardwareDetailOpen(false);
+                });
               }
-            }}>Remove Hub</Button>
+            }}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
             <Button onClick={() => {
               if (selectedHardware) {
-                setHardwareForm({
-                  ...selectedHardware,
-                  applianceIdNames: selectedHardware.applianceIdNames || [],
-                  cameraIdNames: selectedHardware.cameraIdNames || [],
-                  lightIdNames: selectedHardware.lightIdNames || [],
-                  windowIdNames: selectedHardware.windowIdNames || [],
-                  doorIdNames: selectedHardware.doorIdNames || [],
-                  externalIdNames: selectedHardware.externalIdNames || [],
-                });
-                setIsHardwareDetailOpen(false);
-                setIsEditHardwareOpen(true);
+                  setHardwareForm({
+                    ...selectedHardware,
+                    applianceIdNames: selectedHardware.applianceIdNames || [],
+                    cameraIdNames: selectedHardware.cameraIdNames || [],
+                    lightIdNames: selectedHardware.lightIdNames || [],
+                    windowIdNames: selectedHardware.windowIdNames || [],
+                    doorIdNames: selectedHardware.doorIdNames || [],
+                    externalIdNames: selectedHardware.externalIdNames || [],
+                  });
+                  setIsHardwareDetailOpen(false);
+                  setIsEditHardwareOpen(true);
               }
-            }}>Edit Infrastructure</Button>
+            }}>
+              <Edit3 className="w-4 h-4 mr-2" />
+              Edit Hardware
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4805,7 +4810,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
-              Add Hardware Controller
+              Add New Hardware
             </DialogTitle>
             <DialogDescription>
               Deploy a new central node or smart bridging unit to link with facilities.
@@ -4814,7 +4819,7 @@ export default function App() {
 
           <div className="space-y-4 py-3">
             <div className="grid gap-2">
-              <Label htmlFor="add-hw-name">Hardware Controller Name</Label>
+              <Label htmlFor="add-hw-name">Hardware Name</Label>
               <Input 
                 id="add-hw-name" 
                 placeholder="e.g. Living Room Node Bridge" 
@@ -4825,7 +4830,7 @@ export default function App() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddHardwareOpen(false)}>Cancel</Button>
+            
             <Button onClick={() => {
               if (!hardwareForm.hardwareName) return;
               const newId = Math.floor(Math.random() * 9000) + 1000;
@@ -4855,26 +4860,27 @@ export default function App() {
                 },
                 ...prev
               ]);
-            }}>Deploy Node</Button>
+            }}><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Hardware Map Modal (UpdateHardwareDto wrapper) */}
+      {/* Edit Hardware Modal (UpdateHardwareDto wrapper) */}
       <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-[90vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-6 w-6 text-primary" />
-              Configure Hardware Infrastructure
+              Edit Hardware
             </DialogTitle>
             <DialogDescription>
               Assign physical and virtual peripherals to this system hub.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 py-4">
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+            {/* Left Column: Editable Details */}
+            <div className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="edit-hw-name">Hardware Name</Label>
                 <Input 
@@ -4884,21 +4890,33 @@ export default function App() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-hw-auth">Auth Security Key</Label>
-                <Input 
-                  id="edit-hw-auth" 
-                  value={hardwareForm.authKey || ''}
-                  onChange={(e) => setHardwareForm(prev => ({ ...prev, authKey: e.target.value }))}
-                />
+                <Label>Hardware ID / Serial</Label>
+                <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
+                  <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.hardwareId}</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.hardwareId || '')}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Auth Security Key (Read-Only)</Label>
+                <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
+                  <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.authKey}</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.authKey || '')}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
               </div>
             </div>
 
-            {/* Selection arrays */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide border-b pb-1">Toggle Facility Assignments</h3>
+            {/* Right Column: Toggle Facility Assignments */}
+            <div className="space-y-4 md:border-l md:pl-6 flex flex-col min-h-0">
+              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide border-b pb-1 shrink-0">Toggle Facility Assignments</h3>
 
-              {/* Appliances Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+              <ScrollArea className="flex-1 -mr-4 pr-4 max-h-[50vh]">
+                <div className="space-y-4 pb-4">
+                  {/* Appliances Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Connected Appliances</span>
                 <div className="flex flex-wrap gap-2">
                   {devices.filter(d => d.type === 'appliance').map(dev => {
@@ -5059,49 +5077,57 @@ export default function App() {
                 </div>
               </div>
             </div>
+            </ScrollArea>
           </div>
+        </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditHardwareOpen(false)}>Cancel</Button>
+        <DialogFooter>
+            
             <Button onClick={() => {
               if (!hardwareForm.id) return;
-              // Pack as UpdateHardwareDto
-              const updateDto: UpdateHardwareDto = {
-                id: hardwareForm.id,
-                hardwareName: hardwareForm.hardwareName || '',
-                authKey: hardwareForm.authKey || '',
-                lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
-                applianceIds: (hardwareForm.applianceIdNames || []).map(x => x.id),
-                cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
-                windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
-                doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
-                externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
-              };
+              
+              requestAuth(() => {
+                // Pack as UpdateHardwareDto
+                const updateDto: UpdateHardwareDto = {
+                  id: hardwareForm.id as number,
+                  hardwareName: hardwareForm.hardwareName || '',
+                  authKey: hardwareForm.authKey || '',
+                  lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
+                  applianceIds: (hardwareForm.applianceIdNames || []).map(x => x.id),
+                  cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
+                  windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
+                  doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
+                  externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
+                };
 
-              setHardwares(prev => prev.map(item => item.id === updateDto.id ? {
-                ...item,
-                hardwareName: updateDto.hardwareName,
-                authKey: updateDto.authKey,
-                lightIdNames: hardwareForm.lightIdNames || [],
-                applianceIdNames: hardwareForm.applianceIdNames || [],
-                cameraIdNames: hardwareForm.cameraIdNames || [],
-                windowIdNames: hardwareForm.windowIdNames || [],
-                doorIdNames: hardwareForm.doorIdNames || [],
-                externalIdNames: hardwareForm.externalIdNames || [],
-              } : item));
+                setHardwares(prev => prev.map(item => item.id === updateDto.id ? {
+                  ...item,
+                  hardwareName: updateDto.hardwareName,
+                  authKey: updateDto.authKey,
+                  lightIdNames: hardwareForm.lightIdNames || [],
+                  applianceIdNames: hardwareForm.applianceIdNames || [],
+                  cameraIdNames: hardwareForm.cameraIdNames || [],
+                  windowIdNames: hardwareForm.windowIdNames || [],
+                  doorIdNames: hardwareForm.doorIdNames || [],
+                  externalIdNames: hardwareForm.externalIdNames || [],
+                } : item));
 
-              setIsEditHardwareOpen(false);
-              setLogs(prev => [
-                {
-                  id: Math.random().toString(),
-                  timestamp: new Date().toISOString(),
-                  action: `Updated hardware infrastructure map for: ${updateDto.hardwareName}`,
-                  userName: userProfile.getPersonDetailsDto.firstName,
-                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                },
-                ...prev
-              ]);
-            }}>Save Configuration</Button>
+                setIsEditHardwareOpen(false);
+                setLogs(prev => [
+                  {
+                    id: Math.random().toString(),
+                    timestamp: new Date().toISOString(),
+                    action: `Updated hardware infrastructure map for: ${updateDto.hardwareName}`,
+                    userName: userProfile.getPersonDetailsDto.firstName,
+                    userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                  },
+                  ...prev
+                ]);
+              });
+            }}>
+              <CheckCheck className="mr-2 h-4 w-4" />
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -5160,7 +5186,7 @@ export default function App() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddExternalOpen(false)}>Cancel</Button>
+            
             <Button onClick={() => {
               if (!externalForm.externalsName) return;
               const newExt: GetExternalDto = {
@@ -5182,11 +5208,91 @@ export default function App() {
                 },
                 ...prev
               ]);
-            }}>Save External</Button>
+            }}><PlusCircle className="mr-2 h-4 w-4" /> Add External</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+
+      
+      {/* View External Modal */}
+      <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Radio className="h-6 w-6 text-primary" />
+              View External
+            </DialogTitle>
+          </DialogHeader>
+          {selectedExternal && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                 <div className="space-y-1">
+                   <h3 className="font-semibold">{selectedExternal.externalsName}</h3>
+                   <div className="text-xs text-muted-foreground">ID: {selectedExternal.externalsId}</div>
+                 </div>
+                 <Badge variant={selectedExternal.isTriggered ? 'destructive' : 'secondary'}>
+                    {selectedExternal.isTriggered ? 'TRIGGERED' : 'NORMAL'}
+                 </Badge>
+              </div>
+              <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-sm">
+                 <span className="text-muted-foreground font-medium">Mapped Automate Triggers:</span>
+                 <div className="flex gap-1.5 flex-wrap mt-1">
+                   {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
+                     selectedExternal.actionIds.map(aid => {
+                       const sceneName = scenes.find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
+                       return (
+                         <Badge key={aid} variant="outline" className="font-mono text-[10px]">{sceneName}</Badge>
+                       );
+                     })
+                   ) : (
+                     <span className="text-muted-foreground italic">No triggers registered</span>
+                   )}
+                 </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0 mt-4 border-t pt-4">
+            <Button 
+               variant="outline"
+               onClick={() => {
+                 if (selectedExternal) {
+                   setExternalForm(selectedExternal);
+                   setIsViewExternalOpen(false);
+                   setIsEditExternalOpen(true);
+                 }
+               }}
+            >
+              <Edit3 className="h-4 w-4 mr-2" />
+              Edit External
+            </Button>
+            <Button 
+              variant={selectedExternal?.isTriggered ? 'destructive' : 'default'}
+              onClick={() => {
+                 if (selectedExternal) {
+                   requestAuth(() => {
+                      setExternals(prev => prev.map(item => item.id === selectedExternal.id ? { ...item, isTriggered: !item.isTriggered } : item));
+                      setSelectedExternal(prev => prev ? {...prev, isTriggered: !prev.isTriggered} : prev);
+                      setLogs(prev => [
+                        {
+                          id: Math.random().toString(),
+                          timestamp: new Date().toISOString(),
+                          action: `${selectedExternal.externalsName} simulation trigger set to ${!selectedExternal.isTriggered}`,
+                          userName: userProfile.getPersonDetailsDto.firstName,
+                          userAvatar: userProfile.getPersonDetailsDto.imageUrl
+                        },
+                        ...prev
+                      ]);
+                   });
+                 }
+              }}
+            >
+               <Radio className="h-3 w-3 mr-1" />
+               {selectedExternal?.isTriggered ? 'Reset Signal' : 'Test Trigger'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit External Device Modal */}
       <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
@@ -5194,7 +5300,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Radio className="h-6 w-6 text-primary" />
-              Edit Boundary Device Config
+              Edit External
             </DialogTitle>
             <DialogDescription>
               Modify name pattern and linked trigger actions.
@@ -5240,22 +5346,31 @@ export default function App() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditExternalOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => {
+            
+            <Button variant="destructive" size="icon" onClick={() => {
               if (externalForm.id) {
-                setExternals(prev => prev.filter(x => x.id !== externalForm.id));
-                setIsEditExternalOpen(false);
+                requestAuth(() => {
+                  setExternals(prev => prev.filter(x => x.id !== externalForm.id));
+                  setIsEditExternalOpen(false);
+                });
               }
-            }}>Remove External</Button>
+            }}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
             <Button onClick={() => {
               if (!externalForm.id || !externalForm.externalsName) return;
-              setExternals(prev => prev.map(item => item.id === externalForm.id ? {
-                ...item,
-                externalsName: externalForm.externalsName || '',
-                actionIds: externalForm.actionIds || []
-              } : item));
-              setIsEditExternalOpen(false);
-            }}>Apply Update</Button>
+              requestAuth(() => {
+                setExternals(prev => prev.map(item => item.id === externalForm.id ? {
+                  ...item,
+                  externalsName: externalForm.externalsName || '',
+                  actionIds: externalForm.actionIds || []
+                } : item));
+                setIsEditExternalOpen(false);
+              });
+            }}>
+              <CheckCheck className="w-4 h-4 mr-2" />
+              Apply Update
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
