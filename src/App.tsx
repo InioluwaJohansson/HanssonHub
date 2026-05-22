@@ -14,14 +14,21 @@ import {
   GENERAL_CAMERAS,
   INITIAL_HARDWARES,
   INITIAL_EXTERNALS,
-  INITIAL_RECORDINGS
+  INITIAL_CAMERAS,
+  INITIAL_APPLIANCES,
+  INITIAL_DOORS,
+  INITIAL_ROOMS,
+  INITIAL_LIGHTS,
+  INITIAL_SECTIONS,
+  INITIAL_WINDOWS,
+  INITIAL_ACTIONS
 } from './constants';
 import { 
   Device, 
   Scene, 
   Room, 
   Section, 
-  LogEntry, 
+  GetLogDto, 
   Contact as ContactType, 
   ContactCategory, 
   UserProfile,
@@ -39,12 +46,34 @@ import {
   GetContactDetailsDto,
   GetHardwareDto,
   GetExternalDto,
-  Recording,
+  GetCameraDto,
+  CreateCameraDto,
+  UpdateCameraDto,
+  GetRecordingDto,
+  GetApplianceDto,
+  GetDoorDto,
+  GetLightDto,
+  GetWindowDto,
   UpdateHardwareDto,
   CreateHardwareDto,
   UpdateExternalDto,
-  CreateExternalDto
+  CreateExternalDto,
+  CreateActionDto,
+  UpdateActionDto,
+  CreateActionStepDto,
+  UpdateActionStepDto,
+  GetActionStepDto,
+  GetActionDto,
+  FacilityType,
+  ChatDto,
+  ChatParticipantDto,
+  MessageDto,
+  MessageType,
+  SendMessageDto,
+  CreateDirectChatDto,
+  CreateGroupChatDto
 } from './types';
+import { INITIAL_CHATS, INITIAL_CHAT_MESSAGES } from './chatData';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
@@ -57,6 +86,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogClose,
   DialogTitle,
   DialogTrigger,
 } from "./components/ui/dialog";
@@ -70,6 +100,7 @@ import {
   SelectValue,
 } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
+import { Switch } from "./components/ui/switch";
 import { Calendar } from "./components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { 
@@ -100,9 +131,13 @@ import {
   Layers,
   LayoutGrid,
   LayoutDashboard,
+  ChevronLeft,
   ChevronRight,
+  Clock,
   Power,
   Lightbulb,
+  Globe,
+  Video,
   ClipboardList,
   Contact,
   UserCircle,
@@ -112,6 +147,10 @@ import {
   MapPin,
   PlusCircle,
   Trash2,
+  Edit2,
+  Pencil,
+  Undo2,
+  Check,
   Edit3,
   Key,
   ShieldAlert,
@@ -134,7 +173,8 @@ import {
   X,
   Filter,
   CheckCheck,
-  Video,
+  VideoOff,
+  EyeOff,
   ImagePlus,
   History,
   Smile,
@@ -148,7 +188,12 @@ import {
   Cpu,
   Radio,
   Copy,
-  Trash
+  Loader2,
+  Trash,
+  Info,
+  Maximize,
+  Minimize,
+  CameraOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
@@ -192,7 +237,11 @@ export default function App() {
   const [scenes, setScenes] = React.useState<Scene[]>(INITIAL_SCENES);
   const [hardwares, setHardwares] = React.useState<GetHardwareDto[]>(INITIAL_HARDWARES);
   const [externals, setExternals] = React.useState<GetExternalDto[]>(INITIAL_EXTERNALS);
-  const [recordings, setRecordings] = React.useState<Recording[]>(INITIAL_RECORDINGS);
+  const [cameras, setCameras] = React.useState<GetCameraDto[]>(INITIAL_CAMERAS);
+  const [appliances, setAppliances] = React.useState<GetApplianceDto[]>(INITIAL_APPLIANCES);
+  const [doors, setDoors] = React.useState<GetDoorDto[]>(INITIAL_DOORS);
+  const [lights, setLights] = React.useState<GetLightDto[]>(INITIAL_LIGHTS);
+  const [windows, setWindows] = React.useState<GetWindowDto[]>(INITIAL_WINDOWS);
   const [rooms, setRooms] = React.useState<Room[]>(ROOMS);
   const [sections, setSections] = React.useState<Section[]>(SECTIONS);
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
@@ -201,10 +250,56 @@ export default function App() {
   const [facilitySortBy, setFacilitySortBy] = React.useState<'room' | 'section'>('room');
 
   // New State
-  const [logs, setLogs] = React.useState<LogEntry[]>(INITIAL_LOGS);
+  const [logs, setLogs] = React.useState<GetLogDto[]>(INITIAL_LOGS);
+  const [visibleLogsCount, setVisibleLogsCount] = React.useState<number>(50);
+  const [selectedLog, setSelectedLog] = React.useState<GetLogDto | null>(null);
+  const [isViewLogOpen, setIsViewLogOpen] = React.useState<boolean>(false);
+  const loaderRef = React.useRef<HTMLDivElement>(null);
+  const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
+
+  const [userProfile, setUserProfile] = React.useState<UserProfile>(INITIAL_USER);
+
+  const addLogEntry = React.useCallback((actionType: string, logDetails: string) => {
+    const newLog: GetLogDto = {
+      id: Date.now(),
+      getPersonDto: userProfile,
+      personId: userProfile.id,
+      actionType: actionType,
+      timeOfAction: new Date().toISOString(),
+      logDetails: logDetails
+    };
+    setLogs(prev => [newLog, ...prev]);
+  }, [userProfile]);
+
+  // Infinite scroll dynamic loader context
+  React.useEffect(() => {
+    if (activeView !== 'logs') return;
+    if (visibleLogsCount >= logs.length) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !isPagingLoading) {
+        setIsPagingLoading(true);
+        setTimeout(() => {
+          setVisibleLogsCount(prev => prev + 50);
+          setIsPagingLoading(false);
+        }, 500);
+      }
+    }, { rootMargin: '120px' });
+
+    const currentRef = loaderRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, [activeView, visibleLogsCount, logs.length, isPagingLoading]);
+
   const [contacts, setContacts] = React.useState<ContactType[]>(INITIAL_CONTACTS);
   const [contactCategories, setContactCategories] = React.useState<ContactCategory[]>(CONTACT_CATEGORIES);
-  const [userProfile, setUserProfile] = React.useState<UserProfile>(INITIAL_USER);
   const [contactSearchQuery, setContactSearchQuery] = React.useState('');
   const [contactSortCategory, setContactSortCategory] = React.useState<string>('all');
   const [contactView, setContactView] = React.useState<'overview' | 'all'>('overview');
@@ -283,7 +378,12 @@ export default function App() {
     type: 'light',
     room: '',
     section: '',
-    doorType: 'interior'
+    doorType: 'interior',
+    ipAddress: '',
+    username: '',
+    password: '',
+    streamPath: '',
+    port: 80
   });
 
   // Pre-select room/section when opening Add Device dialog
@@ -300,6 +400,29 @@ export default function App() {
   }, [isAddDeviceOpen, activeView, rooms]);
 
   // Add Room State
+  const [actions, setActions] = React.useState<GetActionDto[]>(INITIAL_ACTIONS);
+  const [selectedAction, setSelectedAction] = React.useState<GetActionDto | null>(null);
+  const [isViewActionOpen, setIsViewActionOpen] = React.useState(false);
+  const [isEditActionOpen, setIsEditActionOpen] = React.useState(false);
+  const [isAddActionOpen, setIsAddActionOpen] = React.useState(false);
+  const [isAddActionStepOpen, setIsAddActionStepOpen] = React.useState(false);
+  const [isEditActionStepOpen, setIsEditActionStepOpen] = React.useState(false);
+  const [selectedActionStep, setSelectedActionStep] = React.useState<GetActionStepDto | null>(null);
+  const [actionStepForm, setActionStepForm] = React.useState<CreateActionStepDto>({
+    actionId: 0,
+    facilityType: FacilityType.Appliance,
+    facilityTypeId: 0,
+    brightnessLevel: 0,
+    isLocked: false,
+    isOpen: false,
+    isActive: false
+  });
+  const [actionForm, setActionForm] = React.useState<CreateActionDto>({
+    actionName: '',
+    description: '',
+    personId: 1
+  });
+
   const [isAddRoomOpen, setIsAddRoomOpen] = React.useState(false);
   const [isAddSceneOpen, setIsAddSceneOpen] = React.useState(false);
   const [newRoom, setNewRoom] = React.useState<Partial<Room>>({
@@ -388,6 +511,7 @@ export default function App() {
   const [editingSection, setEditingSection] = React.useState<Partial<Section> | null>(null);
   const [newSectionName, setNewSectionName] = React.useState('');
   const [newSectionType, setNewSectionType] = React.useState<'general' | 'secretive'>('general');
+  const [newSectionIsHidden, setNewSectionIsHidden] = React.useState(false);
 
   // Auth Modal
   const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
@@ -398,27 +522,107 @@ export default function App() {
   // Camera Modal
   const [isCameraModalOpen, setIsCameraModalOpen] = React.useState(false);
   const [selectedCamera, setSelectedCamera] = React.useState<Device | null>(null);
-  const [cameraPlaybackOffset, setCameraPlaybackOffset] = React.useState(0); // seconds from now
+  const [playingRecordingPath, setPlayingRecordingPath] = React.useState<string | null>(null);
+  const [cameraPlaybackOffset, setCameraPlaybackOffset] = React.useState(0);
   const [modalCurrentTime, setModalCurrentTime] = React.useState(new Date());
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
+  const [isScreensaverOpen, setIsScreensaverOpen] = React.useState(false);
+  const videoContainerRef = React.useRef<HTMLDivElement>(null);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const inactivityTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Inactivity Logic
+  const resetInactivityTimer = React.useCallback(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    inactivityTimerRef.current = setTimeout(() => {
+      setIsScreensaverOpen(true);
+    }, 20000); // 20 seconds for demo/testing
+  }, []);
+
+  const handleActivity = React.useCallback(() => {
+    setIsScreensaverOpen(prev => {
+      if (prev) return false;
+      return prev;
+    });
+    // Throttle resets to avoiding excessive timer restarts on continuous motion
+    if (inactivityTimerRef.current) {
+      resetInactivityTimer();
+    }
+  }, [resetInactivityTimer]);
+
+  React.useEffect(() => {
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity, { passive: true });
+    });
+
+    // Initial timer start
+    resetInactivityTimer();
+
+    return () => {
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, [handleActivity, resetInactivityTimer]);
+
+  // Appliance Modal
+  const [isApplianceModalOpen, setIsApplianceModalOpen] = React.useState(false);
+  const [selectedAppliance, setSelectedAppliance] = React.useState<Device | null>(null);
+
+  // Door Modal
+  const [isDoorModalOpen, setIsDoorModalOpen] = React.useState(false);
+  const [selectedDoor, setSelectedDoor] = React.useState<Device | null>(null);
+
+  // Light Modal
+  const [isLightModalOpen, setIsLightModalOpen] = React.useState(false);
+  const [selectedLight, setSelectedLight] = React.useState<Device | null>(null);
+
+  // View Room Modal
+  const [isViewRoomOpen, setIsViewRoomOpen] = React.useState(false);
+  const [viewingRoom, setViewingRoom] = React.useState<Room | null>(null);
+
+  // Window Modal
+  const [isViewWindowOpen, setIsViewWindowOpen] = React.useState(false);
+  const [selectedWindow, setSelectedWindow] = React.useState<Device | null>(null);
+
+  // Section Modal
+  const [isViewSectionOpen, setIsViewSectionOpen] = React.useState(false);
+  const [viewingSection, setViewingSection] = React.useState<Section | null>(null);
 
   // Chat State
   const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
-  const [chatMessages, setChatMessages] = React.useState<any[]>([]);
+  const [chats, setChats] = React.useState<ChatDto[]>(INITIAL_CHATS);
+  const [chatMessages, setChatMessages] = React.useState<MessageDto[]>(INITIAL_CHAT_MESSAGES);
   const [chatInput, setChatInput] = React.useState("");
   const socketRef = React.useRef<any>(null);
   const chatEndRef = React.useRef<HTMLDivElement>(null);
   const [isRecording, setIsRecording] = React.useState(false);
   const [recordingTime, setRecordingTime] = React.useState(0);
-  const [playingAudioId, setPlayingAudioId] = React.useState<string | null>(null);
+  const [playingAudioId, setPlayingAudioId] = React.useState<number | null>(null);
   const [playingProgress, setPlayingProgress] = React.useState(0);
-  const [replyingTo, setReplyingTo] = React.useState<any>(null);
+  const [replyingTo, setReplyingTo] = React.useState<MessageDto | null>(null);
   const recordingTimerRef = React.useRef<any>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
-  const [activeChatId, setActiveChatId] = React.useState<string | null>(null);
+  const [activeChatId, setActiveChatId] = React.useState<number | null>(null);
   const [chatSearchQuery, setChatSearchQuery] = React.useState("");
   const [isChatSearchVisible, setIsChatSearchVisible] = React.useState(false);
+
+  // New Chat Selection State (for when user has no chats)
+  const [isNewChatOpen, setIsNewChatOpen] = React.useState(false);
+  const [isGroupMode, setIsGroupMode] = React.useState(false);
+  const [selectedParticipants, setSelectedParticipants] = React.useState<number[]>([]);
+  const [newGroupName, setNewGroupName] = React.useState("");
+  const [newGroupDescription, setNewGroupDescription] = React.useState("");
 
   React.useEffect(() => {
     if (isRecording) {
@@ -468,6 +672,55 @@ export default function App() {
     };
   }, []);
 
+  // Camera Fullscreen Logic
+  const toggleCameraFullscreen = () => {
+    if (!videoContainerRef.current) return;
+
+    if (!document.fullscreenElement) {
+      videoContainerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  React.useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  // Playback Sync Logic
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !isCameraModalOpen) return;
+
+    const handleTimeUpdate = () => {
+      const progress = (video.currentTime / video.duration) * 100;
+      setCameraPlaybackOffset(progress);
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.playbackRate = playbackSpeed;
+    
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+    };
+  }, [isCameraModalOpen, playbackSpeed]);
+
+  const handleCameraPlaybackChange = (value: number[]) => {
+    if (videoRef.current && videoRef.current.duration) {
+      const newTime = (value[0] / 100) * videoRef.current.duration;
+      videoRef.current.currentTime = newTime;
+      setCameraPlaybackOffset(value[0]);
+    }
+  };
+
   React.useEffect(() => {
     const timer = setInterval(() => {
       setModalCurrentTime(new Date());
@@ -482,48 +735,144 @@ export default function App() {
   }, [chatMessages, isChatModalOpen]);
 
   const handleSendMessage = () => {
-    if (!chatInput.trim() || !activeChatId) return;
-    const msg = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: userProfile.id.toString(),
-      userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-      userAvatar: userProfile.getPersonDetailsDto.imageUrl,
-      text: chatInput,
-      type: "text",
+    if (!chatInput.trim() || activeChatId === null) return;
+    const msg: MessageDto = {
+      id: Date.now(),
       chatId: activeChatId,
-      timestamp: new Date().toISOString(),
-      replyTo: replyingTo ? {
-        id: replyingTo.id,
-        text: replyingTo.text,
-        userName: replyingTo.userName
-      } : null
+      senderPersonId: userProfile.id,
+      senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+      senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
+      content: chatInput,
+      type: MessageType.Text,
+      isEdited: false,
+      isDeleted: false,
+      sentAt: new Date().toISOString(),
+      attachments: []
     };
-    socketRef.current.emit("chat:message", msg);
+    
+    // Update local state and emit
+    setChatMessages(prev => [...prev, msg]);
+    if (socketRef.current) {
+      socketRef.current.emit("chat:message", msg);
+    }
+    
+    // Update last message in chats
+    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
+    
     setChatInput("");
     setReplyingTo(null);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'file') => {
-    if (e.target.files && e.target.files[0] && activeChatId) {
+    if (e.target.files && e.target.files[0] && activeChatId !== null) {
       const file = e.target.files[0];
       const reader = new FileReader();
       reader.onload = () => {
-        const msg = {
-          id: Math.random().toString(36).substr(2, 9),
-          userId: userProfile.id.toString(),
-          userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-          userAvatar: userProfile.getPersonDetailsDto.imageUrl,
-          text: `Sent a ${type}`,
-          mediaUrl: reader.result?.toString(),
-          fileName: file.name,
-          type: type,
+        const msg: MessageDto = {
+          id: Date.now(),
           chatId: activeChatId,
-          timestamp: new Date().toISOString()
+          senderPersonId: userProfile.id,
+          senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+          senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
+          content: `Sent a ${type}`,
+          type: type === 'image' ? MessageType.Image : MessageType.File,
+          isEdited: false,
+          isDeleted: false,
+          sentAt: new Date().toISOString(),
+          attachments: [{
+            fileName: file.name,
+            filePath: reader.result?.toString() || '',
+            contentType: file.type,
+            fileSize: file.size
+          }]
         };
-        socketRef.current.emit("chat:message", msg);
+        setChatMessages(prev => [...prev, msg]);
+        if (socketRef.current) {
+          socketRef.current.emit("chat:message", msg);
+        }
+        setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const startDirectChat = (person: GetPersonDto) => {
+    // Check if chat already exists
+    const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === person.id));
+    if (existingChat) {
+      setActiveChatId(existingChat.id);
+    } else {
+      const newChat: ChatDto = {
+        id: Date.now(),
+        name: `${person.getPersonDetailsDto.firstName} ${person.getPersonDetailsDto.lastName}`,
+        isGroup: false,
+        imageUrl: person.getPersonDetailsDto.imageUrl,
+        createdAt: new Date().toISOString(),
+        participants: [
+          {
+            personId: userProfile.id,
+            fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+            profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
+            isAdmin: true,
+            isOnline: true
+          },
+          {
+            personId: person.id,
+            fullName: `${person.getPersonDetailsDto.firstName} ${person.getPersonDetailsDto.lastName}`,
+            profileImageUrl: person.getPersonDetailsDto.imageUrl,
+            isAdmin: false,
+            isOnline: !person.disabled
+          }
+        ],
+        unreadCount: 0
+      };
+      setChats(prev => [newChat, ...prev]);
+      setActiveChatId(newChat.id);
+    }
+    setIsNewChatOpen(false);
+  };
+
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim() || selectedParticipants.length === 0) return;
+
+    const participants: ChatParticipantDto[] = [
+      {
+        personId: userProfile.id,
+        fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
+        isAdmin: true,
+        isOnline: true
+      },
+      ...selectedParticipants.map(id => {
+        const p = allUsers.find(u => u.id === id);
+        return {
+          personId: id,
+          fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
+          profileImageUrl: p?.getPersonDetailsDto.imageUrl,
+          isAdmin: false,
+          isOnline: !(p?.disabled)
+        };
+      })
+    ];
+
+    const newChat: ChatDto = {
+      id: Date.now(),
+      name: newGroupName,
+      description: newGroupDescription,
+      isGroup: true,
+      imageUrl: `https://picsum.photos/seed/${newGroupName}/100/100`,
+      createdAt: new Date().toISOString(),
+      participants,
+      unreadCount: 0
+    };
+
+    setChats(prev => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
+    setIsNewChatOpen(false);
+    setIsGroupMode(false);
+    setSelectedParticipants([]);
+    setNewGroupName("");
+    setNewGroupDescription("");
   };
 
   // Room Lock State
@@ -542,14 +891,7 @@ export default function App() {
     }));
     
     // Add log
-    const newLog: LogEntry = {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      action: `${nextState ? 'locked' : 'unlocked'} all security points in ${rooms.find(r => r.id === roomId)?.name || 'the room'}`,
-      userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-      userAvatar: userProfile.getPersonDetailsDto.imageUrl
-    };
-    setLogs(prev => [newLog, ...prev]);
+    addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${rooms.find(r => r.id === roomId)?.name || 'the room'}`);
   };
 
   const handleUpdateProfile = () => {
@@ -591,14 +933,7 @@ export default function App() {
     };
 
     if (mockResponse.isSuccess) {
-      const newLog: LogEntry = {
-        id: Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        action: 'Updated profile identity (Synced with UpdatePersonDto)',
-        userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        userAvatar: userProfile.getPersonDetailsDto.imageUrl
-      };
-      setLogs(prev => [newLog, ...prev]);
+      addLogEntry('Profile Sync', 'Updated profile identity (Synced with UpdatePersonDto)');
     }
   });
 };
@@ -620,8 +955,7 @@ export default function App() {
   };
 
   const handleEditCategory = () => {
-    requestAuth(() => {
-      if (!editingCategory || !newCategoryName.trim()) return;
+    if (!editingCategory || !newCategoryName.trim()) return;
     setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
       ...cat,
       name: newCategoryName,
@@ -632,8 +966,7 @@ export default function App() {
     setNewCategoryDescription('');
     setNewCategoryIcon('UserCircle');
     setIsEditCategoryOpen(false);
-      setEditingCategory(null);
-    });
+    setEditingCategory(null);
   };
 
   const handleDeleteCategory = (id: number) => {
@@ -735,16 +1068,20 @@ export default function App() {
   };
 
   const handleAddSection = () => {
-    if (!newSectionName.trim()) return;
-    const newSec: Section = {
-      id: newSectionName.toLowerCase().replace(/\s+/g, '-'),
-      name: newSectionName,
-      type: newSectionType
-    };
-    setSections(prev => [...prev, newSec]);
-    setNewSectionName('');
-    setNewSectionType('general');
-    setIsAddSectionOpen(false);
+    requestAuth(() => {
+      if (!newSectionName.trim()) return;
+      const newSec: Section = {
+        id: newSectionName.toLowerCase().replace(/\s+/g, '-'),
+        name: newSectionName,
+        type: newSectionType,
+        isHidden: newSectionIsHidden
+      };
+      setSections(prev => [...prev, newSec]);
+      setNewSectionName('');
+      setNewSectionType('general');
+      setNewSectionIsHidden(false);
+      setIsAddSectionOpen(false);
+    });
   };
 
   React.useEffect(() => {
@@ -804,6 +1141,7 @@ export default function App() {
   const handleDeleteDevice = (id: string) => {
     requestAuth(() => {
       setDevices(prev => prev.filter(d => d.id !== id));
+      setCameras(prev => prev.filter(c => c.id.toString() !== id.toString()));
     });
   };
 
@@ -815,10 +1153,37 @@ export default function App() {
     }
   };
 
+  const handleDeviceClick = (d: Device) => {
+    if (d.type === 'camera') {
+      setSelectedCamera(d);
+      setIsCameraModalOpen(true);
+    } else if (d.type === 'appliance') {
+      setSelectedAppliance(d);
+      setIsApplianceModalOpen(true);
+    } else if (d.type === 'door') {
+      setSelectedDoor(d);
+      setIsDoorModalOpen(true);
+    } else if (d.type === 'light') {
+      setSelectedLight(d);
+      setIsLightModalOpen(true);
+    } else if (d.type === 'window') {
+      setSelectedWindow(d);
+      setIsViewWindowOpen(true);
+    }
+  };
+
   const handleSaveDevice = () => {
     requestAuth(() => {
       if (editingDevice && editingDevice.id) {
         setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...editingDevice } as Device : d));
+        if (editingDevice.type === 'camera') {
+          setCameras(prev => prev.map(c => c.id.toString() === editingDevice.id!.toString() ? {
+            ...c,
+            cameraName: editingDevice.name || c.cameraName,
+            roomId: editingDevice.room ? parseInt(editingDevice.room) : c.roomId,
+            sectionId: editingDevice.section ? parseInt(editingDevice.section) : c.sectionId
+          } : c));
+        }
         setIsEditDeviceOpen(false);
         setEditingDevice(null);
       }
@@ -864,48 +1229,80 @@ export default function App() {
   };
 
   const handleAddDevice = () => {
-    if (!newDevice.name) return;
-    
-    let inferredType = newDevice.type;
-    if (activeView.startsWith('facility-')) {
-      const facilityType = activeView.replace('facility-', '');
-      if (facilityType === 'lights') inferredType = 'light';
-      else if (facilityType === 'doors') inferredType = 'door';
-      else if (facilityType === 'windows') inferredType = 'window';
-      else if (facilityType === 'appliances') inferredType = 'appliance';
-      else if (facilityType === 'cameras') inferredType = 'camera';
-    }
+    requestAuth(() => {
+      if (!newDevice.name) return;
+      
+      let inferredType = newDevice.type;
+      if (activeView.startsWith('facility-')) {
+        const facilityType = activeView.replace('facility-', '');
+        if (facilityType === 'lights') inferredType = 'light';
+        else if (facilityType === 'doors') inferredType = 'door';
+        else if (facilityType === 'windows') inferredType = 'window';
+        else if (facilityType === 'appliances') inferredType = 'appliance';
+        else if (facilityType === 'cameras') inferredType = 'camera';
+      }
 
-    const device: Device = {
-      id: Math.random().toString(36).substring(2, 9),
-      name: newDevice.name,
-      type: inferredType as any,
-      room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
-      section: newDevice.section || undefined,
-      status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : (inferredType === 'camera' ? 'active' : 'off'),
-      value: inferredType === 'light' ? 0 : undefined,
-      doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
-      powerUsage: inferredType === 'appliance' ? 0 : undefined
-    };
+      const numericId = Math.floor(Math.random() * 9000) + 1000;
+      const device: Device = {
+        id: inferredType === 'camera' ? numericId.toString() : Math.random().toString(36).substring(2, 9),
+        name: newDevice.name,
+        type: inferredType as any,
+        room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
+        section: newDevice.section || undefined,
+        status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : (inferredType === 'camera' ? 'active' : 'off'),
+        value: inferredType === 'light' ? 0 : undefined,
+        doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
+        powerUsage: inferredType === 'appliance' ? 0 : undefined,
+        ipAddress: newDevice.ipAddress,
+        username: newDevice.username,
+        password: newDevice.password,
+        streamPath: newDevice.streamPath,
+        port: newDevice.port
+      };
 
-    setDevices(prev => [...prev, device]);
-    setIsAddDeviceOpen(false);
-    setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior' });
+      if (inferredType === 'camera') {
+        const newCameraDto: GetCameraDto = {
+          id: numericId,
+          cameraName: device.name,
+          cameraId: `CAM-${numericId}`,
+          liveStreamUrl: newDevice.streamPath || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+          isActive: true,
+          powerActive: true,
+          roomId: newDevice.room ? parseInt(newDevice.room) : undefined,
+          sectionId: newDevice.section ? parseInt(newDevice.section) : undefined,
+          recordings: [
+            {
+              filePath: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              startTime: new Date(Date.now() - 3600000).toISOString(),
+              endTime: new Date(Date.now() - 3500000).toISOString()
+            }
+          ]
+        };
+        setCameras(prev => [...prev, newCameraDto]);
+      }
+
+      setDevices(prev => [...prev, device]);
+      setIsAddDeviceOpen(false);
+      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior' });
+    });
   };
 
   const handleAddRoom = () => {
-    if (!newRoom.name) return;
+    requestAuth(() => {
+      if (!newRoom.name) return;
 
-    const room: Room = {
-      id: newRoom.name.toLowerCase().replace(/\s+/g, '-'),
-      name: newRoom.name,
-      section: newRoom.section || '',
-      icon: newRoom.icon || 'Sofa'
-    };
+      const room: Room = {
+        id: newRoom.name.toLowerCase().replace(/\s+/g, '-'),
+        name: newRoom.name,
+        section: newRoom.section || '',
+        icon: newRoom.icon || 'Sofa',
+        isHidden: newRoom.isHidden
+      };
 
-    setRooms(prev => [...prev, room]);
-    setIsAddRoomOpen(false);
-    setNewRoom({ name: '', section: '', icon: 'Sofa' });
+      setRooms(prev => [...prev, room]);
+      setIsAddRoomOpen(false);
+      setNewRoom({ name: '', section: '', icon: 'Sofa' });
+    });
   };
 
   const [newScene, setNewScene] = React.useState<Partial<Scene>>({
@@ -914,16 +1311,18 @@ export default function App() {
   });
 
   const handleAddScene = () => {
-    if (!newScene.name) return;
-    const scene: Scene = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: newScene.name,
-      icon: newScene.icon as any || 'Film',
-      actions: []
-    };
-    setScenes(prev => [...prev, scene]);
-    setNewScene({ name: '', icon: 'Film' });
-    setIsAddSceneOpen(false);
+    requestAuth(() => {
+      if (!newScene.name) return;
+      const scene: Scene = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: newScene.name,
+        icon: newScene.icon as any || 'Film',
+        actions: []
+      };
+      setScenes(prev => [...prev, scene]);
+      setNewScene({ name: '', icon: 'Film' });
+      setIsAddSceneOpen(false);
+    });
   };
 
   const getFilteredDevices = () => {
@@ -1006,9 +1405,6 @@ export default function App() {
     } else if (activeView === 'facility-externals') {
       Icon = Radio;
       title = 'Externals';
-    } else if (activeView === 'facility-recordings') {
-      Icon = Video;
-      title = 'Recordings';
     } else if (activeView === 'facility-doors') {
       Icon = Lock;
       title = 'Doors';
@@ -1142,13 +1538,8 @@ export default function App() {
                   onToggle={handleToggle}
                   onStatusChange={handleStatusChange}
                   onValueChange={handleValueChange}
-                  onClick={(d) => {
-                    if (d.type === 'camera') {
-                      setSelectedCamera(d);
-                      setIsCameraModalOpen(true);
-                    }
-                  }}
-                />
+                onClick={handleDeviceClick}
+              />
               ))}
             </div>
           </div>
@@ -1188,10 +1579,12 @@ export default function App() {
               <Card className="divide-y overflow-hidden">
                 {logs.slice(0, 3).map(log => (
                   <div key={log.id} className="p-4 flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-muted flex-shrink-0" />
+                    <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                      <img src={log.getPersonDto?.getPersonDetailsDto?.imageUrl} alt={`${log.getPersonDto?.getPersonDetailsDto?.firstName} avatar`} className="h-full w-full object-cover" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">{log.action}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(log.timestamp).toLocaleTimeString()}</p>
+                      <p className="text-sm truncate font-medium"><span className="font-semibold">{log.getPersonDto?.getPersonDetailsDto?.firstName}</span>: {log.logDetails}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
                     </div>
                   </div>
                 ))}
@@ -1214,7 +1607,6 @@ export default function App() {
         { id: 'facility-windows', name: 'Windows', icon: WindowIcon, type: 'window' },
         { id: 'facility-hardware', name: 'Hardware', icon: Cpu, type: 'hardware' },
         { id: 'facility-externals', name: 'Externals', icon: Radio, type: 'externals' },
-        { id: 'facility-recordings', name: 'Recordings', icon: Video, type: 'recordings' },
       ].sort((a, b) => a.name.localeCompare(b.name));
 
       return (
@@ -1257,9 +1649,6 @@ export default function App() {
                 active = externals.filter(e => e.isTriggered).length;
                 inactive = total - active;
                 statusSummary = `${active} Triggered • ${inactive} OK`;
-              } else if (cat.type === 'recordings') {
-                total = recordings.length;
-                statusSummary = `${total} Cloud Backups`;
               } else if (cat.type === 'section') {
                 total = sections.length;
                 statusSummary = `${total} Total Sections`;
@@ -1320,11 +1709,28 @@ export default function App() {
     if (activeView === 'logs') {
       const filteredLogs = logs.filter(log => {
         if (!logStartDate && !logEndDate) return true;
-        const logDate = new Date(log.timestamp);
+        const logDate = new Date(log.timeOfAction);
         const start = logStartDate ? new Date(logStartDate) : new Date(0);
         const end = logEndDate ? new Date(logEndDate) : new Date();
         return logDate >= start && logDate <= end;
       });
+
+      const displayedLogs = filteredLogs.slice(0, visibleLogsCount);
+
+      const getActionTypeBadgeColor = (type: string) => {
+        switch (type) {
+          case 'Light Control': return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
+          case 'Door Security': return 'bg-red-500/10 text-red-500 border-red-500/20';
+          case 'Scene Activation': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+          case 'Appliance State': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+          case 'Window Control': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+          case 'Profile Sync': return 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
+          case 'Camera Access': return 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20';
+          case 'System Diagnostic': return 'bg-slate-500/10 text-slate-500 border-slate-500/20';
+          case 'Air Conditioning': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+          default: return 'bg-primary/10 text-primary border-primary/20';
+        }
+      };
 
       return (
         <motion.div
@@ -1364,7 +1770,10 @@ export default function App() {
                     <Calendar
                       mode="single"
                       selected={logStartDate ? new Date(logStartDate) : undefined}
-                      onSelect={(date) => setLogStartDate(date ? date.toISOString() : '')}
+                      onSelect={(date) => {
+                        setLogStartDate(date ? date.toISOString() : '');
+                        setVisibleLogsCount(50); // Reset page count on filter
+                      }}
                       initialFocus
                       className="rounded-2xl"
                     />
@@ -1392,7 +1801,10 @@ export default function App() {
                     <Calendar
                       mode="single"
                       selected={logEndDate ? new Date(logEndDate) : undefined}
-                      onSelect={(date) => setLogEndDate(date ? date.toISOString() : '')}
+                      onSelect={(date) => {
+                        setLogEndDate(date ? date.toISOString() : '');
+                        setVisibleLogsCount(50); // Reset page count on filter
+                      }}
                       initialFocus
                       className="rounded-2xl"
                     />
@@ -1403,36 +1815,171 @@ export default function App() {
                 variant="ghost" 
                 size="icon" 
                 className="mt-5 h-10 w-10 hover:bg-destructive/10 hover:text-destructive rounded-xl transition-colors"
-                onClick={() => { setLogStartDate(''); setLogEndDate(''); }}
+                onClick={() => { setLogStartDate(''); setLogEndDate(''); setVisibleLogsCount(50); }}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
             </div>
           </div>
 
-          <div className="rounded-2xl border bg-card overflow-hidden">
-            <div className="divide-y">
-              {filteredLogs.length > 0 ? filteredLogs.map(log => (
-                <div key={log.id} className="flex items-center gap-4 p-4 hover:bg-accent/50 transition-colors">
-                  <div className="h-10 w-10 rounded-full overflow-hidden flex-shrink-0">
-                    <img src={log.userAvatar} alt={log.userName} className="h-full w-full object-cover" />
+          <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
+            <div className="divide-y text-left">
+              {displayedLogs.length > 0 ? displayedLogs.map(log => {
+                const details = log.getPersonDto?.getPersonDetailsDto;
+                const userFullName = details ? `${details.firstName} ${details.lastName}` : 'System';
+                const avatar = details?.imageUrl || 'https://picsum.photos/seed/system/100/100';
+
+                return (
+                  <div 
+                    key={log.id} 
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 hover:bg-accent/40 active:bg-accent/60 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setSelectedLog(log);
+                      setIsViewLogOpen(true);
+                    }}
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="h-10 w-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border border-primary/10">
+                        <img src={avatar} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                      </div>
+                      <div className="min-w-0 flex-1 text-left">
+                        <p className="text-sm font-medium leading-none text-foreground flex items-center gap-2 flex-wrap text-left">
+                          <span className="font-bold">{userFullName}</span>
+                          <span className="text-muted-foreground truncate max-w-[400px] text-left">{log.logDetails}</span>
+                        </p>
+                        <p className="mt-1.5 text-xs text-muted-foreground flex items-center gap-1">
+                          <Clock className="h-3 w-3 inline text-primary/75" />
+                          {new Date(log.timeOfAction).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0">
+                      <Badge variant="outline" className={cn("text-xs px-2.5 py-0.5 rounded-full border", getActionTypeBadgeColor(log.actionType))}>
+                        {log.actionType}
+                      </Badge>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground hidden sm:block" />
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-none">
-                      <span className="font-bold">{log.userName}</span> {log.action}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </p>
+                );
+              }) : (
+                <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
+                  <ClipboardList className="h-12 w-12 text-muted-foreground/40" />
+                  <div>
+                    <p className="font-semibold text-foreground">No logs found</p>
+                    <p className="text-xs">Adjust your date filters or do some changes to trigger logs.</p>
                   </div>
-                </div>
-              )) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  No logs found for the selected date range.
                 </div>
               )}
             </div>
+
+            {/* Paging / Loading Trigger element */}
+            {visibleLogsCount < filteredLogs.length && (
+              <div 
+                ref={loaderRef} 
+                className="p-6 flex flex-col items-center justify-center gap-2 border-t bg-muted/5"
+              >
+                {isPagingLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-primary font-medium animate-pulse">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    Loading next 50 logs...
+                  </div>
+                ) : (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-muted-foreground hover:text-foreground text-xs font-semibold py-1.5 px-4 rounded-xl border-dashed border hover:border-solid bg-background/50 hover:bg-background transition-all"
+                    onClick={() => {
+                      setIsPagingLoading(true);
+                      setTimeout(() => {
+                        setVisibleLogsCount(prev => prev + 50);
+                        setIsPagingLoading(false);
+                      }, 400);
+                    }}
+                  >
+                    Load More ({filteredLogs.length - visibleLogsCount} remaining)
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Single View Log Details Modal */}
+          <Dialog open={isViewLogOpen} onOpenChange={setIsViewLogOpen}>
+            <DialogContent className="sm:max-w-[480px] rounded-3xl border shadow-2xl p-6 bg-card" showCloseButton={false}>
+              <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+                <X className="h-4 w-4" />
+              </DialogClose>
+              </div>
+              <DialogHeader className="pb-4 border-b text-left pr-12">
+                <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-foreground justify-start">
+                  <ClipboardList className="h-5.5 w-5.5 text-primary" />
+                  View Log Info
+                </DialogTitle>
+                <DialogDescription className="text-xs mt-1 text-left">
+                  Review absolute system trace values and synchronized personnel data.
+                </DialogDescription>
+              </DialogHeader>
+
+              {selectedLog && (
+                <div className="space-y-6 pt-5 text-left">
+                  <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-2xl border border-muted">
+                    <div className="h-12 w-12 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-primary/20">
+                      <img 
+                        src={selectedLog.getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://picsum.photos/seed/system/100/100'} 
+                        alt="User Avatar" 
+                        className="h-full w-full object-cover" 
+                      />
+                    </div>
+                    <div className="text-left">
+                      <h4 className="font-bold text-foreground text-base leading-snug">
+                        {selectedLog.getPersonDto?.getPersonDetailsDto?.firstName} {selectedLog.getPersonDto?.getPersonDetailsDto?.lastName}
+                      </h4>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1 flex-wrap text-left">
+                        <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 py-0 bg-primary/5 text-primary leading-none">
+                          Role: {selectedLog.getPersonDto?.getUserDto?.roleName || 'System/Guest'}
+                        </Badge>
+                        <Badge variant="outline" className={cn("text-[10px] uppercase font-bold px-1.5 py-0 leading-none border-transparent", selectedLog.getPersonDto?.disabled ? "bg-destructive/10 text-destructive" : "bg-emerald-500/15 text-emerald-500")}>
+                          {selectedLog.getPersonDto?.disabled ? 'Disabled' : 'Active'}
+                        </Badge>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1 bg-muted/10 p-3 rounded-xl border">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block text-left">Log Identifier</span>
+                        <span className="font-mono text-xs font-semibold text-primary block text-left">ID: {selectedLog.id}</span>
+                      </div>
+                      <div className="space-y-1 bg-muted/10 p-3 rounded-xl border text-left">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block text-left">Action Class</span>
+                        <Badge variant="outline" className={cn("text-xs font-bold w-fit", getActionTypeBadgeColor(selectedLog.actionType))}>
+                          {selectedLog.actionType}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 bg-muted/10 p-4 rounded-xl border text-left">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block text-left">Timestamp of Event</span>
+                      <div className="text-xs font-medium space-y-1.5 text-left">
+                        <p className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-primary" /> <span className="text-foreground font-semibold">Local:</span> {new Date(selectedLog.timeOfAction).toLocaleString()}</p>
+                        <p className="flex items-center gap-2 text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" /> <span className="font-semibold text-[11px]">UTC:</span> <span className="font-mono text-[11px]">{selectedLog.timeOfAction}</span></p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 bg-muted/30 p-4 rounded-2xl border border-primary/10 text-left">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-primary block text-left">Transaction Details</span>
+                      <p className="text-sm leading-relaxed text-foreground font-medium text-left">
+                        {selectedLog.logDetails}
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </motion.div>
       );
     }
@@ -1597,10 +2144,6 @@ export default function App() {
                             <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
                             <Badge variant="outline" className="mt-1 text-[10px] uppercase tracking-wider">{contact.getContactCategoryDto.name}</Badge>
                           </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEditContact(contact); }}><Edit3 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); setContactToDelete(contact); setIsDeleteContactOpen(true); }}><Trash2 className="h-4 w-4" /></Button>
                         </div>
                       </div>
                     </CardHeader>
@@ -2121,7 +2664,15 @@ export default function App() {
                 >
                   <div className="flex items-center gap-4">
                     <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
-                      <img src={details.imageUrl} alt={`${details.firstName} ${details.lastName}`} className="h-full w-full object-cover" />
+                      <img 
+                        src={details.imageUrl} 
+                        alt={`${details.firstName} ${details.lastName}`} 
+                        className="h-full w-full object-cover" 
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${details.firstName}+${details.lastName}&background=random`;
+                        }}
+                      />
                     </div>
                     <div>
                       <h3 className="font-bold">{details.firstName} {details.lastName}</h3>
@@ -2378,12 +2929,7 @@ export default function App() {
                     onToggle={handleToggle}
                     onStatusChange={handleStatusChange}
                     onValueChange={handleValueChange}
-                    onClick={(d) => {
-                      if (d.type === 'camera') {
-                        setSelectedCamera(d);
-                        setIsCameraModalOpen(true);
-                      }
-                    }}
+                    onClick={handleDeviceClick}
                   />
                 ))}
                 {cameras.length === 0 && (
@@ -2409,6 +2955,16 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                  onClick={() => setActiveView('facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
                 <Sofa className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
               </div>
@@ -2468,57 +3024,77 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                  onClick={() => setActiveView('facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
                 <Zap className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">Actions & Automation</h1>
               </div>
-              <p className="text-muted-foreground">Automate your home with custom triggered Actions.</p>
+              <p className="text-muted-foreground">Manage system-wide triggered events and automation sequences.</p>
             </div>
-            <Button onClick={() => setIsAddSceneOpen(true)}>
+            <Button onClick={() => setIsAddActionOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Add New Action
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {scenes.map(scene => (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {actions.map(action => (
               <Card 
-                key={scene.id} 
-                className="p-6 flex flex-col gap-4 hover:bg-accent/50 hover:border-primary/40 transition-all cursor-pointer group relative"
+                key={action.id} 
+                className="p-6 flex flex-col gap-4 hover:shadow-md transition-all border-l-4 border-l-primary cursor-pointer group relative overflow-hidden"
                 onClick={() => {
-                  triggerScene(scene);
-                  setLogs(prev => [
-                    {
-                      id: Math.random().toString(),
-                      timestamp: new Date().toISOString(),
-                      action: `Triggered Action: ${scene.name}`,
-                      userName: userProfile.getPersonDetailsDto.firstName,
-                      userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                    },
-                    ...prev
-                  ]);
+                  setSelectedAction(action);
+                  setIsViewActionOpen(true);
                 }}
               >
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestAuth(() => setScenes(prev => prev.filter(s => s.id !== scene.id)));
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="flex items-center justify-between">
-                  <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                    {scene.icon === 'Film' ? <Film className="h-6 w-6" /> : scene.icon === 'Sun' ? <Sun className="h-6 w-6" /> : <HomeIcon className="h-6 w-6" />}
+                <div className="flex items-start justify-between relative z-10">
+                  <div className="p-3 bg-primary/10 text-primary rounded-xl group-hover:bg-primary group-hover:text-white transition-colors">
+                    <Zap className="h-6 w-6" />
                   </div>
-                  <Button size="icon" variant="ghost" className="rounded-full">
-                    <Play className="h-5 w-5 fill-current" />
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className={cn(
+                        "h-8 w-8 transition-colors",
+                        action.actionActive ? "text-green-500 hover:bg-green-50" : "text-slate-400 hover:bg-slate-50"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: !a.actionActive } : a));
+                      }}
+                    >
+                      {action.actionActive ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
+                    </Button>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold">{scene.name}</h3>
-                  <p className="text-sm text-muted-foreground">{scene.actions.length} Commands</p>
+
+                <div className="space-y-1 relative z-10">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-bold tracking-tight">{action.actionName}</h3>
+                    <Badge variant={action.actionActive ? "default" : "secondary"} className="text-[10px] h-4">
+                      {action.actionActive ? "Active" : "Disabled"}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground line-clamp-2">{action.actionDescription}</p>
+                </div>
+
+                <div className="mt-2 pt-4 border-t flex items-center justify-between text-xs text-muted-foreground relative z-10">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="h-3 w-3" />
+                    <span>{action.getActionStepDtos.length} Steps</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3 w-3" />
+                    <span>Mod: {action.lastModifiedOn ? format(new Date(action.lastModifiedOn), 'MMM d') : 'N/A'}</span>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -2538,9 +3114,16 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
-                <Button variant="ghost" size="icon" onClick={() => setActiveView('facilities')}>
-                  <ChevronRight className="h-5 w-5 rotate-180" />
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                  onClick={() => setActiveView('facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-5 w-5" />
                 </Button>
+                <div className="h-4 w-px bg-border mx-1" />
                 <Cpu className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">Hardware Systems</h1>
               </div>
@@ -2596,6 +3179,34 @@ export default function App() {
     }
 
     if (activeView === 'facility-externals') {
+      const getFilteredExternals = () => {
+        let result = [...externals];
+
+        // Search by name
+        if (facilitySearchQuery) {
+          result = result.filter(ext => 
+            ext.externalsName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+          );
+        }
+
+        // Sort by room or section
+        result.sort((a, b) => {
+          if (facilitySortBy === 'room') {
+            const roomA = rooms.find(r => r.id === a.room)?.name || 'No Room';
+            const roomB = rooms.find(r => r.id === b.room)?.name || 'No Room';
+            return roomA.localeCompare(roomB);
+          } else {
+            const sectionA = sections.find(s => s.id === a.section)?.name || 'No Section';
+            const sectionB = sections.find(s => s.id === b.section)?.name || 'No Section';
+            return sectionA.localeCompare(sectionB);
+          }
+        });
+
+        return result;
+      };
+
+      const filteredExternals = getFilteredExternals();
+
       return (
         <motion.div
           key="facility-externals"
@@ -2603,12 +3214,19 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
-                <Button variant="ghost" size="icon" onClick={() => setActiveView('facilities')}>
-                  <ChevronRight className="h-5 w-5 rotate-180" />
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                  onClick={() => setActiveView('facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-5 w-5" />
                 </Button>
+                <div className="h-4 w-px bg-border mx-1" />
                 <Radio className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">External Systems & Peripherals</h1>
               </div>
@@ -2622,18 +3240,84 @@ export default function App() {
             </Button>
           </div>
 
+          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
+              <Input
+                type="text"
+                placeholder="Search externals by name..."
+                className="pl-10 h-10"
+                value={facilitySearchQuery}
+                onChange={(e) => setFacilitySearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <span className="text-xs text-muted-foreground font-medium">Sort:</span>
+              <div className="flex items-center rounded-lg border bg-card p-1">
+                <button
+                  className={cn(
+                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                    facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                  )}
+                  onClick={() => setFacilitySortBy('room')}
+                >
+                  By Room
+                </button>
+                <button
+                  className={cn(
+                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                    facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                  )}
+                  onClick={() => setFacilitySortBy('section')}
+                >
+                  By Section
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {externals.map(ext => (
+            {filteredExternals.map(ext => (
               <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
-                    <h3 className="font-bold text-lg">{ext.externalsName}</h3>
-                    <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalsId}</p>
+                    <h3 className="font-bold text-lg">{ext.externalName}</h3>
+                    <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
                   </div>
-                  <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'}>
-                    {ext.isTriggered ? 'TRIGGERED' : 'NORMAL'}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-3">
+                    <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
+                      {ext.isTriggered ? 'TRIGGERED' : 'STANDBY'}
+                    </Badge>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <Switch 
+                        checked={ext.isActive} 
+                        onCheckedChange={(checked) => {
+                          setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
+                          addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                {(ext.section || ext.room) && (
+                  <div className="flex gap-2 text-xs border-t pt-2">
+                    {ext.section && (
+                      <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
+                        <Layers className="h-3 w-3" />
+                        {sections.find(s => s.id === ext.section)?.name || ext.section}
+                      </Badge>
+                    )}
+                    {ext.room && (
+                      <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
+                        <Sofa className="h-3 w-3" />
+                        {rooms.find(r => r.id === ext.room)?.name || ext.room}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+
                 <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-xs">
                   <span className="text-muted-foreground font-medium">Mapped Automate Triggers:</span>
                   <div className="flex gap-1.5 flex-wrap mt-1">
@@ -2648,51 +3332,6 @@ export default function App() {
                       <span className="text-muted-foreground italic">No triggers registered</span>
                     )}
                   </div>
-                </div>
-                
-              </Card>
-            ))}
-          </div>
-        </motion.div>
-      );
-    }
-
-    if (activeView === 'facility-recordings') {
-      return (
-        <motion.div
-          key="facility-recordings"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-8"
-        >
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <Video className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">Security Film & Recordings</h1>
-            </div>
-            <p className="text-muted-foreground">Historical backup recordings from security surveillance captures.</p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {recordings.map(rec => (
-              <Card key={rec.id} className="overflow-hidden border hover:shadow-md transition-all">
-                <div className="aspect-video w-full bg-slate-800 relative group overflow-hidden">
-                  <img src={rec.thumbnailUrl} alt={rec.cameraName} className="object-cover w-full h-full opacity-80 group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" />
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="secondary" size="icon" className="rounded-full">
-                      <Play className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <span className="absolute bottom-2 right-2 bg-black/80 font-mono text-[10px] text-white px-1.5 py-0.5 rounded">
-                    {rec.duration}
-                  </span>
-                </div>
-                <div className="p-4 space-y-2">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-sm">{rec.cameraName}</h3>
-                    <Badge variant="outline" className="font-mono text-[10px]">{rec.size}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{new Date(rec.timestamp).toLocaleString()}</p>
                 </div>
               </Card>
             ))}
@@ -2712,6 +3351,16 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                  onClick={() => setActiveView('facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
                 <Layers className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
               </div>
@@ -2744,22 +3393,11 @@ export default function App() {
                         size="icon" 
                         className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
                         onClick={() => {
-                          setEditingSection(section);
-                          setIsEditSectionOpen(true);
+                          setViewingSection(section);
+                          setIsViewSectionOpen(true);
                         }}
                       >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          requestAuth(() => setSections(prev => prev.filter(s => s.id !== section.id)));
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
+                        <Info className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -2797,12 +3435,7 @@ export default function App() {
                             onToggle={handleToggle}
                             onValueChange={handleValueChange}
                             onStatusChange={handleStatusChange}
-                            onClick={(d) => {
-                              if (d.type === 'camera') {
-                                setSelectedCamera(d);
-                                setIsCameraModalOpen(true);
-                              }
-                            }}
+                            onClick={handleDeviceClick}
                           />
                         ))}
                         {sectionDevices.filter(d => !d.room).length === 0 && (
@@ -2923,11 +3556,18 @@ export default function App() {
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facilities')}>
-                <ChevronRight className="h-5 w-5 rotate-180" />
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facility-overview')}
+                title="Back to Overview"
+              >
+                <ChevronLeft className="h-5 w-5" />
               </Button>
-              <HeaderIcon className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">{headerTitle}</h1>
+              <div className="h-4 w-px bg-border mx-1" />
+              <TitleIcon className="h-8 w-8 text-primary" />
+              <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
             </div>
             <p className="text-muted-foreground">Manage all {title?.toLowerCase()} in your home.</p>
           </div>
@@ -2938,13 +3578,12 @@ export default function App() {
             </Badge>
             {isRoom && (
               <>
-                <Button variant="outline" size="sm" onClick={() => handleEditRoom(room!)}>
-                  <Edit3 className="mr-2 h-4 w-4" />
-                  Edit Room
-                </Button>
-                <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => handleDeleteRoom(room!.id)}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Room
+                <Button variant="outline" size="sm" onClick={() => {
+                  setViewingRoom(room!);
+                  setIsViewRoomOpen(true);
+                }}>
+                  <Info className="mr-2 h-4 w-4" />
+                  View Room Details
                 </Button>
               </>
             )}
@@ -3048,12 +3687,7 @@ export default function App() {
                 onStatusChange={handleStatusChange}
                 onDelete={handleDeleteDevice}
                 onEdit={handleEditDevice}
-                onClick={(d) => {
-                  if (d.type === 'camera') {
-                    setSelectedCamera(d);
-                    setIsCameraModalOpen(true);
-                  }
-                }}
+                onClick={handleDeviceClick}
               />
             ))}
           </div>
@@ -3183,6 +3817,77 @@ export default function App() {
                 onChange={(e) => setNewDevice(prev => ({ ...prev, name: e.target.value }))}
               />
             </div>
+
+            {activeView === 'facility-cameras' && (
+              <div className="space-y-4 pt-2 border-t mt-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Globe className="h-3 w-3" />
+                    IP Address
+                  </Label>
+                  <Input 
+                    id="ipAddress" 
+                    placeholder="e.g. 192.168.1.100"
+                    value={newDevice.ipAddress}
+                    onChange={(e) => setNewDevice(prev => ({ ...prev, ipAddress: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <UserCircle className="h-3 w-3" />
+                      Username
+                    </Label>
+                    <Input 
+                      id="username" 
+                      placeholder="admin"
+                      value={newDevice.username}
+                      onChange={(e) => setNewDevice(prev => ({ ...prev, username: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Shield className="h-3 w-3" />
+                      Password
+                    </Label>
+                    <Input 
+                      id="password" 
+                      type="password"
+                      placeholder="••••••••"
+                      value={newDevice.password}
+                      onChange={(e) => setNewDevice(prev => ({ ...prev, password: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Video className="h-3 w-3" />
+                      Stream Path
+                    </Label>
+                    <Input 
+                      id="streamPath" 
+                      placeholder="/live"
+                      value={newDevice.streamPath}
+                      onChange={(e) => setNewDevice(prev => ({ ...prev, streamPath: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Settings2 className="h-3 w-3" />
+                      Port
+                    </Label>
+                    <Input 
+                      id="port" 
+                      type="number"
+                      placeholder="80"
+                      value={newDevice.port}
+                      onChange={(e) => setNewDevice(prev => ({ ...prev, port: parseInt(e.target.value) || 0 }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {activeView === 'facility-doors' && (
               <div className="grid gap-2">
@@ -3343,6 +4048,17 @@ export default function App() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
+              <div className="space-y-0.5">
+                <Label htmlFor="room-hidden" className="text-sm font-medium">Hidden Room</Label>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+              </div>
+              <Switch 
+                id="room-hidden" 
+                checked={newRoom.isHidden || false} 
+                onCheckedChange={(checked) => setNewRoom(prev => ({ ...prev, isHidden: checked }))} 
+              />
+            </div>
           </div>
           <DialogFooter>
             
@@ -3358,7 +4074,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
-              Edit Home Section
+              Edit {editingSection?.name || 'Section'}
             </DialogTitle>
             <DialogDescription>Update the details and visibility of this section.</DialogDescription>
           </DialogHeader>
@@ -3392,13 +4108,24 @@ export default function App() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
+              <div className="space-y-0.5">
+                <Label htmlFor="edit-sec-hidden" className="text-sm font-medium">Hidden Section</Label>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+              </div>
+              <Switch 
+                id="edit-sec-hidden" 
+                checked={editingSection?.isHidden || false} 
+                onCheckedChange={(checked) => setEditingSection(prev => prev ? { ...prev, isHidden: checked } : null)} 
+              />
+            </div>
           </div>
           <DialogFooter>
             
             <Button onClick={() => {
               if (editingSection?.id && editingSection.name) {
                 requestAuth(() => {
-                  setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type } : s));
+                  setSections(prev => prev.map(s => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden } : s));
                   setIsEditSectionOpen(false);
                 });
               }
@@ -3690,7 +4417,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-primary" />
-              Update User Role
+              Update {updateUserRoleData.userName || 'User'} Role
             </DialogTitle>
             <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
           </DialogHeader>
@@ -3702,11 +4429,11 @@ export default function App() {
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Owner</SelectItem>
-                  <SelectItem value="2">Wife</SelectItem>
-                  <SelectItem value="3">Child</SelectItem>
-                  <SelectItem value="4">Relative</SelectItem>
-                  <SelectItem value="5">Visitor</SelectItem>
+                  <SelectItem value={Role.Owner.toString()}>Owner</SelectItem>
+                  <SelectItem value={Role.Wife.toString()}>Wife</SelectItem>
+                  <SelectItem value={Role.Child.toString()}>Child</SelectItem>
+                  <SelectItem value={Role.Relative.toString()}>Relative</SelectItem>
+                  <SelectItem value={Role.Visitor.toString()}>Visitor</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -3714,9 +4441,19 @@ export default function App() {
           <DialogFooter>
             
             <Button onClick={() => {
-              setPendingUserAction({ type: 'update-role', userId: updateUserRoleData.id, targetRole: updateUserRoleData.role });
-              setIsEditPersonRoleOpen(false);
-              setIsAuthCodeModalOpen(true);
+              requestAuth(() => {
+                const targetRole = updateUserRoleData.role;
+                setAllUsers(prev => prev.map(u => u.getUserDto.id === updateUserRoleData.id ? {
+                  ...u,
+                  getUserDto: {
+                    ...u.getUserDto,
+                    role: targetRole,
+                    roleName: Role[targetRole]
+                  }
+                } : u));
+                setIsEditPersonRoleOpen(false);
+                setIsViewPersonDetailsOpen(false);
+              });
             }} className="bg-transparent border-2 border-primary text-black hover:bg-primary/5 flex items-center gap-2">
               <RefreshCw className="h-4 w-4" />
               Update Access
@@ -3727,13 +4464,13 @@ export default function App() {
 
       {/* View Person Details Dialog */}
       <Dialog open={isViewPersonDetailsOpen} onOpenChange={setIsViewPersonDetailsOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px]" showCloseButton={false}>
           <DialogHeader>
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <DialogTitle className="flex items-center gap-2">
                   <UserCircle className="h-5 w-5 text-primary" />
-                  User Profile: {viewingPerson?.getPersonDetailsDto.firstName} {viewingPerson?.getPersonDetailsDto.lastName}
+                  View User Profile: {viewingPerson?.getPersonDetailsDto.firstName} {viewingPerson?.getPersonDetailsDto.lastName}
                 </DialogTitle>
                 <DialogDescription className="mt-0">Detailed view of user properties and system settings.</DialogDescription>
               </div>
@@ -3765,8 +4502,14 @@ export default function App() {
                   )}
                   onClick={() => {
                     if (viewingPerson) {
-                      setPendingUserAction({ type: 'toggle-disable', userId: viewingPerson.id });
-                      setIsAuthCodeModalOpen(true);
+                      requestAuth(() => {
+                        setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
+                          ...u, 
+                          disabled: !u.disabled, 
+                          getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
+                        } : u));
+                        setIsViewPersonDetailsOpen(false);
+                      });
                     }
                   }}
                 >
@@ -3778,13 +4521,19 @@ export default function App() {
                    className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
                   onClick={() => {
                     if (viewingPerson) {
-                      setPendingUserAction({ type: 'delete', userId: viewingPerson.id });
-                      setIsAuthCodeModalOpen(true);
+                      requestAuth(() => {
+                        setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
+                        setIsViewPersonDetailsOpen(false);
+                      });
                     }
                   }}
                 >
                   <Trash2 className="h-4 w-4 text-red-600" />
                 </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+                <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+                  <X className="h-4 w-4" />
+                </DialogClose>
               </div>
             </div>
           </DialogHeader>
@@ -3793,24 +4542,37 @@ export default function App() {
               {viewingPerson && (
                 <>
                   {/* Identity Section */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Core Identity</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground uppercase">Username</Label>
-                        <p className="font-medium font-mono">{viewingPerson.getUserDto.userName}</p>
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground uppercase">System Role</Label>
-                        <Badge variant="outline" className="mt-1">{viewingPerson.getUserDto.roleName}</Badge>
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground uppercase">Internal ID</Label>
-                        <p className="font-medium font-mono text-muted-foreground text-xs">{viewingPerson.personId}</p>
-                      </div>
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground uppercase">Gender</Label>
-                        <p className="font-medium">{Gender[viewingPerson.getPersonDetailsDto.gender]}</p>
+                  <div className="flex items-start gap-6 border-b pb-4">
+                    <div className="h-24 w-24 rounded-2xl bg-muted flex items-center justify-center overflow-hidden shrink-0 border-2 border-primary/10 shadow-inner">
+                      <img 
+                        src={viewingPerson.getPersonDetailsDto.imageUrl || `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`} 
+                        alt="Profile" 
+                        referrerPolicy="no-referrer"
+                        className="h-full w-full object-cover" 
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`;
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-3 flex-1">
+                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Core Identity</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">Username</Label>
+                          <p className="font-medium font-mono">{viewingPerson.getUserDto.userName}</p>
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">System Role</Label>
+                          <Badge variant="outline" className="mt-1">{viewingPerson.getUserDto.roleName}</Badge>
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">Internal ID</Label>
+                          <p className="font-medium font-mono text-muted-foreground text-xs">{viewingPerson.personId}</p>
+                        </div>
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase">Gender</Label>
+                          <p className="font-medium">{Gender[viewingPerson.getPersonDetailsDto.gender]}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3975,7 +4737,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
-              {editingContactId ? 'Edit Contact' : 'Add New Contact'}
+              {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
             </DialogTitle>
             <DialogDescription>Fill in the contact details and addresses.</DialogDescription>
           </DialogHeader>
@@ -4307,6 +5069,17 @@ export default function App() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
+              <div className="space-y-0.5">
+                <Label htmlFor="sec-hidden" className="text-sm font-medium">Hidden Section</Label>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+              </div>
+              <Switch 
+                id="sec-hidden" 
+                checked={newSectionIsHidden} 
+                onCheckedChange={setNewSectionIsHidden} 
+              />
+            </div>
           </div>
           <DialogFooter>
             
@@ -4319,36 +5092,92 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className={`sm:max-w-[400px] border-2 transition-colors ${authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50"}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5 text-primary" />
-              Authorization Required
-            </DialogTitle>
-            <DialogDescription>
-              Please enter your 6-digit numerical authorization code to proceed with the operation.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center gap-6 py-8">
-            <div className="flex gap-2">
-              <Input 
-                type="password"
-                maxLength={6}
-                className="text-center text-2xl tracking-[1em] font-mono h-14 w-48"
-                placeholder="••••••"
-                value={authCode}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '');
-                  if (val.length <= 6) { setAuthCode(val); setAuthError(false); }
-                }}
-              />
+        <DialogContent className={`sm:max-w-[520px] border-2 transition-colors duration-300 ${authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50"}`}>
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
+            {/* Left Column (Current Contents) */}
+            <div className="sm:col-span-7 space-y-4">
+              <div className="space-y-2">
+                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                  <Key className="h-5 w-5 text-primary animate-pulse" />
+                  Authorization Required
+                </DialogTitle>
+                <DialogDescription>
+                  Please enter your 6-digit numerical authorization code to proceed with the operation.
+                </DialogDescription>
+              </div>
+              
+              <div className="flex flex-col gap-3">
+                <Input 
+                  type="password"
+                  maxLength={6}
+                  className="text-center text-2xl tracking-[0.5em] font-mono h-14 w-full"
+                  placeholder="••••••"
+                  value={authCode}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    if (val.length <= 6) { setAuthCode(val); setAuthError(false); }
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">This is a sensitive operation.</p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">This is a sensitive operation.</p>
+
+            {/* Right Column (Keypad) */}
+            <div className="sm:col-span-5 flex flex-col items-center justify-center p-3 border-t sm:border-t-0 sm:border-l border-muted bg-muted/20 rounded-xl">
+              <div className="grid grid-cols-3 gap-2 w-full max-w-[180px]">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <Button
+                    key={num}
+                    variant="outline"
+                    className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground focus:ring-2 focus:ring-primary transition-all p-0 flex items-center justify-center"
+                    onClick={() => {
+                      if (authCode.length < 6) {
+                        setAuthCode(prev => prev + num);
+                        setAuthError(false);
+                      }
+                    }}
+                  >
+                    {num}
+                  </Button>
+                ))}
+                {/* Clear */}
+                <Button
+                  variant="outline"
+                  className="h-11 w-11 text-[11px] font-semibold rounded-full text-red-500 hover:bg-red-50 p-0 flex items-center justify-center"
+                  onClick={() => {
+                    setAuthCode('');
+                    setAuthError(false);
+                  }}
+                >
+                  Clear
+                </Button>
+                {/* 0 */}
+                <Button
+                  variant="outline"
+                  className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground transition-all p-0 flex items-center justify-center"
+                  onClick={() => {
+                    if (authCode.length < 6) {
+                      setAuthCode(prev => prev + '0');
+                      setAuthError(false);
+                    }
+                  }}
+                >
+                  0
+                </Button>
+                {/* Delete/Backspace */}
+                <Button
+                  variant="outline"
+                  className="h-11 w-11 text-sm font-semibold rounded-full hover:bg-muted p-0 flex items-center justify-center"
+                  onClick={() => {
+                    setAuthCode(prev => prev.slice(0, -1));
+                    setAuthError(false);
+                  }}
+                >
+                  ⌫
+                </Button>
+              </div>
+            </div>
           </div>
-          <DialogFooter>
-            
-            
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -4361,21 +5190,12 @@ export default function App() {
                 const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
                 return <Icon className="h-5 w-5 text-primary" />;
               })()}
-              Edit {editingDevice && (() => {
-                if (editingDevice.type === 'window') return 'Light';
-                const map: Record<string, string> = {
-                  'appliance': 'Appliance',
-                  'light': 'Light',
-                  'camera': 'Camera',
-                  'door': 'Door'
-                };
-                return map[editingDevice.type] || 'Device';
-              })()}
+              Edit {editingDevice?.name || 'Device'}
             </DialogTitle>
             <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
           </DialogHeader>
           {editingDevice && (
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-name" className="flex items-center gap-2">
                   {(() => {
@@ -4399,6 +5219,77 @@ export default function App() {
                   onChange={(e) => setEditingDevice({ ...editingDevice, name: e.target.value })}
                 />
               </div>
+
+              {editingDevice.type === 'camera' && (
+                <div className="space-y-4 pt-2 border-t mt-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Globe className="h-3 w-3" />
+                      IP Address
+                    </Label>
+                    <Input 
+                      id="edit-ipAddress" 
+                      placeholder="e.g. 192.168.1.100"
+                      value={editingDevice.ipAddress || ''}
+                      onChange={(e) => setEditingDevice({ ...editingDevice, ipAddress: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                        <UserCircle className="h-3 w-3" />
+                        Username
+                      </Label>
+                      <Input 
+                        id="edit-username" 
+                        placeholder="admin"
+                        value={editingDevice.username || ''}
+                        onChange={(e) => setEditingDevice({ ...editingDevice, username: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                        <Shield className="h-3 w-3" />
+                        Password
+                      </Label>
+                      <Input 
+                        id="edit-password" 
+                        type="password"
+                        placeholder="••••••••"
+                        value={editingDevice.password || ''}
+                        onChange={(e) => setEditingDevice({ ...editingDevice, password: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                        <Video className="h-3 w-3" />
+                        Stream Path
+                      </Label>
+                      <Input 
+                        id="edit-streamPath" 
+                        placeholder="/live"
+                        value={editingDevice.streamPath || ''}
+                        onChange={(e) => setEditingDevice({ ...editingDevice, streamPath: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                        <Settings2 className="h-3 w-3" />
+                        Port
+                      </Label>
+                      <Input 
+                        id="edit-port" 
+                        type="number"
+                        placeholder="80"
+                        value={editingDevice.port || 80}
+                        onChange={(e) => setEditingDevice({ ...editingDevice, port: parseInt(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {editingDevice.type === 'door' && (
                 <div className="grid gap-2">
@@ -4482,13 +5373,114 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* View Room Dialog */}
+      <Dialog open={isViewRoomOpen} onOpenChange={setIsViewRoomOpen}>
+        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (viewingRoom) {
+                  handleEditRoom(viewingRoom);
+                  setIsViewRoomOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (viewingRoom) {
+                  handleDeleteRoom(viewingRoom.id);
+                  setIsViewRoomOpen(false);
+                  setActiveView('facility-rooms');
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <Sofa className="h-5 w-5 text-primary" />
+              View {viewingRoom?.name || 'Room'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and configuration for {viewingRoom?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingRoom && (() => {
+            const currentRoomDto = INITIAL_ROOMS.find(r => r.roomId === viewingRoom.id) as any;
+            return (
+              <div className="py-4 space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                    <div className="font-medium text-lg">{viewingRoom.name}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <div className="font-medium">{sections.find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
+                  </div>
+                  {currentRoomDto && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <div className="font-medium">{currentRoomDto.createdByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <div className="font-medium">{currentRoomDto.createdOn ? format(new Date(currentRoomDto.createdOn), 'PPp') : 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <div className="font-medium">{currentRoomDto.peronName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
+                        <div className="font-medium">
+                          {currentRoomDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                        <div className="font-medium">
+                          {currentRoomDto.isDeleted ? <Badge variant="destructive">Deleted</Badge> : <Badge variant="secondary">No</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <div className="font-medium">{currentRoomDto.lastModifiedByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
+                        <div className="font-medium">{currentRoomDto.lastModifiedOn ? format(new Date(currentRoomDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Room Dialog */}
       <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
-              Edit Room
+              Edit {editingRoom?.name || 'Room'}
             </DialogTitle>
             <DialogDescription>Update the details of this room.</DialogDescription>
           </DialogHeader>
@@ -4546,6 +5538,17 @@ export default function App() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
+                <div className="space-y-0.5">
+                  <Label htmlFor="edit-room-hidden" className="text-sm font-medium">Hidden Room</Label>
+                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+                </div>
+                <Switch 
+                  id="edit-room-hidden" 
+                  checked={editingRoom.isHidden || false} 
+                  onCheckedChange={(checked) => setEditingRoom({ ...editingRoom, isHidden: checked })} 
+                />
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -4559,11 +5562,42 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isViewContactOpen} onOpenChange={setIsViewContactOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                setIsViewContactOpen(false);
+                handleEditContact(viewingContact!);
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (viewingContact) {
+                  setContactToDelete(viewingContact);
+                  setIsDeleteContactOpen(true);
+                  setIsViewContactOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
-              Contact Details
+              View {viewingContact?.firstName || 'Contact'}
             </DialogTitle>
           </DialogHeader>
           {viewingContact && (
@@ -4618,13 +5652,6 @@ export default function App() {
               </div>
             </div>
           )}
-          <DialogFooter className="pt-4 border-t">
-            
-            <Button className="rounded-xl shadow-lg shadow-primary/20" onClick={() => {
-              setIsViewContactOpen(false);
-              handleEditContact(viewingContact!);
-            }}>Edit Contact</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
       
@@ -4637,11 +5664,54 @@ export default function App() {
 
       {/* Hardware Detail Modal */}
       <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
-        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedHardware) {
+                    setHardwareForm({
+                      ...selectedHardware,
+                      applianceIdNames: selectedHardware.applianceIdNames || [],
+                      cameraIdNames: selectedHardware.cameraIdNames || [],
+                      lightIdNames: selectedHardware.lightIdNames || [],
+                      windowIdNames: selectedHardware.windowIdNames || [],
+                      doorIdNames: selectedHardware.doorIdNames || [],
+                      externalIdNames: selectedHardware.externalIdNames || [],
+                    });
+                    setIsHardwareDetailOpen(false);
+                    setIsEditHardwareOpen(true);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (selectedHardware) {
+                  requestAuth(() => {
+                    setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
+                    setIsHardwareDetailOpen(false);
+                  });
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
-              Hardware Controller Details
+              View {selectedHardware?.hardwareName || 'Hardware'}
             </DialogTitle>
             <DialogDescription>
               Detailed telemetry and component assignment for the selected system node.
@@ -4769,38 +5839,6 @@ export default function App() {
               </div>
             </div>
           )}
-
-          <DialogFooter className="gap-2 sm:gap-0 mt-4">
-            
-            <Button variant="destructive" size="icon" onClick={() => {
-              if (selectedHardware) {
-                requestAuth(() => {
-                  setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
-                  setIsHardwareDetailOpen(false);
-                });
-              }
-            }}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <Button onClick={() => {
-              if (selectedHardware) {
-                  setHardwareForm({
-                    ...selectedHardware,
-                    applianceIdNames: selectedHardware.applianceIdNames || [],
-                    cameraIdNames: selectedHardware.cameraIdNames || [],
-                    lightIdNames: selectedHardware.lightIdNames || [],
-                    windowIdNames: selectedHardware.windowIdNames || [],
-                    doorIdNames: selectedHardware.doorIdNames || [],
-                    externalIdNames: selectedHardware.externalIdNames || [],
-                  });
-                  setIsHardwareDetailOpen(false);
-                  setIsEditHardwareOpen(true);
-              }
-            }}>
-              <Edit3 className="w-4 h-4 mr-2" />
-              Edit Hardware
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -4850,16 +5888,7 @@ export default function App() {
               };
               setHardwares(prev => [...prev, newHw]);
               setIsAddHardwareOpen(false);
-              setLogs(prev => [
-                {
-                  id: Math.random().toString(),
-                  timestamp: new Date().toISOString(),
-                  action: `Created system Controller Node: ${newHw.hardwareName}`,
-                  userName: userProfile.getPersonDetailsDto.firstName,
-                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                },
-                ...prev
-              ]);
+              addLogEntry('System Diagnostic', `Created system Controller Node: ${newHw.hardwareName}`);
             }}><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
           </DialogFooter>
         </DialogContent>
@@ -4871,7 +5900,7 @@ export default function App() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-6 w-6 text-primary" />
-              Edit Hardware
+              Edit {hardwareForm?.hardwareName || 'Hardware'}
             </DialogTitle>
             <DialogDescription>
               Assign physical and virtual peripherals to this system hub.
@@ -5066,11 +6095,11 @@ export default function App() {
                           if (isSelected) {
                             setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id.toString() !== ext.id.toString()) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalsName }] }));
+                            setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalName }] }));
                           }
                         }}
                       >
-                        {ext.externalsName} {isSelected && '✓'}
+                        {ext.externalName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -5113,16 +6142,7 @@ export default function App() {
                 } : item));
 
                 setIsEditHardwareOpen(false);
-                setLogs(prev => [
-                  {
-                    id: Math.random().toString(),
-                    timestamp: new Date().toISOString(),
-                    action: `Updated hardware infrastructure map for: ${updateDto.hardwareName}`,
-                    userName: userProfile.getPersonDetailsDto.firstName,
-                    userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                  },
-                  ...prev
-                ]);
+                addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
               });
             }}>
               <CheckCheck className="mr-2 h-4 w-4" />
@@ -5152,9 +6172,48 @@ export default function App() {
               <Input 
                 id="ext-name" 
                 placeholder="e.g. Laser Gate Switch" 
-                value={externalForm.externalsName || ''}
-                onChange={(e) => setExternalForm(prev => ({ ...prev, externalsName: e.target.value }))}
+                value={externalForm.externalName || ''}
+                onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
+                className="rounded-xl"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="ext-section">Section</Label>
+                <Select 
+                  value={externalForm.sectionId?.toString() || 'none'} 
+                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, sectionId: val === 'none' ? undefined : parseInt(val) }))}
+                >
+                  <SelectTrigger id="ext-section">
+                    <SelectValue placeholder="Select section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Section</SelectItem>
+                    {sections.map(section => (
+                      <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="ext-room">Room</Label>
+                <Select 
+                  value={externalForm.roomId?.toString() || 'none'} 
+                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, roomId: val === 'none' ? undefined : parseInt(val) }))}
+                >
+                  <SelectTrigger id="ext-room">
+                    <SelectValue placeholder="Select room" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Room</SelectItem>
+                    {rooms.map(room => (
+                      <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -5186,29 +6245,38 @@ export default function App() {
           </div>
 
           <DialogFooter>
-            
-            <Button onClick={() => {
-              if (!externalForm.externalsName) return;
-              const newExt: GetExternalDto = {
-                id: Math.floor(Math.random() * 9000) + 1000,
-                externalsName: externalForm.externalsName,
-                externalsId: `EXT-DEV-${Math.floor(Math.random() * 80) + 10}`,
-                isTriggered: false,
-                actionIds: externalForm.actionIds || []
-              };
-              setExternals(prev => [...prev, newExt]);
-              setIsAddExternalOpen(false);
-              setLogs(prev => [
-                {
-                  id: Math.random().toString(),
-                  timestamp: new Date().toISOString(),
-                  action: `Added Boundary Device: ${newExt.externalsName}`,
-                  userName: userProfile.getPersonDetailsDto.firstName,
-                  userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                },
-                ...prev
-              ]);
-            }}><PlusCircle className="mr-2 h-4 w-4" /> Add External</Button>
+            <Button 
+              className="w-full rounded-2xl font-bold py-6 text-base"
+              onClick={() => {
+                if (!externalForm.externalName) return;
+                const newExt: GetExternalDto = {
+                  id: Math.floor(Math.random() * 9000) + 1000,
+                  externalName: externalForm.externalName,
+                  externalId: `EXT-DEV-${Math.floor(Math.random() * 80) + 10}`,
+                  isTriggered: false,
+                  isActive: true,
+                  actionIds: externalForm.actionIds || [],
+                  roomId: externalForm.roomId,
+                  sectionId: externalForm.sectionId,
+                  createdBy: 1,
+                  createdByName: userProfile.getPersonDetailsDto.firstName,
+                  createdOn: new Date().toISOString(),
+                  lastModifiedBy: 1,
+                  lastModifiedByName: userProfile.getPersonDetailsDto.firstName,
+                  lastModifiedOn: new Date().toISOString(),
+                  isDeleted: false,
+                  personId: 1,
+                  peronName: userProfile.getPersonDetailsDto.firstName,
+                  deletedBy: 0
+                };
+                setExternals(prev => [...prev, newExt]);
+                setIsAddExternalOpen(false);
+                addLogEntry('Window Control', `Added Boundary Device: ${newExt.externalName}`);
+                setExternalForm({});
+              }}
+            >
+              <PlusCircle className="mr-2 h-5 w-5" /> Add External Device
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -5217,104 +6285,173 @@ export default function App() {
       
       {/* View External Modal */}
       <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedExternal) {
+                  setExternalForm(selectedExternal);
+                  setIsViewExternalOpen(false);
+                  setIsEditExternalOpen(true);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => requestAuth(() => {
+                setExternals(prev => prev.filter(e => e.id !== selectedExternal?.id));
+                setIsViewExternalOpen(false);
+                addLogEntry('Hardware Security', `Removed external device: ${selectedExternal?.externalName}`);
+              })}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
             <DialogTitle className="flex items-center gap-2">
-              <Radio className="h-6 w-6 text-primary" />
-              View External
+              <Radio className="h-5 w-5 text-primary" />
+              View {selectedExternal?.externalName || 'External'}
             </DialogTitle>
+            <DialogDescription>
+              Detailed view and security controls for {selectedExternal?.externalName}.
+            </DialogDescription>
           </DialogHeader>
           {selectedExternal && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                 <div className="space-y-1">
-                   <h3 className="font-semibold">{selectedExternal.externalsName}</h3>
-                   <div className="text-xs text-muted-foreground">ID: {selectedExternal.externalsId}</div>
-                 </div>
-                 <Badge variant={selectedExternal.isTriggered ? 'destructive' : 'secondary'}>
-                    {selectedExternal.isTriggered ? 'TRIGGERED' : 'NORMAL'}
-                 </Badge>
-              </div>
-              <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-sm">
-                 <span className="text-muted-foreground font-medium">Mapped Automate Triggers:</span>
-                 <div className="flex gap-1.5 flex-wrap mt-1">
-                   {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
-                     selectedExternal.actionIds.map(aid => {
-                       const sceneName = scenes.find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
-                       return (
-                         <Badge key={aid} variant="outline" className="font-mono text-[10px]">{sceneName}</Badge>
-                       );
-                     })
-                   ) : (
-                     <span className="text-muted-foreground italic">No triggers registered</span>
-                   )}
-                 </div>
+            <div className="py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Triggered Status</span>
+                  <div className="flex items-center gap-2 font-medium">
+                    {selectedExternal.isTriggered ? (
+                      <Badge variant="destructive" className="animate-pulse">Triggered</Badge>
+                    ) : (
+                      <Badge variant="secondary">Standby</Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">External ID</span>
+                  <div className="font-medium font-mono uppercase">{selectedExternal.externalId}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                  <div className="font-medium">
+                    {selectedExternal.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                  <div className="font-medium">{selectedExternal.sectionId || 'N/A'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
+                  <div className="font-medium">{selectedExternal.roomId || 'N/A'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                  <div className="font-medium">{selectedExternal.createdByName || 'System'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                  <div className="font-medium">{selectedExternal.createdOn ? format(new Date(selectedExternal.createdOn), 'PPp') : 'N/A'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                  <div className="font-medium">{selectedExternal.lastModifiedByName || 'System'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
+                  <div className="font-medium">{selectedExternal.lastModifiedOn ? format(new Date(selectedExternal.lastModifiedOn), 'PPp') : 'Never'}</div>
+                </div>
               </div>
             </div>
           )}
-          <DialogFooter className="gap-2 sm:gap-0 mt-4 border-t pt-4">
-            <Button 
-               variant="outline"
-               onClick={() => {
-                 if (selectedExternal) {
-                   setExternalForm(selectedExternal);
-                   setIsViewExternalOpen(false);
-                   setIsEditExternalOpen(true);
-                 }
-               }}
-            >
-              <Edit3 className="h-4 w-4 mr-2" />
-              Edit External
-            </Button>
-            <Button 
-              variant={selectedExternal?.isTriggered ? 'destructive' : 'default'}
-              onClick={() => {
-                 if (selectedExternal) {
-                   requestAuth(() => {
-                      setExternals(prev => prev.map(item => item.id === selectedExternal.id ? { ...item, isTriggered: !item.isTriggered } : item));
-                      setSelectedExternal(prev => prev ? {...prev, isTriggered: !prev.isTriggered} : prev);
-                      setLogs(prev => [
-                        {
-                          id: Math.random().toString(),
-                          timestamp: new Date().toISOString(),
-                          action: `${selectedExternal.externalsName} simulation trigger set to ${!selectedExternal.isTriggered}`,
-                          userName: userProfile.getPersonDetailsDto.firstName,
-                          userAvatar: userProfile.getPersonDetailsDto.imageUrl
-                        },
-                        ...prev
-                      ]);
-                   });
-                 }
-              }}
-            >
-               <Radio className="h-3 w-3 mr-1" />
-               {selectedExternal?.isTriggered ? 'Reset Signal' : 'Test Trigger'}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Edit External Device Modal */}
       <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Radio className="h-6 w-6 text-primary" />
-              Edit External
-            </DialogTitle>
-            <DialogDescription>
+        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl">
+          <DialogHeader className="pb-4 border-b">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
+                <Pencil className="h-5 w-5" />
+              </div>
+              <DialogTitle className="text-xl font-bold tracking-tight">Edit {externalForm?.externalName || 'External'}</DialogTitle>
+            </div>
+            <DialogDescription className="mt-2 text-muted-foreground mr-6">
               Modify name pattern and linked trigger actions.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3">
+          <div className="space-y-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-ext-name">External Name</Label>
+              <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">External Device Name</Label>
               <Input 
                 id="edit-ext-name" 
-                value={externalForm.externalsName || ''}
-                onChange={(e) => setExternalForm(prev => ({ ...prev, externalsName: e.target.value }))}
+                value={externalForm.externalName || ''}
+                onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
+                className="rounded-xl border-slate-200"
               />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Device Active State</Label>
+                <p className="text-[10px] text-muted-foreground font-medium">Enable or disable this external interface</p>
+              </div>
+              <Switch 
+                checked={externalForm.isActive} 
+                onCheckedChange={(checked) => setExternalForm(prev => ({ ...prev, isActive: checked }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ext-section">Section</Label>
+                <Select 
+                  value={externalForm.section || 'none'} 
+                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, section: val === 'none' ? undefined : val }))}
+                >
+                  <SelectTrigger id="edit-ext-section">
+                    <SelectValue placeholder="Select section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Section</SelectItem>
+                    {sections.map(section => (
+                      <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ext-room">Room</Label>
+                <Select 
+                  value={externalForm.room || 'none'} 
+                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, room: val === 'none' ? undefined : val }))}
+                >
+                  <SelectTrigger id="edit-ext-room">
+                    <SelectValue placeholder="Select room" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Room</SelectItem>
+                    {rooms.map(room => (
+                      <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -5363,7 +6500,9 @@ export default function App() {
                 setExternals(prev => prev.map(item => item.id === externalForm.id ? {
                   ...item,
                   externalsName: externalForm.externalsName || '',
-                  actionIds: externalForm.actionIds || []
+                  actionIds: externalForm.actionIds || [],
+                  room: externalForm.room,
+                  section: externalForm.section
                 } : item));
                 setIsEditExternalOpen(false);
               });
@@ -5378,116 +6517,1638 @@ export default function App() {
       {/* Camera Feed Modal */}
       <Dialog open={isCameraModalOpen} onOpenChange={(open) => {
         setIsCameraModalOpen(open);
-        if (!open) setCameraPlaybackOffset(0);
+        if (!open) {
+          setCameraPlaybackOffset(0);
+          setPlayingRecordingPath(null);
+        }
       }}>
-        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] sm:max-w-[85vw] max-h-[90vh] p-0 overflow-hidden rounded-3xl border-0 shadow-2xl">
-          <div className="flex flex-col h-full bg-black relative max-h-[90vh]">
-            {/* Header overlay */}
-            <div className="absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 to-transparent z-40">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Camera className="h-5 w-5 text-primary" />
-                    {selectedCamera?.name || 'Camera Feed'}
-                  </h2>
-                  <p className="text-xs text-white/60 tracking-wide font-mono uppercase">
-                    REC • 1080p • 60fps • {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
-                  </p>
+        <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] sm:max-w-[92vw] md:max-w-6xl h-[85vh] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background text-foreground">
+          {(() => {
+            const currentCameraDto = cameras.find(c => c.id.toString() === selectedCamera?.id.toString() || c.cameraName === selectedCamera?.name);
+            const liveStreamUrl = currentCameraDto?.liveStreamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+            const isLive = !playingRecordingPath;
+            const currentVideoUrl = playingRecordingPath || liveStreamUrl;
+            const recordingsList = currentCameraDto?.recordings || [];
+            
+            return (
+              <div className="flex flex-col h-full bg-background relative overflow-hidden">
+                {/* Header Section */}
+                <div className="flex items-center justify-between p-5 border-b bg-muted/30 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                      <Camera className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                        View {selectedCamera?.name || currentCameraDto?.cameraName || 'Camera'}
+                        <Badge variant="secondary" className={cn(
+                          "ml-2 text-[10px] py-0 px-2 font-mono uppercase tracking-wider border",
+                          selectedCamera?.status === 'active' ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                        )}>
+                          {selectedCamera?.status || 'Active'}
+                        </Badge>
+                      </h2>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 z-50">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                      onClick={() => {
+                        if (selectedCamera) {
+                          handleEditDevice(selectedCamera.id);
+                          setIsCameraModalOpen(false);
+                        }
+                      }}
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                      onClick={() => {
+                        if (selectedCamera) {
+                          handleDeleteDevice(selectedCamera.id);
+                          setIsCameraModalOpen(false);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <div className="h-4 w-px bg-border mx-1" />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                      onClick={() => setIsCameraModalOpen(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
+
+                {/* Main Body Grid */}
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden min-h-0 bg-background">
+                  {/* Left Column: Live/Playback video screen & info panel */}
+                  <div className="lg:col-span-7 flex flex-col p-6 gap-6 overflow-y-auto border-r h-full">
+                    {/* Video Stream Container */}
+                    <div ref={videoContainerRef} className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border shadow-2xl group flex flex-col justify-center shrink-0">
+                      {/* Video source overlay status */}
+                      <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-black/70 px-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md">
+                        <div className={cn(
+                          "h-2 w-2 rounded-full",
+                          isLive ? "bg-red-500 animate-pulse" : "bg-cyan-400"
+                        )} />
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-white">
+                          {isLive ? 'LIVE HD FEED' : 'PLAYBACK: RECORDING'}
+                        </span>
+                      </div>
+
+                      {/* Video Player */}
+                      {selectedCamera?.status === 'active' ? (
+                        <video
+                          ref={videoRef}
+                          key={currentVideoUrl}
+                          src={currentVideoUrl}
+                          className={cn(
+                            "h-full w-full object-cover select-none bg-black",
+                            isFullscreen ? "h-screen w-screen object-contain" : ""
+                          )}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center bg-black/90 p-12 text-center h-full">
+                          <VideoOff className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                          <h3 className="text-xl font-bold text-white mb-2">Camera Inactive</h3>
+                          <p className="text-muted-foreground text-sm max-w-xs">
+                            Please toggle active status to view live feed
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Overlap UI controls */}
+                      <div className="absolute bottom-4 left-4 right-4 z-30 flex justify-between items-center bg-black/60 p-3 rounded-xl border border-white/10 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <span className="text-xs font-mono text-white/90">
+                          {isLive ? 'Live RTSP Direct Stream' : 'Archive Backup Playback'}
+                        </span>
+                        
+                        <div className="flex items-center gap-3">
+                          <Button 
+                            size="sm" 
+                            variant="ghost"
+                            className="text-white hover:bg-white/10 h-8 w-8 p-0 rounded-lg transition-all active:scale-95"
+                            onClick={toggleCameraFullscreen}
+                            title="Fullscreen"
+                          >
+                            {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                          </Button>
+                          
+                          {!isLive && (
+                            <Button 
+                              size="sm" 
+                              variant="default"
+                              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold py-1 px-3 h-8 text-[11px] rounded-lg tracking-wider font-mono shadow-lg transition-all active:scale-95"
+                              onClick={() => setPlayingRecordingPath(null)}
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                              Return to Live
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Camera Info Detail Grid */}
+                    <div className="bg-muted/30 p-5 rounded-2xl border space-y-4 shrink-0">
+                      <div className="flex items-center justify-between border-b pb-2">
+                        <h3 className="text-sm font-bold text-foreground tracking-widest uppercase font-mono">Stream Configuration</h3>
+                        <Badge variant="outline" className="text-blue-600 border-blue-200 text-[10px]">CCTV CONNECTION</Badge>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">IP Address</span>
+                          <span className="font-semibold text-foreground font-mono">192.168.1.{10 + (currentCameraDto?.id || 10) % 240}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Port Node</span>
+                          <span className="font-semibold text-foreground font-mono">554 (RTSP)</span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Username</span>
+                          <span className="font-semibold text-foreground font-mono">sec_operator</span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Stream Path</span>
+                          <span className="font-semibold text-foreground font-mono text-ellipsis overflow-hidden block">/live/h264/ch1</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t">
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Assigned Room</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Unassigned Room'}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Assigned Section</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedCamera?.section ? sections.find(s => s.id === selectedCamera.section)?.name : 'Security'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Advanced Operations: Move the Edit and Delete icons into the view modal */}
+                      <div className="grid grid-cols-2 gap-4 pt-2 border-t mt-4">
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                          <div className="font-medium">
+                            {currentCameraDto?.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                          <div className="font-medium">
+                            {currentCameraDto?.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                          <div className="font-medium">{currentCameraDto?.sectionId || 'N/A'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
+                          <div className="font-medium">{currentCameraDto?.roomId || 'N/A'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                          <div className="font-medium">{currentCameraDto?.peronName || 'System'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                          <div className="font-medium">
+                            {currentCameraDto?.isDeleted ? 'Deleted' : 'No'}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                          <div className="font-medium">{currentCameraDto?.createdByName || 'System'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                          <div className="font-medium">{currentCameraDto?.createdOn ? format(new Date(currentCameraDto.createdOn), 'PPp') : 'N/A'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                          <div className="font-medium">{currentCameraDto?.lastModifiedByName || 'System'}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                          <div className="font-medium">{currentCameraDto?.lastModifiedOn ? format(new Date(currentCameraDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                        </div>
+                      </div>
+                  </div>
+
+                  {/* Right Column: List of recordings in table format */}
+                  <div className="lg:col-span-5 flex flex-col p-6 h-full overflow-hidden">
+                    <div className="flex items-center justify-between mb-4 shrink-0">
+                      <h3 className="text-sm font-bold text-foreground tracking-wider uppercase font-mono flex items-center gap-2">
+                        <Video className="h-4 w-4 text-primary" />
+                        History recordings
+                      </h3>
+                      <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] font-mono">
+                        {recordingsList.length} Saved
+                      </Badge>
+                    </div>
+
+                    {/* Scrollable Table View */}
+                    <div className="flex-1 overflow-y-auto pr-1">
+                      {recordingsList.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-48 rounded-xl border border-dashed text-center p-6">
+                          <EyeOff className="h-8 w-8 text-muted-foreground/40 mb-2 animate-bounce" />
+                          <p className="text-xs text-muted-foreground">No recent security backup files located for this camera.</p>
+                        </div>
+                      ) : (
+                        <div className="border rounded-xl overflow-hidden bg-muted/10">
+                          <table className="w-full text-xs text-left">
+                            <thead className="text-[10px] bg-muted/20 text-muted-foreground uppercase tracking-wider border-b font-mono">
+                              <tr>
+                                <th className="p-3">Interval / Time Frame</th>
+                                <th className="p-3 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y font-mono">
+                              {recordingsList.map((recording, idx) => {
+                                const isCurrentlyPlayingThis = playingRecordingPath === recording.filePath;
+                                return (
+                                  <tr key={idx} className={cn(
+                                    "transition-colors hover:bg-muted/50",
+                                    isCurrentlyPlayingThis ? "bg-primary/10 text-primary" : ""
+                                  )}>
+                                    <td className="p-3">
+                                      <div className="flex flex-col gap-1">
+                                        <span className="font-semibold text-foreground">
+                                          {format(new Date(recording.startTime), "MMM dd, HH:mm:ss")}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground">
+                                          to {format(new Date(recording.endTime), "HH:mm:ss")}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="p-3 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className={cn(
+                                            "h-7 w-7 rounded-lg",
+                                            isCurrentlyPlayingThis ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                                          )}
+                                          onClick={() => setPlayingRecordingPath(recording.filePath)}
+                                          title="Play Recording Video"
+                                        >
+                                          <Play className="h-3 w-3" />
+                                        </Button>
+                                        
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                                          onClick={() => {
+                                            alert(`Initiating secure direct server download for ${recording.filePath.split('/').pop() || 'backup.mp4'}`);
+                                            addLogEntry("Camera Access", `Initiated download of backup recording clip for camera: ${currentCameraDto?.cameraName || selectedCamera?.name}`);
+                                          }}
+                                          title="Download Backup Clip"
+                                        >
+                                          <Download className="h-3 w-3" />
+                                        </Button>
+                                        
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 rounded-lg hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                                          onClick={() => {
+                                            // Handle record deletion
+                                            setCameras(prev => prev.map(c => {
+                                              if (c.id.toString() === selectedCamera?.id.toString()) {
+                                                return {
+                                                  ...c,
+                                                  recordings: c.recordings.filter(r => r.filePath !== recording.filePath)
+                                                };
+                                              }
+                                              return c;
+                                            }));
+                                            if (isCurrentlyPlayingThis) setPlayingRecordingPath(null);
+                                            addLogEntry("Camera Access", `Secured permanent deletion of backup clip starting at ${format(new Date(recording.startTime), "HH:mm:ss")} from ${currentCameraDto?.cameraName || selectedCamera?.name}`);
+                                          }}
+                                          title="Delete Backup Clip"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+      {/* Appliance View Modal */}
+      <Dialog open={isApplianceModalOpen} onOpenChange={setIsApplianceModalOpen}>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedAppliance) {
+                  handleEditDevice(selectedAppliance.id);
+                  setIsApplianceModalOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (selectedAppliance) {
+                  handleDeleteDevice(selectedAppliance.id);
+                  setIsApplianceModalOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <Power className="h-5 w-5 text-primary" />
+              View {selectedAppliance?.name || 'Appliance'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and configuration for {selectedAppliance?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAppliance && (() => {
+            const currentApplianceDto = INITIAL_APPLIANCES.find(a => a.id.toString() === selectedAppliance.id.toString() || a.applianceName === selectedAppliance.name) as any;
+            return (
+            <div className="py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
+                  <div className="flex items-center gap-2 font-medium">
+                    <div className={cn("h-2 w-2 rounded-full", selectedAppliance.status === 'on' ? 'bg-emerald-500' : 'bg-zinc-400')} />
+                    {selectedAppliance.status === 'on' ? 'Active' : 'Inactive'}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
+                  <div className="font-medium">{selectedAppliance.room ? rooms.find(r => r.id === selectedAppliance.room)?.name : 'N/A'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Power Usage</span>
+                  <div className="font-medium text-emerald-600 dark:text-emerald-400">{selectedAppliance.powerUsage || 0} W</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Device Type</span>
+                  <div className="font-medium capitalize">{selectedAppliance.type}</div>
+                </div>
+                {currentApplianceDto && (
+                  <>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                      <div className="font-medium">
+                        {currentApplianceDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                      <div className="font-medium">
+                        {currentApplianceDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                      <div className="font-medium">{currentApplianceDto.sectionId || 'N/A'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
+                      <div className="font-medium">{currentApplianceDto.roomId || 'N/A'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                      <div className="font-medium">{currentApplianceDto.peronName || 'System'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                      <div className="font-medium">
+                        {currentApplianceDto.isDeleted ? 'Deleted' : 'No'}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                      <div className="font-medium">{currentApplianceDto.createdByName || 'System'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                      <div className="font-medium">{currentApplianceDto.createdOn ? format(new Date(currentApplianceDto.createdOn), 'PPp') : 'N/A'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                      <div className="font-medium">{currentApplianceDto.lastModifiedByName || 'System'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                      <div className="font-medium">{currentApplianceDto.lastModifiedOn ? format(new Date(currentApplianceDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Door View Modal */}
+      <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedDoor) {
+                  handleEditDevice(selectedDoor.id);
+                  setIsDoorModalOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (selectedDoor) {
+                  handleDeleteDevice(selectedDoor.id);
+                  setIsDoorModalOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-primary" />
+              View {selectedDoor?.name || 'Door'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and security controls for {selectedDoor?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedDoor && (() => {
+            const currentDoorDto = INITIAL_DOORS.find(d => d.id.toString() === selectedDoor.id.toString() || d.doorName === selectedDoor.name) as any;
+            return (
+            <div className="py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
+                  <div className="flex items-center gap-2 font-medium">
+                    {selectedDoor.status === 'locked' ? (
+                      <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
+                    ) : (
+                      <Badge variant="destructive">Unlocked</Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Type</span>
+                  <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
+                  <div className="font-medium">{selectedDoor.room ? rooms.find(r => r.id === selectedDoor.room)?.name : 'N/A'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                  <div className="font-medium">{selectedDoor.section ? sections.find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
+                </div>
+                {currentDoorDto && (
+                  <>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                      <div className="font-medium">
+                        {currentDoorDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                      <div className="font-medium">
+                        {currentDoorDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Resident</span>
+                      <div className="font-medium">{currentDoorDto.peronName || 'System'} (ID: {currentDoorDto.personId || 0})</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Info</span>
+                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || 'Hub'} (ID: {currentDoorDto.roomId || 0})</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Info</span>
+                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || 'Area'} (ID: {currentDoorDto.sectionId || 0})</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Deletion Status</span>
+                      <div className="font-medium">
+                        {currentDoorDto.isDeleted ? <span className="text-red-500">Deleted (by: {currentDoorDto.deletedBy})</span> : 'Active'}
+                        {currentDoorDto.deletedOn && <div className="text-[10px]">{format(new Date(currentDoorDto.deletedOn), 'PPp')}</div>}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                      <div className="font-medium">{currentDoorDto.createdByName || 'System'} (ID: {currentDoorDto.createdBy || 0})</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                      <div className="font-medium">{currentDoorDto.createdOn ? format(new Date(currentDoorDto.createdOn), 'PPp') : 'N/A'}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                      <div className="font-medium">{currentDoorDto.lastModifiedByName || 'System'} (ID: {currentDoorDto.lastModifiedBy || 0})</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                      <div className="font-medium">{currentDoorDto.lastModifiedOn ? format(new Date(currentDoorDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+          })()}
+        </DialogContent>
+      </Dialog>
+      {/* Light View Modal */}
+      <Dialog open={isLightModalOpen} onOpenChange={setIsLightModalOpen}>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedLight) {
+                  handleEditDevice(selectedLight.id);
+                  setIsLightModalOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (selectedLight) {
+                  handleDeleteDevice(selectedLight.id);
+                  setIsLightModalOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <Lightbulb className="h-5 w-5 text-primary" />
+              View {selectedLight?.name || 'Light'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and configuration for {selectedLight?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedLight && (() => {
+            const currentLightDto = lights.find(l => l.lightName === selectedLight?.name || l.id.toString() === selectedLight?.id.toString());
+            return (
+              <div className="py-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
+                    <div className="flex items-center gap-2 font-medium">
+                      <div className={cn("h-2 w-2 rounded-full", selectedLight.status === 'on' ? 'bg-amber-400' : 'bg-zinc-400')} />
+                      {selectedLight.status === 'on' ? 'On' : 'Off'}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Brightness</span>
+                    <div className="font-medium">{selectedLight.value || currentLightDto?.brightnessLevel || 0}%</div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
+                    <div className="font-medium">{selectedLight.room ? rooms.find(r => r.id === selectedLight.room)?.name : 'N/A'}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <div className="font-medium">{selectedLight.section ? sections.find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
+                  </div>
+                  {/* BaseDefaultDto Integration */}
+                  {currentLightDto && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                        <div className="font-medium">
+                          {currentLightDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                        <div className="font-medium">
+                          {currentLightDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                        <div className="font-medium">{currentLightDto.sectionId || 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
+                        <div className="font-medium">{currentLightDto.roomId || 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <div className="font-medium">{currentLightDto.peronName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                        <div className="font-medium">
+                          {currentLightDto.isDeleted ? 'Deleted' : 'No'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <div className="font-medium">{currentLightDto.createdByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <div className="font-medium">{currentLightDto.createdOn ? format(new Date(currentLightDto.createdOn), 'PPp') : 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <div className="font-medium">{currentLightDto.lastModifiedByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <div className="font-medium">{currentLightDto.lastModifiedOn ? format(new Date(currentLightDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+      {/* Section View Modal */}
+      <Dialog open={isViewSectionOpen} onOpenChange={setIsViewSectionOpen}>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (viewingSection) {
+                  setEditingSection(viewingSection);
+                  setIsEditSectionOpen(true);
+                  setIsViewSectionOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (viewingSection) {
+                  requestAuth(() => setSections(prev => prev.filter(s => s.id !== viewingSection.id)));
+                  setIsViewSectionOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5 text-primary" />
+              View {viewingSection?.name || 'Section'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and configuration for {viewingSection?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingSection && (() => {
+            const currentSectionDto = INITIAL_SECTIONS.find(s => s.id.toString() === viewingSection.id.toString() || s.sectionId === viewingSection.id) as any;
+            return (
+              <div className="py-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                    <div className="font-medium text-lg">{currentSectionDto?.sectionId || viewingSection.id}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Name</span>
+                    <div className="font-medium text-lg">{viewingSection.name}</div>
+                  </div>
+                  {currentSectionDto && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
+                        <div className="font-medium text-sm">
+                          {currentSectionDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                        <div className="font-medium text-sm">
+                          {currentSectionDto.isDeleted ? <Badge variant="destructive">Deleted</Badge> : <Badge variant="secondary">Active</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <div className="font-medium text-sm">{currentSectionDto.peronName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <div className="font-medium text-sm">{currentSectionDto.createdByName || 'System'}</div>
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <div className="font-medium text-sm">{currentSectionDto.createdOn ? format(new Date(currentSectionDto.createdOn), 'PPp') : 'N/A'}</div>
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <div className="font-medium text-sm">{currentSectionDto.lastModifiedOn ? format(new Date(currentSectionDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Window View Modal */}
+      <Dialog open={isViewWindowOpen} onOpenChange={setIsViewWindowOpen}>
+        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => {
+                if (selectedWindow) {
+                  handleEditDevice(selectedWindow.id);
+                  setIsViewWindowOpen(false);
+                }
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => {
+                if (selectedWindow) {
+                  handleDeleteDevice(selectedWindow.id);
+                  setIsViewWindowOpen(false);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            <div className="h-4 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="pr-24">
+            <DialogTitle className="flex items-center gap-2">
+              <WindowIcon className="h-5 w-5 text-primary" />
+              View {selectedWindow?.name || 'Window'}
+            </DialogTitle>
+            <DialogDescription>
+              Detailed view and configuration for {selectedWindow?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedWindow && (() => {
+            const currentWindowDto = windows.find(w => w.windowName === selectedWindow?.name || w.id.toString() === selectedWindow?.id.toString());
+            return (
+              <div className="py-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
+                    <div className="flex items-center gap-2 font-medium">
+                      {selectedWindow.status === 'locked' ? (
+                        <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
+                      ) : (
+                        <Badge variant="destructive">Unlocked</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Open Status</span>
+                    <div className="flex items-center gap-2 font-medium">
+                      {currentWindowDto?.isOpen ? (
+                        <Badge variant="secondary" className="bg-amber-400">Open</Badge>
+                      ) : (
+                        <Badge variant="secondary">Closed</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
+                    <div className="font-medium text-sm">{selectedWindow.room ? rooms.find(r => r.id === selectedWindow.room)?.name : 'N/A'}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <div className="font-medium text-sm">{selectedWindow.section ? sections.find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
+                  </div>
+                  {/* BaseDefaultDto Integration */}
+                  {currentWindowDto && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                        <div className="font-medium">
+                          {currentWindowDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                        <div className="font-medium">
+                          {currentWindowDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
+                        <div className="font-medium">{currentWindowDto.sectionId || 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
+                        <div className="font-medium">{currentWindowDto.roomId || 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <div className="font-medium">{currentWindowDto.peronName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
+                        <div className="font-medium">
+                          {currentWindowDto.isDeleted ? 'Deleted' : 'No'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <div className="font-medium">{currentWindowDto.createdByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <div className="font-medium">{currentWindowDto.createdOn ? format(new Date(currentWindowDto.createdOn), 'PPp') : 'N/A'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <div className="font-medium">{currentWindowDto.lastModifiedByName || 'System'}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <div className="font-medium">{currentWindowDto.lastModifiedOn ? format(new Date(currentWindowDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-slate-50 dark:bg-slate-900 rounded-[2rem]" showCloseButton={false}>
+          <div className="absolute right-6 top-6 flex items-center gap-2 z-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-10 w-10 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => { 
+                if (selectedAction) {
+                  setActionForm({
+                    actionName: selectedAction.actionName,
+                    description: selectedAction.actionDescription,
+                    personId: selectedAction.personId
+                  });
+                }
+                setIsViewActionOpen(false); 
+                setIsEditActionOpen(true); 
+              }}
+            >
+              <Edit3 className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-10 w-10 rounded-full text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+              onClick={() => requestAuth(() => { setActions(prev => prev.filter(a => a.id !== selectedAction?.id)); setIsViewActionOpen(false); })}
+            >
+              <Trash2 className="h-5 w-5" />
+            </Button>
+            <div className="h-5 w-px bg-border mx-1" />
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-5 w-5" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="p-8 pb-4 bg-white dark:bg-slate-900 border-b shrink-0 pr-40">
+            <div className="flex items-center gap-4">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/5">
+                <Zap className="h-8 w-8" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-2xl font-bold tracking-tight">
+                  {selectedAction?.actionName}
+                </DialogTitle>
+                <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
+                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md font-mono">{selectedAction?.actionId}</span>
+                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                  {selectedAction?.actionActive ? 
+                    <span className="text-emerald-500 font-bold text-xs uppercase tracking-wider">Active sequence</span> : 
+                    <span className="text-slate-400 font-bold text-xs uppercase tracking-wider">Disabled</span>
+                  }
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-6 scrollbar-hide">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Layers className="h-3 w-3" />
+                  Execution Sequence
+                </h4>
                 <Button 
                   variant="ghost" 
-                  size="icon" 
-                  className="rounded-full bg-white/10 hover:bg-white/20 text-white"
-                  onClick={() => setIsCameraModalOpen(false)}
+                  size="sm" 
+                  className="text-primary font-bold hover:bg-primary/5 rounded-lg h-8 px-2"
+                  onClick={() => {
+                    setActionStepForm({
+                      actionId: selectedAction?.id || 0,
+                      facilityType: FacilityType.Appliance,
+                      facilityTypeId: 0,
+                      brightnessLevel: 0,
+                      isLocked: false,
+                      isOpen: false,
+                      isActive: false
+                    });
+                    setIsAddActionStepOpen(true);
+                  }}
                 >
-                  <X className="h-5 w-5" />
+                  <PlusCircle className="h-4 w-4 mr-1.5" />
+                  Add Step
                 </Button>
+              </div>
+
+              <div className="space-y-3">
+                {selectedAction?.getActionStepDtos.map((step, idx) => (
+                  <Card key={step.id} className="p-4 bg-white dark:bg-slate-800 border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-all group rounded-2xl">
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center font-bold text-slate-400 shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-700 dark:text-slate-200">
+                            {(() => {
+                              switch (step.facilityType) {
+                                case FacilityType.Appliance: return appliances.find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
+                                case FacilityType.Camera: return cameras.find(x => x.id === step.facilityTypeId)?.cameraName || 'Camera';
+                                case FacilityType.Door: return doors.find(x => x.id === step.facilityTypeId)?.doorName || 'Door';
+                                case FacilityType.External: return externals.find(x => x.id === step.facilityTypeId)?.externalName || 'External';
+                                case FacilityType.Light: return lights.find(x => x.id === step.facilityTypeId)?.lightName || 'Light';
+                                case FacilityType.Window: return windows.find(x => x.id === step.facilityTypeId)?.windowName || 'Window';
+                                default: return 'Device';
+                              }
+                            })()}
+                          </span>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
+                            {FacilityType[step.facilityType]}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                          {step.facilityType === FacilityType.Light && step.brightnessLevel > 0 && (
+                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 rounded-lg">
+                              Brightness: {step.brightnessLevel}%
+                            </Badge>
+                          )}
+                          {step.facilityType === FacilityType.Door && (
+                            <Badge variant="outline" className={cn(
+                              "text-[10px] rounded-lg",
+                              step.isLocked ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                            )}>
+                              {step.isLocked ? "Locked" : "Unlocked"}
+                            </Badge>
+                          )}
+                          {(step.facilityType === FacilityType.Door || step.facilityType === FacilityType.Window) && (
+                            <Badge variant="outline" className={cn(
+                              "text-[10px] rounded-lg",
+                              step.isOpen ? "bg-orange-50 text-orange-600 border-orange-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                            )}>
+                              {step.isOpen ? "Open" : "Closed"}
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className={cn(
+                            "text-[10px] rounded-lg",
+                            step.isActive ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                          )}>
+                            {step.isActive ? "Run" : "Stop"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-9 w-9 rounded-xl hover:bg-blue-50 hover:text-blue-600 text-slate-400" 
+                          title="Edit Step"
+                          onClick={() => {
+                            setSelectedActionStep(step);
+                            setActionStepForm({ ...step });
+                            setIsEditActionStepOpen(true);
+                          }}
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive text-slate-400" 
+                          title="Remove Step"
+                          onClick={() => requestAuth(() => {
+                            if (selectedAction) {
+                              const updatedSteps = selectedAction.getActionStepDtos.filter(s => s.id !== step.id);
+                              const updatedAction = { ...selectedAction, getActionStepDtos: updatedSteps };
+                              setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+                              setSelectedAction(updatedAction);
+                            }
+                          })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             </div>
 
-            <div className="relative flex-1 overflow-hidden group min-h-[400px]">
-              <div 
-                className="absolute top-24 left-6 flex items-center gap-2 z-30 bg-black/60 px-4 py-2 rounded-full border border-white/20 backdrop-blur-md cursor-pointer hover:bg-black/80 transition-all active:scale-95"
-                onClick={() => setCameraPlaybackOffset(0)}
-              >
-                <div className={cn(
-                  "h-2 w-2 rounded-full",
-                  cameraPlaybackOffset === 0 ? "bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.9)]" : "bg-white/40"
-                )} />
-                <span className={cn(
-                  "text-[10px] font-mono font-black uppercase tracking-[0.2em]",
-                  cameraPlaybackOffset === 0 ? "text-white" : "text-white/60"
-                )}>
-                  {cameraPlaybackOffset === 0 ? 'Live Feed' : 'Jump to Live'}
-                </span>
-              </div>
-              
-              <img 
-                src={`https://picsum.photos/seed/${selectedCamera?.id || 'default'}-${cameraPlaybackOffset}/1920/1080`} 
-                alt="Camera Feed" 
-                className="h-full w-full object-cover select-none"
-                referrerPolicy="no-referrer"
-              />
+            <div className="p-6 bg-primary/5 rounded-3xl border border-primary/10">
+              <h4 className="text-sm font-bold text-primary uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Info className="h-4 w-4" />
+                Description
+              </h4>
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                {selectedAction?.actionDescription}
+              </p>
+            </div>
 
-              {/* Status HUD */}
-              <div className="absolute top-24 right-6 z-30 flex flex-col gap-2">
-                <div className="bg-black/60 px-3 py-1.5 rounded-lg border border-white/10 backdrop-blur-md flex items-center gap-2">
-                  <ShieldCheck className="h-3 w-3 text-primary" />
-                  <span className="text-[10px] font-mono text-white/80">SECURE STREAM</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Created By</span>
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                    <UserCircle className="h-5 w-5" />
+                  </div>
+                  <div className="font-bold text-slate-700 dark:text-slate-200">{selectedAction?.createdByName || 'System'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">{selectedAction?.createdOn ? format(new Date(selectedAction.createdOn), 'PP') : 'N/A'}</div>
                 </div>
               </div>
-
-              {/* Controls Footer */}
-              <div className="absolute bottom-0 left-0 right-0 p-8 pt-20 bg-gradient-to-t from-black/90 via-black/40 to-transparent z-40">
-                <div className="space-y-6">
-                  <div className="flex items-center gap-6">
-                    <span className="text-[10px] font-mono text-white/50 w-24">
-                      {format(subSeconds(modalCurrentTime, 24 * 3600), "HH:mm:ss")}
-                    </span>
-                    <div className="flex-1 px-2">
-                      <Slider
-                        defaultValue={[24 * 3600]}
-                        max={24 * 3600}
-                        step={1}
-                        value={[24 * 3600 - cameraPlaybackOffset]}
-                        onValueChange={(vals) => setCameraPlaybackOffset(24 * 3600 - vals[0])}
-                        className="cursor-pointer"
-                      />
-                    </div>
-                    <span className="text-[10px] font-mono text-white font-bold w-24 text-right">
-                      {format(subSeconds(modalCurrentTime, cameraPlaybackOffset), "HH:mm:ss")}
-                    </span>
+              <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Modified</span>
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                    <Settings2 className="h-5 w-5" />
                   </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-white/10 px-3 py-2 rounded-xl backdrop-blur-md border border-white/10">
-                        <p className="text-[11px] font-mono text-white tracking-widest uppercase">
-                          {format(subSeconds(modalCurrentTime, cameraPlaybackOffset), "MMM dd, yyyy • HH:mm:ss")}
-                        </p>
-                      </div>
-                      {cameraPlaybackOffset > 0 && (
-                        <Badge variant="secondary" className="bg-primary/20 text-primary border-primary/30 animate-in fade-in slide-in-from-left-2">
-                          PLAYBACK: -{Math.floor(cameraPlaybackOffset / 3600)}h {Math.floor((cameraPlaybackOffset % 3600) / 60)}m
-                        </Badge>
-                      )}
-                    </div>
-                    
-                    <div className="flex gap-3">
-                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button className="h-10 px-6 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 transition-all active:scale-95">
-                        Capture Image
-                      </Button>
-                    </div>
-                  </div>
+                  <div className="font-bold text-slate-700 dark:text-slate-200">{selectedAction?.lastModifiedByName || 'System'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">{selectedAction?.lastModifiedOn ? format(new Date(selectedAction.lastModifiedOn), 'PP') : 'N/A'}</div>
                 </div>
               </div>
             </div>
           </div>
+
+          <div className="p-5 border-t bg-white dark:bg-slate-900 shrink-0">
+             <div className="flex justify-end gap-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">
+               Step configuration for automated sequence
+             </div>
+          </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
+          <div className="absolute right-4 top-4 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
+                <Zap className="h-6 w-6" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-xl font-bold tracking-tight">Create New Action</DialogTitle>
+                <DialogDescription className="text-xs font-medium">Define a new automated sequence</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
+              <Input 
+                id="actionName" 
+                placeholder="e.g. Master Shutoff" 
+                value={actionForm.actionName}
+                onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
+                className="rounded-2xl h-11 border-slate-200"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Description</Label>
+              <Input 
+                id="description" 
+                placeholder="Describe what this action does..." 
+                value={actionForm.description}
+                onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
+                className="rounded-2xl h-11 border-slate-200"
+              />
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-0">
+            <Button 
+              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              onClick={() => {
+                const newAction: GetActionDto = {
+                  id: actions.length + 1,
+                  actionId: `ACT-00${actions.length + 1}`,
+                  actionName: actionForm.actionName,
+                  actionDescription: actionForm.description,
+                  actionActive: true,
+                  getActionStepDtos: [],
+                  createdBy: 1,
+                  createdByName: userProfile.getPersonDetailsDto.firstName,
+                  createdOn: new Date().toISOString(),
+                  lastModifiedBy: 1,
+                  lastModifiedByName: userProfile.getPersonDetailsDto.firstName,
+                  lastModifiedOn: new Date().toISOString(),
+                  isDeleted: false,
+                  personId: 1,
+                  peronName: userProfile.getPersonDetailsDto.firstName,
+                  deletedBy: 0
+                };
+                setActions(prev => [...prev, newAction]);
+                setIsAddActionOpen(false);
+                setActionForm({ actionName: '', description: '', personId: 1 });
+              }}
+            >
+              <PlusCircle className="h-5 w-5" />
+              Create Action
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
+          <div className="absolute right-4 top-4 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
+                <Edit3 className="h-6 w-6" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-xl font-bold tracking-tight">Edit Action</DialogTitle>
+                <DialogDescription className="text-xs font-medium">Update action details</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
+              <Input 
+                id="edit-actionName" 
+                placeholder="e.g. Master Shutoff" 
+                value={actionForm.actionName}
+                onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
+                className="rounded-2xl h-11 border-slate-200"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Description</Label>
+              <Input 
+                id="edit-description" 
+                placeholder="Describe what this action does..." 
+                value={actionForm.description}
+                onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
+                className="rounded-2xl h-11 border-slate-200"
+              />
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-0">
+            <Button 
+              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              onClick={() => {
+                if (selectedAction) {
+                  setActions(prev => prev.map(a => a.id === selectedAction.id ? {
+                    ...a,
+                    actionName: actionForm.actionName,
+                    actionDescription: actionForm.description,
+                    lastModifiedOn: new Date().toISOString()
+                  } : a));
+                  setIsEditActionOpen(false);
+                  setActionForm({ actionName: '', description: '', personId: 1 });
+                }
+              }}
+            >
+              <Save className="h-5 w-5" />
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Action Step Modal */}
+      {/* Add Action Step Modal */}
+      <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
+          <div className="absolute right-4 top-4 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
+                <PlusCircle className="h-6 w-6" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-xl font-bold tracking-tight">Add Sequence Step</DialogTitle>
+                <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
+                <Select 
+                  value={actionStepForm.facilityType.toString()} 
+                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
+                >
+                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
+                    <SelectItem value={FacilityType.Appliance.toString()}>Appliance</SelectItem>
+                    <SelectItem value={FacilityType.Camera.toString()}>Camera</SelectItem>
+                    <SelectItem value={FacilityType.Door.toString()}>Door</SelectItem>
+                    <SelectItem value={FacilityType.External.toString()}>External</SelectItem>
+                    <SelectItem value={FacilityType.Light.toString()}>Light</SelectItem>
+                    <SelectItem value={FacilityType.Window.toString()}>Window</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Device / Target</Label>
+                <Select 
+                  value={actionStepForm.facilityTypeId.toString()} 
+                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
+                >
+                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                    <SelectValue placeholder="Select device" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
+                    {(() => {
+                      switch (actionStepForm.facilityType) {
+                        case FacilityType.Appliance: return appliances.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.applianceName}</SelectItem>);
+                        case FacilityType.Camera: return cameras.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.cameraName}</SelectItem>);
+                        case FacilityType.Door: return doors.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.doorName}</SelectItem>);
+                        case FacilityType.External: return externals.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.externalName}</SelectItem>);
+                        case FacilityType.Light: return lights.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.lightName}</SelectItem>);
+                        case FacilityType.Window: return windows.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.windowName}</SelectItem>);
+                        default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
+                      }
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-[1.5rem] border border-slate-100 dark:border-slate-800 space-y-5">
+              {actionStepForm.facilityType === FacilityType.Light && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Brightness Level</Label>
+                    <Badge className="bg-primary/10 text-primary border-none font-bold">{actionStepForm.brightnessLevel}%</Badge>
+                  </div>
+                  <Slider 
+                    value={[actionStepForm.brightnessLevel]} 
+                    onValueChange={(vals) => setActionStepForm(prev => ({ ...prev, brightnessLevel: Array.isArray(vals) ? vals[0] : vals }))}
+                    max={100} 
+                    min={0}
+                    step={1} 
+                    className="py-2"
+                  />
+                </div>
+              )}
+
+              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
+                <div className="flex items-center justify-between p-1">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Engage physical lock</p>
+                  </div>
+                  <Switch 
+                    checked={actionStepForm.isLocked} 
+                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isLocked: checked }))}
+                  />
+                </div>
+              )}
+
+              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
+                <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Physical orientation</p>
+                  </div>
+                  <Switch 
+                    checked={actionStepForm.isOpen} 
+                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isOpen: checked }))}
+                  />
+                </div>
+              )}
+
+              <div className={cn(
+                "flex items-center justify-between p-1",
+                (actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window || actionStepForm.facilityType === FacilityType.Light) ? "pt-2 border-t border-slate-200/50" : ""
+              )}>
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
+                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Overall operational state</p>
+                </div>
+                <Switch 
+                  checked={actionStepForm.isActive} 
+                  onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isActive: checked }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-0">
+            <Button 
+              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              onClick={() => {
+                if (selectedAction) {
+                  const newStep: GetActionStepDto = {
+                    id: Math.max(0, ...selectedAction.getActionStepDtos.map(s => s.id)) + 1,
+                    actionId: parseInt(selectedAction.actionId.replace('ACT-', '')), // Map to int as per DTO
+                    facilityType: actionStepForm.facilityType,
+                    facilityTypeId: actionStepForm.facilityTypeId,
+                    brightnessLevel: actionStepForm.brightnessLevel,
+                    isLocked: actionStepForm.isLocked,
+                    isOpen: actionStepForm.isOpen,
+                    isActive: actionStepForm.isActive
+                  };
+                  const updatedAction = { ...selectedAction, getActionStepDtos: [...selectedAction.getActionStepDtos, newStep] };
+                  setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+                  setSelectedAction(updatedAction);
+                  setIsAddActionStepOpen(false);
+                }
+              }}
+            >
+              <PlusCircle className="h-5 w-5" />
+              Confirm Step
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Action Step Modal */}
+      <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
+          <div className="absolute right-4 top-4 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
+                <Pencil className="h-6 w-6" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-xl font-bold tracking-tight">Edit Sequence Step</DialogTitle>
+                <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
+                <Select 
+                  value={actionStepForm.facilityType.toString()} 
+                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
+                >
+                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
+                    <SelectItem value={FacilityType.Appliance.toString()}>Appliance</SelectItem>
+                    <SelectItem value={FacilityType.Camera.toString()}>Camera</SelectItem>
+                    <SelectItem value={FacilityType.Door.toString()}>Door</SelectItem>
+                    <SelectItem value={FacilityType.External.toString()}>External</SelectItem>
+                    <SelectItem value={FacilityType.Light.toString()}>Light</SelectItem>
+                    <SelectItem value={FacilityType.Window.toString()}>Window</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Device / Target</Label>
+                <Select 
+                  value={actionStepForm.facilityTypeId.toString()} 
+                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
+                >
+                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                    <SelectValue placeholder="Select device" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
+                    {(() => {
+                      switch (actionStepForm.facilityType) {
+                        case FacilityType.Appliance: return appliances.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.applianceName}</SelectItem>);
+                        case FacilityType.Camera: return cameras.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.cameraName}</SelectItem>);
+                        case FacilityType.Door: return doors.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.doorName}</SelectItem>);
+                        case FacilityType.External: return externals.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.externalName}</SelectItem>);
+                        case FacilityType.Light: return lights.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.lightName}</SelectItem>);
+                        case FacilityType.Window: return windows.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.windowName}</SelectItem>);
+                        default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
+                      }
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-[1.5rem] border border-slate-100 dark:border-slate-800 space-y-5">
+              {actionStepForm.facilityType === FacilityType.Light && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Brightness Level</Label>
+                    <Badge className="bg-primary/10 text-primary border-none font-bold">{actionStepForm.brightnessLevel}%</Badge>
+                  </div>
+                  <Slider 
+                    value={[actionStepForm.brightnessLevel]} 
+                    onValueChange={(vals) => setActionStepForm(prev => ({ ...prev, brightnessLevel: Array.isArray(vals) ? vals[0] : vals }))}
+                    max={100} 
+                    min={0}
+                    step={1} 
+                    className="py-2"
+                  />
+                </div>
+              )}
+
+              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
+                <div className="flex items-center justify-between p-1">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Engage physical lock</p>
+                  </div>
+                  <Switch 
+                    checked={actionStepForm.isLocked} 
+                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isLocked: checked }))}
+                  />
+                </div>
+              )}
+
+              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
+                <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Physical orientation</p>
+                  </div>
+                  <Switch 
+                    checked={actionStepForm.isOpen} 
+                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isOpen: checked }))}
+                  />
+                </div>
+              )}
+
+              <div className={cn(
+                "flex items-center justify-between p-1",
+                (actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window || actionStepForm.facilityType === FacilityType.Light) ? "pt-2 border-t border-slate-200/50" : ""
+              )}>
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
+                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Overall operational state</p>
+                </div>
+                <Switch 
+                  checked={actionStepForm.isActive} 
+                  onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isActive: checked }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-0">
+            <Button 
+              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              onClick={() => {
+                if (selectedAction && selectedActionStep) {
+                  const updatedStep: GetActionStepDto = {
+                    ...selectedActionStep,
+                    facilityType: actionStepForm.facilityType,
+                    facilityTypeId: actionStepForm.facilityTypeId,
+                    brightnessLevel: actionStepForm.brightnessLevel,
+                    isLocked: actionStepForm.isLocked,
+                    isOpen: actionStepForm.isOpen,
+                    isActive: actionStepForm.isActive
+                  };
+                  const updatedSteps = selectedAction.getActionStepDtos.map(s => s.id === updatedStep.id ? updatedStep : s);
+                  const updatedAction = { ...selectedAction, getActionStepDtos: updatedSteps };
+                  setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+                  setSelectedAction(updatedAction);
+                  setIsEditActionStepOpen(false);
+                }
+              }}
+            >
+              <Save className="h-5 w-5" />
+              Update Step
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
         <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 flex flex-row overflow-hidden rounded-3xl border-0 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] bg-white">
           {/* WhatsApp Style Sidebar - List View (Increased width: 25-30%) */}
@@ -5500,7 +8161,16 @@ export default function App() {
                   </div>
                   <h2 className="text-lg font-bold tracking-tight text-[#111b21]">HanssonHub Chats</h2>
                 </div>
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-9 w-9 rounded-full text-[#54656f]" 
+                    onClick={() => setIsNewChatOpen(true)}
+                    title="New Chat"
+                  >
+                    <PlusCircle className="h-5 w-5" />
+                  </Button>
                   <MessageSquare className="h-5 w-5 text-[#54656f]" />
                 </div>
               </div>
@@ -5508,60 +8178,77 @@ export default function App() {
 
             <ScrollArea className="flex-1 bg-white">
               <div className="divide-y divide-slate-50">
-                {[
-                  { id: 'general', name: 'Home Hub', lastMsg: chatMessages.filter(m => m.chatId === 'general').slice(-1)[0]?.text || 'No messages yet', time: 'Now', icon: <HomeIcon className="h-5 w-5" />, online: true, unread: 0 },
-                  { id: 'maint', name: 'Maintenance', lastMsg: 'Your request #231 is processed.', time: '2:45 PM', icon: <Wrench className="h-5 w-5" />, online: true, unread: 2 },
-                  { id: 'family', name: 'Family Group', lastMsg: 'Dinner at 7?', time: 'Yesterday', icon: <Users className="h-5 w-5" />, online: false, unread: 0 },
-                  { id: 'sec', name: 'Security Alerts', lastMsg: 'Front door unlocked.', time: 'Tuesday', icon: <ShieldAlert className="h-5 w-5" />, online: true, unread: 0 },
-                  { id: 'work', name: 'Office Hub', lastMsg: 'Meeting starting in 10.', time: 'Monday', icon: <Building2 className="h-5 w-5" />, online: false, unread: 1 },
-                ].map((item) => (
-                  <button 
-                    key={item.id}
-                    onClick={() => {
-                      setActiveChatId(item.id);
-                      setChatSearchQuery("");
-                      setIsChatSearchVisible(false);
-                    }}
-                    className={cn(
-                      "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] transition-all text-left group relative border-l-4 border-transparent",
-                      activeChatId === item.id && "bg-[#f0f2f5] border-primary"
-                    )}
-                  >
-                    <div className="relative shrink-0 flex items-center">
-                      <div className={cn(
-                        "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden",
-                        activeChatId === item.id ? "bg-primary text-primary-foreground" : "bg-slate-200 text-slate-500 group-hover:bg-white transition-colors"
-                      )}>
-                        {item.icon}
-                      </div>
-                      {item.online && (
-                        <span className="absolute bottom-2 right-0 h-3.5 w-3.5 bg-[#25d366] border-[3px] border-white rounded-full" />
-                      )}
+                {chats.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                    <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+                      <MessageSquare className="h-8 w-8 text-slate-300" />
                     </div>
-                    <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
-                      <div className="flex justify-between items-center mb-0.5">
-                        <span className="font-semibold text-[16px] text-[#111b21] truncate">{item.name}</span>
-                        <span className={cn(
-                          "text-[11px] font-medium tracking-tight px-1",
-                          item.unread > 0 ? "text-[#25d366]" : "text-[#667781]"
-                        )}>{item.time}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-1">
-                        <div className="flex items-center gap-1 min-w-0">
-                          {activeChatId === item.id && item.id === 'general' && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
-                          <p className="text-[14px] text-[#667781] truncate leading-relaxed">
-                            {item.id === 'general' ? (chatMessages.filter(m => m.chatId === 'general').slice(-1)[0]?.text || item.lastMsg) : item.lastMsg}
-                          </p>
-                        </div>
-                        {item.unread > 0 && (
-                          <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm">
-                            {item.unread}
-                          </div>
+                    <p className="text-sm font-medium text-slate-500 mb-4">No active conversations</p>
+                    <Button onClick={() => setIsNewChatOpen(true)} size="sm" className="rounded-full px-6">
+                      Start your first chat
+                    </Button>
+                  </div>
+                ) : (
+                  chats.map((chat) => {
+                    const lastMsg = chat.lastMessage;
+                    const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
+                    
+                    return (
+                      <button 
+                        key={chat.id}
+                        onClick={() => {
+                          setActiveChatId(chat.id);
+                          setChatSearchQuery("");
+                          setIsChatSearchVisible(false);
+                        }}
+                        className={cn(
+                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] transition-all text-left group relative border-l-4 border-transparent",
+                          activeChatId === chat.id && "bg-[#f0f2f5] border-primary"
                         )}
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                      >
+                        <div className="relative shrink-0 flex items-center">
+                          <div className={cn(
+                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100",
+                            activeChatId === chat.id ? "bg-primary/10" : "bg-slate-50"
+                          )}>
+                            {chat.imageUrl ? (
+                              <img src={chat.imageUrl} alt={chat.name} className="h-full w-full object-cover" />
+                            ) : (
+                              chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <UserIcon className="h-6 w-6 text-slate-400" />
+                            )}
+                          </div>
+                          {isOnline && (
+                            <span className="absolute bottom-2 right-0 h-3.5 w-3.5 bg-[#25d366] border-[3px] border-white rounded-full" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
+                          <div className="flex justify-between items-center mb-0.5">
+                            <span className="font-semibold text-[16px] text-[#111b21] truncate">{chat.name || 'Private Chat'}</span>
+                            <span className={cn(
+                              "text-[11px] font-medium tracking-tight px-1",
+                              chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781]"
+                            )}>
+                              {lastMsg ? format(new Date(lastMsg.sentAt), 'HH:mm') : format(new Date(chat.createdAt), 'MMM d')}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1 min-w-0">
+                              {lastMsg && lastMsg.senderPersonId === userProfile.id && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
+                              <p className="text-[14px] text-[#667781] truncate leading-relaxed">
+                                {lastMsg ? lastMsg.content : (chat.description || 'No messages yet')}
+                              </p>
+                            </div>
+                            {chat.unreadCount > 0 && (
+                              <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm">
+                                {chat.unreadCount}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </ScrollArea>
           </div>
@@ -5570,65 +8257,74 @@ export default function App() {
           <div className="flex-1 flex flex-col bg-[#efeae2] relative overflow-hidden">
             {activeChatId ? (
               <>
-                {/* Essential Header */}
-                <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner">
-                        {activeChatId === 'general' ? <HomeIcon className="h-5 w-5" /> : 
-                         activeChatId === 'maint' ? <Wrench className="h-5 w-5" /> : 
-                         activeChatId === 'family' ? <Users className="h-5 w-5" /> : 
-                         activeChatId === 'sec' ? <ShieldAlert className="h-5 w-5" /> : <Building2 className="h-5 w-5" />}
+                {(() => {
+                  const chat = chats.find(c => c.id === activeChatId);
+                  if (!chat) return null;
+                  const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
+
+                  return (
+                    <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200">
+                            {chat.imageUrl ? (
+                              <img src={chat.imageUrl} alt={chat.name} className="h-full w-full object-cover" />
+                            ) : (
+                              chat.isGroup ? <Users className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />
+                            )}
+                          </div>
+                          {isOnline && (
+                            <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-[#f0f2f5] rounded-full" />
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px]">
+                            {chat.name || 'Private Chat'}
+                          </h3>
+                          <div className="flex items-center gap-1.5 ">
+                            <span className="text-[12px] text-[#667781] font-medium leading-none">
+                              {isOnline ? 'Online • Active now' : 'Offline'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-[#f0f2f5] rounded-full" />
-                    </div>
-                    <div>
-                      <h3 className="text-[16px] font-bold text-[#111b21]">
-                        {activeChatId === 'general' ? 'Home Hub' : 
-                         activeChatId === 'maint' ? 'Maintenance' : 
-                         activeChatId === 'family' ? 'Family Group' : 
-                         activeChatId === 'sec' ? 'Security Alerts' : 'Office Hub'}
-                      </h3>
-                      <div className="flex items-center gap-1.5 ">
-                        <span className="text-[12px] text-[#667781] font-medium leading-none">Online • Active now</span>
+                      <div className="flex items-center gap-1">
+                        {isChatSearchVisible && (
+                          <motion.div 
+                            initial={{ width: 0, opacity: 0 }}
+                            animate={{ width: 200, opacity: 1 }}
+                            className="mr-2"
+                          >
+                            <Input 
+                              placeholder="Search messages..." 
+                              className="h-8 text-xs bg-white border-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded-lg"
+                              value={chatSearchQuery}
+                              onChange={(e) => setChatSearchQuery(e.target.value)}
+                            />
+                          </motion.div>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn("rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50", isChatSearchVisible && "bg-slate-200 text-primary")}
+                          onClick={() => setIsChatSearchVisible(!isChatSearchVisible)}
+                        >
+                          <Search className="h-5 w-5" />
+                        </Button>
+                        <Separator orientation="vertical" className="h-5 mx-2 bg-[#d1d7db]" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => setIsChatModalOpen(false)} 
+                          className="rounded-full h-10 w-10 hover:bg-destructive/10 hover:text-destructive group/close"
+                          title="Close Chat"
+                        >
+                          <XCircle className="h-6 w-6 text-[#54656f] group-hover/close:text-destructive transition-colors" />
+                        </Button>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {isChatSearchVisible && (
-                      <motion.div 
-                        initial={{ width: 0, opacity: 0 }}
-                        animate={{ width: 200, opacity: 1 }}
-                        className="mr-2"
-                      >
-                        <Input 
-                          placeholder="Search messages..." 
-                          className="h-8 text-xs bg-white border-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded-lg"
-                          value={chatSearchQuery}
-                          onChange={(e) => setChatSearchQuery(e.target.value)}
-                        />
-                      </motion.div>
-                    )}
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className={cn("rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50", isChatSearchVisible && "bg-slate-200 text-primary")}
-                      onClick={() => setIsChatSearchVisible(!isChatSearchVisible)}
-                    >
-                      <Search className="h-5 w-5" />
-                    </Button>
-                    <Separator orientation="vertical" className="h-5 mx-2 bg-[#d1d7db]" />
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => setIsChatModalOpen(false)} 
-                      className="rounded-full h-10 w-10 hover:bg-destructive/10 hover:text-destructive group/close"
-                      title="Close Chat"
-                    >
-                      <XCircle className="h-6 w-6 text-[#54656f] group-hover/close:text-destructive transition-colors" />
-                    </Button>
-                  </div>
-                </header>
+                    </header>
+                  );
+                })()}
 
                 <div className="flex-1 relative overflow-hidden">
                   {/* WhatsApp background pattern */}
@@ -5645,9 +8341,9 @@ export default function App() {
 
                       <div className="space-y-4 flex-1">
                         {(() => {
-                          const currentMessages = chatMessages.filter(m => 
+                           const currentMessages = chatMessages.filter(m => 
                             m.chatId === activeChatId && 
-                            (!chatSearchQuery || m.text?.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                            (!chatSearchQuery || m.content?.toLowerCase().includes(chatSearchQuery.toLowerCase()))
                           );
 
                           if (currentMessages.length === 0) {
@@ -5664,7 +8360,7 @@ export default function App() {
                                 <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">Today</span>
                               </div>
                               {currentMessages.map((msg, idx) => {
-                                const isMe = msg.userId === userProfile.id.toString();
+                                const isMe = msg.senderPersonId === userProfile.id;
                                 return (
                                   <motion.div 
                                     initial={{ opacity: 0, y: 15, scale: 0.95 }}
@@ -5690,130 +8386,48 @@ export default function App() {
 
                                       {!isMe && (
                                         <div className="px-1 mb-1">
-                                          <span className="text-xs font-bold text-primary tracking-tight">{msg.userName}</span>
+                                          <span className="text-xs font-bold text-primary tracking-tight">{msg.senderName}</span>
                                         </div>
                                       )}
 
-                                      {/* Quoted Message */}
-                                      {msg.replyTo && (
-                                        <div className="mb-1 p-2 rounded-lg bg-black/5 border-l-4 border-primary/50 text-[13px] opacity-80 overflow-hidden">
-                                          <p className="font-bold text-xs mb-0.5 text-primary">{msg.replyTo.userName}</p>
-                                          <p className="truncate italic">{msg.replyTo.text}</p>
-                                        </div>
-                                      )}
-                                      
                                       <div className="px-1 py-0.5">
-                                        {msg.type === 'text' && (
-                                          <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.text}</p>
+                                        {msg.type === MessageType.Text && (
+                                          <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.content}</p>
                                         )}
-                                        {msg.type === 'image' && (
+                                        {msg.type === MessageType.Image && msg.attachments?.[0] && (
                                           <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
                                             <img 
-                                              src={msg.mediaUrl} 
+                                              src={msg.attachments[0].filePath} 
                                               alt="uploaded" 
                                               className="rounded-lg w-full h-auto max-h-[400px] object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm" 
                                               referrerPolicy="no-referrer"
                                             />
-                                            <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.text}</p>
+                                            {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
                                           </div>
                                         )}
-                                        {msg.type === 'file' && (
+                                        {msg.type === MessageType.File && msg.attachments?.[0] && (
                                           <div className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
                                             <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
                                               <FileText className="h-7 w-7 text-white" />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                              <p className="text-sm font-bold truncate text-[#111b21]">{msg.fileName}</p>
-                                              <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">PDF • 1.2 MB</p>
+                                              <p className="text-sm font-bold truncate text-[#111b21]">{msg.attachments[0].fileName}</p>
+                                              <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
+                                                {msg.attachments[0].contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(msg.attachments[0].fileSize / 1024 / 1024).toFixed(1)} MB
+                                              </p>
                                             </div>
                                             <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
                                               <Download className="h-4 w-4" />
                                             </Button>
                                           </div>
                                         )}
-                                        {msg.type === 'audio' && (
-                                          <div className="flex items-center gap-4 w-72 bg-[#f0f2f5]/40 p-2.5 rounded-xl border border-black/5">
-                                            <div className="relative shrink-0">
-                                              <Button 
-                                                size="icon" 
-                                                variant="ghost" 
-                                                className="h-12 w-12 rounded-full bg-white shadow-sm shrink-0 text-primary"
-                                                onClick={() => {
-                                                  if (playingAudioId === msg.id) {
-                                                    if (audioRef.current) {
-                                                      audioRef.current.pause();
-                                                    }
-                                                    setPlayingAudioId(null);
-                                                  } else {
-                                                    if (audioRef.current) {
-                                                      audioRef.current.pause();
-                                                    }
-                                                    const audio = new Audio(msg.mediaUrl);
-                                                    audioRef.current = audio;
-                                                    setPlayingAudioId(msg.id);
-                                                    setPlayingProgress(0);
-                                                    audio.play();
-                                                    
-                                                    audio.ontimeupdate = () => {
-                                                      setPlayingProgress(audio.currentTime);
-                                                    };
-                                                    
-                                                    audio.onended = () => {
-                                                      setPlayingAudioId(null);
-                                                      setPlayingProgress(0);
-                                                    };
-                                                  }
-                                                }}
-                                              >
-                                                {playingAudioId === msg.id ? (
-                                                  <Pause className="h-5 w-5 fill-current" />
-                                                ) : (
-                                                  <Play className="h-5 w-5 fill-current ml-0.5" />
-                                                )}
-                                              </Button>
-                                              <div className="absolute -top-1 -right-1 h-5 w-5 bg-primary rounded-full flex items-center justify-center border-2 border-white shadow-sm">
-                                                <Mic className="h-3 w-3 text-white" />
-                                              </div>
-                                            </div>
-                                            <div className="flex-1 flex flex-col gap-1.5">
-                                              <div className="flex items-end gap-[1px] h-8 pt-2">
-                                                {Array.from({length: 32}).map((_, i) => {
-                                                  const isPlayed = playingAudioId === msg.id && (i / 32) < (playingProgress / (msg.duration || 1));
-                                                  return (
-                                                    <div 
-                                                      key={i} 
-                                                      className={cn(
-                                                        "flex-1 rounded-full transition-all duration-300",
-                                                        isPlayed ? "bg-primary h-[80%]" : "bg-slate-300 h-[40%]"
-                                                      )} 
-                                                      style={{ 
-                                                        height: isPlayed ? `${40 + Math.random() * 40}%` : `${20 + Math.random() * 20}%`
-                                                      }} 
-                                                    />
-                                                  );
-                                                })}
-                                              </div>
-                                              <div className="flex justify-between items-center text-[10px] font-bold text-[#667781]">
-                                                <span>
-                                                  {playingAudioId === msg.id 
-                                                    ? `${Math.floor(playingProgress / 60)}:${Math.floor(playingProgress % 60).toString().padStart(2, '0')}`
-                                                    : `${Math.floor((msg.duration || 0) / 60)}:${Math.floor((msg.duration || 0) % 60).toString().padStart(2, '0')}`
-                                                  }
-                                                </span>
-                                                <span>Voice Note</span>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      <div className="flex items-center justify-end gap-1 px-1 mt-0.5 h-4">
-                                        <span className={cn(
-                                          "text-[10px] font-medium leading-none text-[#667781]"
-                                        )}>
-                                          {format(new Date(msg.timestamp || Date.now()), "HH:mm")}
-                                        </span>
-                                        {isMe && <CheckCheck className="h-4 w-4 text-[#53bdeb] ml-0.5" />}
+                                        
+                                        <div className="flex items-center justify-end gap-1 mt-1">
+                                          <span className="text-[10px] text-[#667781] font-medium uppercase tracking-tighter">
+                                            {format(new Date(msg.sentAt), 'HH:mm')}
+                                          </span>
+                                          {isMe && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
+                                        </div>
                                       </div>
                                     </div>
                                   </motion.div>
@@ -5841,8 +8455,8 @@ export default function App() {
                         className="mx-auto w-[95%] bg-white/80 backdrop-blur-sm p-3 rounded-t-xl border-t border-l border-r border-[#d1d7db] flex items-center justify-between gap-3 shadow-sm"
                       >
                         <div className="border-l-4 border-primary pl-3 flex-1 overflow-hidden">
-                          <p className="text-xs font-bold text-primary mb-0.5">{replyingTo.userName}</p>
-                          <p className="text-sm text-[#667781] truncate">{replyingTo.text}</p>
+                          <p className="text-xs font-bold text-primary mb-0.5">{replyingTo.senderName}</p>
+                          <p className="text-sm text-[#667781] truncate">{replyingTo.content}</p>
                         </div>
                         <Button 
                           variant="ghost" 
@@ -6043,6 +8657,209 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isNewChatOpen} onOpenChange={(open) => {
+        setIsNewChatOpen(open);
+        if (!open) {
+          setIsGroupMode(false);
+          setSelectedParticipants([]);
+          setNewGroupName("");
+          setNewGroupDescription("");
+        }
+      }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-0 shadow-2xl bg-white">
+          <DialogHeader className="p-6 pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="text-xl font-bold text-slate-900">
+                  {isGroupMode ? "Create New Group" : "Start New Chat"}
+                </DialogTitle>
+                <DialogDescription className="text-slate-500">
+                  {isGroupMode ? "Select participants to add to the group." : "Select a person to start a private conversation with."}
+                </DialogDescription>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-primary font-bold hover:bg-primary/5 rounded-full px-4"
+                onClick={() => setIsGroupMode(!isGroupMode)}
+              >
+                {isGroupMode ? "Cancel" : "New Group"}
+              </Button>
+            </div>
+          </DialogHeader>
+
+          {isGroupMode && (
+            <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                <Input 
+                  placeholder="e.g., Family Hub, Maintenance Team" 
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  className="bg-white border-slate-200 rounded-xl h-11"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
+                <Input 
+                  placeholder="What is this group about?" 
+                  value={newGroupDescription}
+                  onChange={(e) => setNewGroupDescription(e.target.value)}
+                  className="bg-white border-slate-200 rounded-xl h-11"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 bg-slate-50 border-b">
+             <div className="relative">
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+               <Input 
+                 placeholder={isGroupMode ? "Search participants..." : "Search people..."} 
+                 className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-1"
+               />
+             </div>
+          </div>
+
+          <ScrollArea className="h-[350px]">
+            <div className="p-2 space-y-1">
+              {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+                const isSelected = selectedParticipants.includes(user.id);
+                return (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      if (isGroupMode) {
+                        setSelectedParticipants(prev => 
+                          isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
+                        );
+                      } else {
+                        startDirectChat(user);
+                      }
+                    }}
+                    className={cn(
+                      "w-full p-3 flex items-center gap-4 rounded-2xl transition-all group",
+                      isSelected ? "bg-primary/5 ring-1 ring-primary/20 shadow-sm" : "hover:bg-slate-50"
+                    )}
+                  >
+                    <div className="h-12 w-12 rounded-full overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-slate-100 shrink-0 relative">
+                      <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                      {isGroupMode && (
+                        <div className={cn(
+                          "absolute inset-0 flex items-center justify-center transition-all",
+                          isSelected ? "bg-primary/60" : "bg-transparent"
+                        )}>
+                          {isSelected && <Check className="h-6 w-6 text-white" />}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h4 className="font-bold text-slate-800 group-hover:text-primary transition-colors">
+                        {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                      </h4>
+                      <p className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
+                        {user.getUserDto.roleName} • {user.disabled ? 'Offline' : 'Available'}
+                      </p>
+                    </div>
+                    {!isGroupMode && (
+                      <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                        <ChevronRight className="h-5 w-5" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </ScrollArea>
+          <div className="p-4 border-t bg-slate-50 flex gap-3">
+             <Button variant="outline" className="flex-1 rounded-xl h-11" onClick={() => setIsNewChatOpen(false)}>Cancel</Button>
+             {isGroupMode && (
+               <Button 
+                className="flex-1 rounded-xl h-11 shadow-lg shadow-primary/20" 
+                onClick={handleCreateGroup}
+                disabled={!newGroupName.trim() || selectedParticipants.length === 0}
+               >
+                 Create Group ({selectedParticipants.length})
+               </Button>
+             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <AnimatePresence>
+        {isScreensaverOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] bg-black cursor-pointer"
+            onClick={() => setIsScreensaverOpen(false)}
+          >
+            <div className="h-full w-full grid grid-cols-2 grid-rows-2 gap-1 p-1">
+              {[0, 1, 2, 3].map((i) => {
+                const cam = cameras.length > 0 ? cameras[i % cameras.length] : null;
+                const videoUrl = cam 
+                  ? (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4")
+                  : "";
+                
+                return (
+                  <div key={i} className="relative bg-slate-900 rounded-sm overflow-hidden border border-white/5">
+                    {cam ? (
+                      <>
+                        <video 
+                          src={videoUrl} 
+                          autoPlay 
+                          loop 
+                          muted 
+                          playsInline
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
+                          <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
+                          <span className="text-[10px] font-bold text-white uppercase tracking-widest">
+                            {(cam as any).cameraName || (cam as any).name || "Camera " + (i + 1)}
+                          </span>
+                        </div>
+                        <div className="absolute bottom-4 right-4 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
+                           <span className="text-[10px] font-mono text-white/70">{format(new Date(), 'HH:mm:ss')}</span>
+                        </div>
+                        <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent group-hover:border-white/5 transition-all" />
+                      </>
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600">
+                        <CameraOff className="h-12 w-12 opacity-20" />
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Signal - CAM {i+1}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Screensaver UI Overlays */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="text-white/20 text-9xl font-black uppercase tracking-[0.5em] select-none pointer-events-none">
+                CCTV
+              </div>
+            </div>
+            
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center gap-4">
+              <div className="px-6 py-3 bg-white/5 backdrop-blur-md rounded-full border border-white/10 flex items-center gap-4">
+                 <div className="flex flex-col items-center">
+                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Security Monitor</span>
+                   <span className="text-xl font-bold text-white tracking-widest">{format(new Date(), 'MMM dd, yyyy')}</span>
+                 </div>
+                 <div className="h-8 w-px bg-white/10" />
+                 <div className="flex flex-col items-center">
+                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Active Feeds</span>
+                   <span className="text-xl font-bold text-emerald-400">04</span>
+                 </div>
+              </div>
+              <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Click anywhere to resume session</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

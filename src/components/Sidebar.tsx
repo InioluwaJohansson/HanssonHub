@@ -46,7 +46,6 @@ export type NavView =
   | 'facility-actions'
   | 'facility-hardware'
   | 'facility-externals'
-  | 'facility-recordings'
   | 'facility-doors' 
   | 'facility-lights' 
   | 'facility-appliances' 
@@ -78,7 +77,7 @@ const iconMap: Record<string, any> = {
 };
 
 export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile, isCollapsed }: SidebarProps) {
-  const [isFacilitiesOpen, setIsFacilitiesOpen] = React.useState(true);
+  const [isFacilitiesOpen, setIsFacilitiesOpen] = React.useState(false);
 
   const firstName = userProfile.getPersonDetailsDto.firstName;
   const lastName = userProfile.getPersonDetailsDto.lastName;
@@ -98,7 +97,6 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
     { id: 'facility-externals', label: 'Externals', icon: Radio },
     { id: 'facility-hardware', label: 'Hardware', icon: Cpu },
     { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
-    { id: 'facility-recordings', label: 'Recordings', icon: Video },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
     { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
@@ -215,11 +213,6 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
             <div className="flex flex-col text-left">
               <span className="text-xs font-medium">{firstName} {lastName[0]}.</span>
               <span className="text-[10px] text-muted-foreground">{roleName}</span>
-            </div>
-          )}
-          {!isCollapsed && (
-            <div className="ml-auto rounded-md p-1">
-              <UserCircle className="h-4 w-4 text-muted-foreground" />
             </div>
           )}
         </button>

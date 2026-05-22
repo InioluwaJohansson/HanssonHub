@@ -120,12 +120,10 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
         className={cn(
           "group relative overflow-hidden transition-all duration-300 hover:shadow-md",
           isActive ? "border-primary/50 bg-primary/5" : "bg-card",
-          (onClick && device.type !== 'camera') ? "cursor-pointer" : ""
+          onClick ? "cursor-pointer" : ""
         )}
         onClick={() => {
-          if (device.type !== 'camera') {
-            onClick?.(device);
-          }
+          onClick?.(device);
         }}
       >
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -148,33 +146,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
             </div>
           </div>
           {!isSummary && (
-            <div className="flex items-center gap-1">
-              {onEdit && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEdit(device.id);
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-              )}
-              {onDelete && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(device.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
               {(device.type === 'door' || device.type === 'window') ? (
                 <Button 
                   variant="ghost" 
@@ -201,59 +173,57 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <Badge variant={isActive ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider">
-                {device.status.replace('-', ' ')}
-              </Badge>
-              {device.value !== undefined && (!isActive || isSummary) && (
-                <span className="text-xs font-mono text-muted-foreground">
-                  {`${device.value}%`}
-                </span>
-              )}
-              {device.type === 'appliance' && device.powerUsage !== undefined && (
-                <span className="text-[10px] font-mono text-muted-foreground">
-                  {device.powerUsage}W
-                </span>
-              )}
-            </div>
-            
-            {(device.type === 'door' || device.type === 'window') && !isSummary && (
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className={cn(
-                      "flex-1 text-[10px] transition-colors",
-                      isLocked 
-                        ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100" 
-                        : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                    )}
-                    onClick={() => handleDoorAction(isLocked ? 'unlock' : 'lock')}
-                  >
-                    {isLocked ? <Unlock className="mr-1 h-3 w-3" /> : <Lock className="mr-1 h-3 w-3" />}
-                    {isLocked ? 'Unlock' : 'Lock'}
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className={cn(
-                      "flex-1 text-[10px] transition-colors",
-                      isOpen
-                        ? "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                        : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                    )}
-                    onClick={() => handleDoorAction(isOpen ? 'close' : 'open')}
-                  >
-                    {isOpen ? (device.status === 'open-locked' ? <DoorOpen className="mr-1 h-3 w-3" /> : <WindowIcon className="mr-1 h-3 w-3" />) : <WindowIcon className="mr-1 h-3 w-3" />}
-                    {getOpenCloseLabel()}
-                  </Button>
-                </div>
-              </div>
+          <div className="flex items-center justify-between">
+            <Badge variant={isActive ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider">
+              {device.status.replace('-', ' ')}
+            </Badge>
+            {device.value !== undefined && (!isActive || isSummary) && (
+              <span className="text-xs font-mono text-muted-foreground">
+                {`${device.value}%`}
+              </span>
+            )}
+            {device.type === 'appliance' && device.powerUsage !== undefined && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {device.powerUsage}W
+              </span>
             )}
 
+            {(device.type === 'door' || device.type === 'window') && !isSummary && (
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  className={cn(
+                    "h-8 w-8 transition-colors rounded-lg border flex items-center justify-center shadow-sm",
+                    isLocked 
+                      ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100" 
+                      : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); handleDoorAction(isLocked ? 'unlock' : 'lock'); }}
+                  title={isLocked ? 'Unlock' : 'Lock'}
+                >
+                  {isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  className={cn(
+                    "h-8 w-8 transition-colors rounded-lg border flex items-center justify-center shadow-sm",
+                    isOpen
+                      ? "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                      : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); handleDoorAction(isOpen ? 'close' : 'open'); }}
+                  title={isOpen ? 'Close' : 'Open'}
+                >
+                  {isOpen ? (device.status === 'open-locked' ? <DoorOpen className="h-4 w-4" /> : <WindowIcon className="h-4 w-4" />) : <WindowIcon className="h-4 w-4" />}
+                </Button>
+              </div>
+            )}
+          </div>
+            
             {device.value !== undefined && isActive && device.type !== 'door' && device.type !== 'window' && !isSummary && (
-              <div className="pt-2 space-y-2">
+              <div className="pt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <div className="flex items-center gap-1">
                     <Sun className="h-3 w-3" />
@@ -267,7 +237,8 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
                   max="100"
                   step="1"
                   value={device.value}
-                  onChange={(e) => onValueChange?.(device.id, parseInt(e.target.value))}
+                  onChange={(e) => { e.stopPropagation(); onValueChange?.(device.id, parseInt(e.target.value)); }}
+                  onPointerDown={(e) => e.stopPropagation()}
                   className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
                 />
               </div>

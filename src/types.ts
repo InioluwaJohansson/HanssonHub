@@ -1,3 +1,67 @@
+export enum FacilityType {
+  Appliance = 1,
+  Camera,
+  Door,
+  External,
+  Light,
+  Window
+}
+
+export interface CreateActionDto {
+  actionName: string;
+  description: string;
+  personId: number;
+}
+
+export interface UpdateActionDto {
+  id: number;
+  personId: number;
+  actionName: string;
+  description: string;
+}
+
+export interface CreateActionStepDto {
+  actionId: number;
+  facilityType: FacilityType;
+  facilityTypeId: number;
+  brightnessLevel: number;
+  isLocked: boolean;
+  isOpen: boolean;
+  isActive: boolean;
+}
+
+export interface UpdateActionStepDto extends CreateActionStepDto {
+  id: number;
+}
+
+export interface GetActionStepDto {
+  id: number;
+  actionId: number;
+  facilityType: FacilityType;
+  facilityTypeId: number;
+  brightnessLevel: number;
+  isLocked: boolean;
+  isOpen: boolean;
+  isActive: boolean;
+}
+
+export interface GetActionDto extends UserBaseDefaultDto {
+  id: number;
+  actionId: string;
+  actionName: string;
+  actionDescription: string;
+  actionActive: boolean;
+  getActionStepDtos: GetActionStepDto[];
+}
+
+export interface ActionResponseModel extends BaseResponse {
+  data: GetActionDto;
+}
+
+export interface ActionsResponseModel extends BaseResponse {
+  data: GetActionDto[];
+}
+
 export type DeviceType = 'light' | 'door' | 'appliance' | 'camera' | 'speaker' | 'window';
 
 export type DoorStatus = 'locked' | 'unlocked' | 'open' | 'open-locked';
@@ -16,6 +80,11 @@ export interface Device {
   section?: string;
   doorType?: 'exterior' | 'interior';
   powerUsage?: number; // in Watts
+  ipAddress?: string;
+  username?: string;
+  password?: string;
+  streamPath?: string;
+  port?: number;
 }
 
 export interface SceneAction {
@@ -36,20 +105,31 @@ export interface Room {
   name: string;
   section: string;
   icon: string;
+  isHidden?: boolean;
 }
 
 export interface Section {
   id: string;
   name: string;
   type?: 'general' | 'secretive';
+  isHidden?: boolean;
 }
 
-export interface LogEntry {
-  id: string;
-  timestamp: string;
-  action: string;
-  userName: string;
-  userAvatar: string;
+export interface GetLogDto {
+  id: number;
+  getPersonDto: GetPersonDto;
+  personId: number;
+  actionType: string;
+  timeOfAction: string; // DateTime ISO string
+  logDetails: string;
+}
+
+export interface LogResponseModel extends BaseResponse {
+  data: GetLogDto;
+}
+
+export interface LogsResponseModel extends BaseResponse {
+  data: GetLogDto[];
 }
 
 export interface BaseAddressDto {
@@ -314,13 +394,29 @@ export interface HardwaresResponseModel extends BaseResponse {
 }
 
 export interface BaseDefaultDto {
-  id: number;
+  isActive?: boolean;
+  powerActive?: boolean;
+  roomId?: number;
+  roomName?: string;
+  sectionId?: number;
+  sectionName?: string;
+  createdBy?: number;
+  createdByName?: string;
+  createdOn?: string;
+  lastModifiedBy?: number;
+  lastModifiedByName?: string;
+  lastModifiedOn?: string;
+  deletedOn?: string;
+  deletedBy?: number;
+  isDeleted?: boolean;
+  personId?: number;
+  peronName?: string;
 }
 
 export interface GetExternalDto extends BaseDefaultDto {
   id: number;
-  externalsName: string;
-  externalsId: string;
+  externalName: string;
+  externalId: string;
   isTriggered: boolean;
   actionIds: number[];
 }
@@ -360,7 +456,230 @@ export interface UpdateHardwareDto {
 }
 
 export interface CreateBaseDefaultDto {
-  // Base default interface
+  roomId?: number;
+  sectionId?: number;
+}
+
+export enum DoorType {
+  Interior = 1,
+  Exterior,
+  Gate
+}
+
+export interface CreateLightDto extends CreateBaseDefaultDto {
+  lightName: string;
+  brightnessLevel: number;
+}
+
+export interface UpdateLightDto extends CreateBaseDefaultDto {
+  id: number;
+  lightName: string;
+  brightnessLevel: number;
+  isActive: boolean;
+}
+
+export interface GetLightDto extends BaseDefaultDto {
+  id: number;
+  lightName: string;
+  lightId: string;
+  brightnessLevel: number;
+}
+
+export interface LightResponseModel extends BaseResponse {
+  data: GetLightDto;
+}
+
+export interface LightsResponseModel extends BaseResponse {
+  data: GetLightDto[];
+}
+
+export interface CreateRoomDto {
+  roomName: string;
+  personId: number;
+  sectionId: number;
+  isHidden: boolean;
+}
+
+export interface UpdateRoomDto {
+  id: number;
+  roomName: string;
+  personId: number;
+  sectionId: number;
+  isHidden: boolean;
+}
+
+export interface UserBaseDefaultDto {
+  createdBy: number;
+  createdByName: string;
+  createdOn: string;
+  lastModifiedBy: number;
+  lastModifiedByName: string;
+  lastModifiedOn?: string;
+  deletedOn?: string;
+  deletedBy: number;
+  isDeleted: boolean;
+  personId: number;
+  peronName: string;
+}
+
+export interface CreateSectionDto {
+  sectionName: string;
+  isHidden: boolean;
+}
+
+export interface UpdateSectionDto {
+  id: number;
+  sectionName: string;
+  isHidden: boolean;
+}
+
+export interface GetSectionDto extends UserBaseDefaultDto {
+  id: number;
+  sectionName: string;
+  sectionId: string;
+  isHidden: boolean;
+  rooms: GetRoomDto[];
+  doors: GetDoorDto[];
+  lights: GetLightDto[];
+  windows: GetWindowDto[];
+  appliances: GetApplianceDto[];
+  cameras: GetCameraDto[];
+  externals: GetExternalDto[];
+}
+
+export interface SectionResponseModel extends BaseResponse {
+  data: GetSectionDto;
+}
+
+export interface SectionsResponseModel extends BaseResponse {
+  data: GetSectionDto[];
+}
+
+export interface CreateWindowDto extends CreateBaseDefaultDto {
+  windowName: string;
+  windowId: string;
+  isOpen: boolean;
+  isLocked: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface UpdateWindowDto extends CreateBaseDefaultDto {
+  id: number;
+  windowName: string;
+  isOpen: boolean;
+  isLocked: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface GetWindowDto extends BaseDefaultDto {
+  id: number;
+  windowName: string;
+  windowId: string;
+  isOpen: boolean;
+  isLocked: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface WindowResponseModel extends BaseResponse {
+  data: GetWindowDto;
+}
+
+export interface WindowsResponseModel extends BaseResponse {
+  data: GetWindowDto[];
+}
+
+export interface GetRoomDto extends UserBaseDefaultDto {
+  id: number;
+  roomName: string;
+  roomId: string;
+  personId: number;
+  sectionId: number;
+  isHidden: boolean;
+  doors: GetDoorDto[];
+  lights: GetLightDto[];
+  windows: GetWindowDto[];
+  appliances: GetApplianceDto[];
+  cameras: GetCameraDto[];
+  externals: GetExternalDto[];
+}
+
+export interface RoomResponseModel extends BaseResponse {
+  data: GetRoomDto;
+}
+
+export interface RoomsResponseModel extends BaseResponse {
+  data: GetRoomDto[];
+}
+
+export interface CreateApplianceDto extends CreateBaseDefaultDto {
+  applianceName: string;
+}
+
+export interface UpdateApplianceDto extends CreateBaseDefaultDto {
+  id: number;
+  applianceName: string;
+  isActive: boolean;
+}
+
+export interface GetApplianceDto extends BaseDefaultDto {
+  id: number;
+  applianceName: string;
+  applianceId: string;
+}
+
+export interface ApplianceResponseModel extends BaseResponse {
+  data: GetApplianceDto;
+}
+
+export interface AppliancesResponseModel extends BaseResponse {
+  data: GetApplianceDto[];
+}
+
+export interface CreateDoorDto extends CreateBaseDefaultDto {
+  doorName: string;
+  doorType: DoorType;
+  isLocked: boolean;
+  isOpen: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface UpdateDoorDto extends CreateBaseDefaultDto {
+  id: number;
+  doorName: string;
+  doorType: DoorType;
+  isLocked: boolean;
+  isOpen: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface GetDoorDto extends BaseDefaultDto {
+  id: number;
+  doorName: string;
+  doorId: string;
+  doorType: DoorType;
+  isLocked: boolean;
+  isOpen: boolean;
+  openedBy: number;
+  lockedBy: number;
+  unlockedBy: number;
+}
+
+export interface DoorResponseModel extends BaseResponse {
+  data: GetDoorDto;
+}
+
+export interface DoorsResponseModel extends BaseResponse {
+  data: GetDoorDto[];
 }
 
 export interface CreateExternalDto extends CreateBaseDefaultDto {
@@ -371,7 +690,179 @@ export interface CreateExternalDto extends CreateBaseDefaultDto {
 export interface UpdateExternalDto extends CreateBaseDefaultDto {
   id: number;
   externalName: string;
+  isTriggered: boolean;
+  isActive: boolean;
   actionIds: number[];
+}
+
+export interface CreateCameraDto extends CreateBaseDefaultDto {
+  cameraName: string;
+  ipAddress: string;
+  username: string;
+  password?: string;
+  streamPath: string;
+  port: number;
+}
+
+export interface UpdateCameraDto extends CreateBaseDefaultDto {
+  id: number;
+  cameraName: string;
+  isActive: boolean;
+  ipAddress: string;
+  username: string;
+  password?: string;
+  streamPath: string;
+  port: number;
+}
+
+export interface GetCameraDto extends BaseDefaultDto {
+  id: number;
+  cameraName: string;
+  cameraId: string;
+  liveStreamUrl: string;
+  recordings: GetRecordingDto[];
+}
+
+export interface CameraResponseModel extends BaseResponse {
+  data: GetCameraDto;
+}
+
+export interface CamerasResponseModel extends BaseResponse {
+  data: GetCameraDto[];
+}
+
+export interface GetRecordingDto {
+  filePath: string;
+  startTime: string;
+  endTime: string;
+}
+
+export enum MessageType {
+  Text = 1,
+  Image,
+  Video,
+  File,
+  Location,
+  Contact,
+  Audio
+}
+
+export interface CreateDirectChatDto {
+  recipientPersonId: number;
+}
+
+export interface CreateGroupChatDto {
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  participantPersonIds: number[];
+}
+
+export interface UpdateGroupChatDto {
+  name: string;
+  description?: string;
+  imageUrl?: string;
+}
+
+export interface AddParticipantsDto {
+  personIds: number[];
+}
+
+export interface RemoveParticipantDto {
+  personId: number;
+}
+
+export interface MessageAttachmentDto {
+  fileName: string;
+  filePath: string;
+  contentType: string;
+  fileSize: number;
+  thumbnailPath?: string;
+}
+
+export interface SendMessageDto {
+  chatId: number;
+  content?: string;
+  type: MessageType;
+  attachments: MessageAttachmentDto[];
+}
+
+export interface EditMessageDto {
+  messageId: number;
+  content: string;
+}
+
+export interface DeleteMessageDto {
+  messageId: number;
+}
+
+export interface MessageDto {
+  id: number;
+  chatId: number;
+  senderPersonId: number;
+  senderName: string;
+  senderProfileImage?: string;
+  content?: string;
+  type: MessageType;
+  isEdited: boolean;
+  isDeleted: boolean;
+  sentAt: string; // ISO string
+  attachments: MessageAttachmentDto[];
+}
+
+export interface ChatParticipantDto {
+  personId: number;
+  fullName: string;
+  profileImageUrl?: string;
+  isAdmin: boolean;
+  isOnline: boolean;
+}
+
+export interface ChatDto {
+  id: number;
+  name?: string;
+  description?: string;
+  isGroup: boolean;
+  imageUrl?: string;
+  createdAt: string; // ISO string
+  participants: ChatParticipantDto[];
+  lastMessage?: MessageDto;
+  unreadCount: number;
+}
+
+export interface RealtimeMessageDto {
+  messageId: number;
+  chatId: number;
+  senderPersonId: number;
+  senderName: string;
+  content?: string;
+  type: MessageType;
+  sentAt: string; // ISO string
+  attachments: MessageAttachmentDto[];
+}
+
+export interface TypingDto {
+  chatId: number;
+  personId: number;
+  name: string;
+  isTyping: boolean;
+}
+
+export interface ReadReceiptDto {
+  chatId: number;
+  personId: number;
+  readAt: string; // ISO string
+}
+
+export interface PresenceDto {
+  personId: number;
+  isOnline: boolean;
+}
+
+export interface MessageQueryDto {
+  chatId: number;
+  page: number;
+  pageSize: number;
 }
 
 
