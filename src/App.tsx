@@ -32,7 +32,6 @@ import {
   Contact as ContactType, 
   ContactCategory, 
   UserProfile,
-  User,
   CreatePersonDto,
   UpdateUserDto,
   UpdateUserPasswordDto,
@@ -71,9 +70,11 @@ import {
   MessageType,
   SendMessageDto,
   CreateDirectChatDto,
-  CreateGroupChatDto
+  CreateGroupChatDto,
+  CreateRoomDto
 } from './types';
 import { INITIAL_CHATS, INITIAL_CHAT_MESSAGES } from './chatData';
+import { toast, Toaster } from 'sonner';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
@@ -153,6 +154,7 @@ import {
   Check,
   Edit3,
   Key,
+  ClipboardCheck,
   ShieldAlert,
   MoreVertical,
   User as UserIcon,
@@ -303,7 +305,54 @@ export default function App() {
   const [contactSearchQuery, setContactSearchQuery] = React.useState('');
   const [contactSortCategory, setContactSortCategory] = React.useState<string>('all');
   const [contactView, setContactView] = React.useState<'overview' | 'all'>('overview');
-  const [allUsers, setAllUsers] = React.useState<User[]>(INITIAL_USERS);
+  const [allUsers, setAllUsers] = React.useState<GetPersonDto[]>(INITIAL_USERS);
+
+  const appNamesDetailList = React.useMemo(() => {
+    return {
+      applianceIdNames: appliances.map(a => ({ id: a.id, name: a.applianceName })),
+      cameraIdNames: cameras.map(c => ({ id: c.id, name: c.cameraName })),
+      lightIdNames: lights.map(l => ({ id: l.id, name: l.lightName })),
+      windowIdNames: windows.map(w => ({ id: w.id, name: w.windowName })),
+      doorIdNames: doors.map(d => ({ id: d.id, name: d.doorName })),
+      externalIdNames: externals.map(e => ({ id: e.id, name: e.externalName })),
+      personIdNames: allUsers.map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
+      contactCategoryIdNames: contactCategories.map(c => ({ id: c.id, name: c.name })),
+      applianceType: [
+        { id: 1, name: 'TV' },
+        { id: 2, name: 'Fridge' },
+        { id: 3, name: 'Coffee Maker' },
+        { id: 4, name: 'AC' },
+        { id: 5, name: 'Sprinklers' }
+      ],
+      gender: [
+        { id: 1, name: 'Male' },
+        { id: 2, name: 'Female' },
+        { id: 3, name: 'Other' }
+      ],
+      doorType: [
+        { id: 1, name: 'Interior' },
+        { id: 2, name: 'Exterior' }
+      ],
+      facilityType: [
+        { id: 1, name: 'Appliance' },
+        { id: 2, name: 'Camera' },
+        { id: 3, name: 'Light' },
+        { id: 4, name: 'Door' },
+        { id: 5, name: 'Window' }
+      ],
+      role: [
+        { id: 1, name: 'Owner' },
+        { id: 2, name: 'Wife' },
+        { id: 3, name: 'Husband' },
+        { id: 4, name: 'Son' },
+        { id: 5, name: 'Daughter' },
+        { id: 6, name: 'Relative' },
+        { id: 7, name: 'Visitor' }
+      ],
+      roomIds: INITIAL_ROOMS.map(r => ({ id: r.id, name: r.roomName })),
+      sectionIds: INITIAL_SECTIONS.map(s => ({ id: s.id, name: s.sectionName })),
+    };
+  }, [appliances, cameras, lights, windows, doors, externals, allUsers, contactCategories]);
 
   // Person/User Modals
   const [isAddPersonOpen, setIsAddPersonOpen] = React.useState(false);
@@ -424,8 +473,14 @@ export default function App() {
   });
 
   const [isAddRoomOpen, setIsAddRoomOpen] = React.useState(false);
+  const [roomLocked, setRoomLocked] = React.useState(false);
+  const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
+  const [generatedToken, setGeneratedToken] = React.useState("");
+  const [newGroupImageUrl, setNewGroupImageUrl] = React.useState("");
+  const [editingGroupId, setEditingGroupId] = React.useState<number | null>(null);
+  const [isEditGroupOpen, setIsEditGroupOpen] = React.useState(false);
   const [isAddSceneOpen, setIsAddSceneOpen] = React.useState(false);
-  const [newRoom, setNewRoom] = React.useState<Partial<Room>>({
+  const [newRoom, setNewRoom] = React.useState<Partial<Room & CreateRoomDto>>({
     name: '',
     section: '',
     icon: 'Sofa'
@@ -539,7 +594,7 @@ export default function App() {
     }
     inactivityTimerRef.current = setTimeout(() => {
       setIsScreensaverOpen(true);
-    }, 20000); // 20 seconds for demo/testing
+    }, 60000); // 1 minute
   }, []);
 
   const handleActivity = React.useCallback(() => {
@@ -835,6 +890,14 @@ export default function App() {
   const handleCreateGroup = () => {
     if (!newGroupName.trim() || selectedParticipants.length === 0) return;
 
+    // Apply CreateGroupChatDto
+    const groupPayload: CreateGroupChatDto = {
+      name: newGroupName,
+      description: newGroupDescription,
+      imageUrl: newGroupImageUrl || `https://picsum.photos/seed/${newGroupName}/100/100`,
+      participantPersonIds: [userProfile.id, ...selectedParticipants]
+    };
+
     const participants: ChatParticipantDto[] = [
       {
         personId: userProfile.id,
@@ -857,10 +920,10 @@ export default function App() {
 
     const newChat: ChatDto = {
       id: Date.now(),
-      name: newGroupName,
-      description: newGroupDescription,
+      name: groupPayload.name,
+      description: groupPayload.description,
       isGroup: true,
-      imageUrl: `https://picsum.photos/seed/${newGroupName}/100/100`,
+      imageUrl: groupPayload.imageUrl,
       createdAt: new Date().toISOString(),
       participants,
       unreadCount: 0
@@ -876,7 +939,43 @@ export default function App() {
   };
 
   // Room Lock State
-  const [roomLocked, setRoomLocked] = React.useState(false);
+  const handleUpdateGroup = () => {
+    if (!editingGroupId || !newGroupName.trim()) return;
+
+    const participants: ChatParticipantDto[] = [
+      {
+        personId: userProfile.id,
+        fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
+        isAdmin: true,
+        isOnline: true
+      },
+      ...selectedParticipants.map(id => {
+        const p = allUsers.find(u => u.id === id);
+        return {
+          personId: id,
+          fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
+          profileImageUrl: p?.getPersonDetailsDto.imageUrl,
+          isAdmin: false,
+          isOnline: !(p?.disabled)
+        };
+      })
+    ];
+
+    setChats(prev => prev.map(chat => 
+      chat.id === editingGroupId 
+        ? { 
+            ...chat, 
+            name: newGroupName, 
+            description: newGroupDescription, 
+            imageUrl: newGroupImageUrl || chat.imageUrl,
+            participants: participants
+          } 
+        : chat
+    ));
+    setIsEditGroupOpen(false);
+    setEditingGroupId(null);
+  };
 
   const toggleRoomLock = (roomId: string) => {
     const nextState = !roomLocked;
@@ -1911,7 +2010,7 @@ export default function App() {
                 <X className="h-4 w-4" />
               </DialogClose>
               </div>
-              <DialogHeader className="pb-4 border-b text-left pr-12">
+              <DialogHeader className="mb-0 border-b text-left pr-12 pb-4">
                 <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-foreground justify-start">
                   <ClipboardList className="h-5.5 w-5.5 text-primary" />
                   View Log Info
@@ -1922,7 +2021,7 @@ export default function App() {
               </DialogHeader>
 
               {selectedLog && (
-                <div className="space-y-6 pt-5 text-left">
+                <div className="space-y-6 pt-[3px] text-left">
                   <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-2xl border border-muted">
                     <div className="h-12 w-12 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-primary/20">
                       <img 
@@ -2683,6 +2782,18 @@ export default function App() {
                 </Card>
               );
             })}
+            <Button 
+              variant="outline" 
+              className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
+              onClick={() => {
+                const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                setGeneratedToken(token);
+                setIsTokenModalOpen(true);
+              }}
+            >
+              <Key className="h-6 w-6 text-muted-foreground" />
+              <span className="text-sm font-medium text-muted-foreground">Generate Token</span>
+            </Button>
             <Button 
               variant="outline" 
               className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
@@ -3703,6 +3814,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
+      <Toaster position="top-center" richColors />
       <Sidebar 
         activeView={activeView} 
         onViewChange={setActiveView} 
@@ -3783,7 +3895,7 @@ export default function App() {
               Connect a new smart device to your HanssonHub.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="name" className="flex items-center gap-2">
                 {(() => {
@@ -3923,7 +4035,7 @@ export default function App() {
             <div className="grid gap-2">
               <Label htmlFor="section" className="flex items-center gap-2">
                 <Layers className="h-3 w-3 text-muted-foreground" />
-                Section (Optional)
+                Section Name (Optional)
               </Label>
               <Select 
                 value={newDevice.section} 
@@ -3943,7 +4055,7 @@ export default function App() {
             <div className="grid gap-2">
               <Label htmlFor="room" className="flex items-center gap-2">
                 <Sofa className="h-3 w-3 text-muted-foreground" />
-                Room (Optional)
+                Room Name (Optional)
               </Label>
               <Select 
                 value={newDevice.room} 
@@ -3984,7 +4096,7 @@ export default function App() {
       {/* Add Room Dialog */}
       <Dialog open={isAddRoomOpen} onOpenChange={setIsAddRoomOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
               Add New Room
@@ -3993,7 +4105,7 @@ export default function App() {
               Create a new room in your HanssonHub.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="room-name" className="flex items-center gap-2">
                 <Edit3 className="h-3 w-3 text-muted-foreground" />
@@ -4007,9 +4119,41 @@ export default function App() {
               />
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="room-person" className="flex items-center gap-2">
+                <UserIcon className="h-3 w-3 text-muted-foreground" />
+                Person Name
+              </Label>
+              <Select 
+                value={newRoom.personId?.toString() || 'none'} 
+                onValueChange={(v) => setNewRoom(prev => ({ ...prev, personId: v === 'none' ? undefined : parseInt(v) }))}
+              >
+                <SelectTrigger id="room-person">
+                  <SelectValue placeholder="Select person" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Person Assigned</SelectItem>
+                  {allUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id.toString()}>
+                      <div className="flex items-center gap-2">
+                        <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
+                          <img 
+                            src={u.getPersonDetailsDto.imageUrl} 
+                            alt={u.getPersonDetailsDto.firstName} 
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="room-section" className="flex items-center gap-2">
                 <Layers className="h-3 w-3 text-muted-foreground" />
-                Section (Optional)
+                Section Name (Optional)
               </Label>
               <Select 
                 value={newRoom.section} 
@@ -4071,14 +4215,14 @@ export default function App() {
       </Dialog>
       <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
               Edit {editingSection?.name || 'Section'}
             </DialogTitle>
             <DialogDescription>Update the details and visibility of this section.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
                 <Layers className="h-3.5 w-3.5 text-muted-foreground" />
@@ -4148,7 +4292,7 @@ export default function App() {
               Update your account password. You will need your current password and your authorization code.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="password-token">Security Token</Label>
               <Input 
@@ -4193,7 +4337,7 @@ export default function App() {
       {/* Authorization Code Dialog */}
       <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
         <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 shadow-lg shadow-yellow-100/50">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2 text-yellow-700">
               <ShieldAlert className="h-5 w-5" />
               Authorization Required
@@ -4202,7 +4346,7 @@ export default function App() {
               This is a sensitive operation. Please enter your credentials to authorize the action.
             </DialogDescription>
           </DialogHeader>
-        <div className="grid gap-4 py-4">
+        <div className="grid gap-4 pt-[3px] pb-4">
           <div className="grid gap-2">
             <Label htmlFor="auth-pwd">Login Password</Label>
             <Input 
@@ -4293,7 +4437,7 @@ export default function App() {
       {/* Add New Person Dialog */}
       <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
         <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-primary" />
               Add New Household Member
@@ -4301,7 +4445,7 @@ export default function App() {
             <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[80vh] px-1">
-            <div className="grid gap-6 py-4">
+            <div className="grid gap-6 pt-[3px] py-4">
               <div className="space-y-4">
                 <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
                   <UserIcon className="h-4 w-4" />
@@ -4421,7 +4565,7 @@ export default function App() {
             </DialogTitle>
             <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-role-select">Select New Role</Label>
               <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
@@ -4465,7 +4609,7 @@ export default function App() {
       {/* View Person Details Dialog */}
       <Dialog open={isViewPersonDetailsOpen} onOpenChange={setIsViewPersonDetailsOpen}>
         <DialogContent className="sm:max-w-[600px]" showCloseButton={false}>
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <DialogTitle className="flex items-center gap-2">
@@ -4538,7 +4682,7 @@ export default function App() {
             </div>
           </DialogHeader>
           <ScrollArea className="max-h-[70vh]">
-            <div className="space-y-6 py-4">
+            <div className="space-y-6 pt-[3px] pb-4">
               {viewingPerson && (
                 <>
                   {/* Identity Section */}
@@ -4625,7 +4769,7 @@ export default function App() {
             </DialogTitle>
             <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="cat-name">Category Name</Label>
               <Input 
@@ -4683,7 +4827,7 @@ export default function App() {
             </DialogTitle>
             <DialogDescription>Update category details and icon.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-cat-name">Category Name</Label>
               <Input 
@@ -4734,7 +4878,7 @@ export default function App() {
 
       <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) setEditingContactId(null); }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
               {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
@@ -4742,7 +4886,7 @@ export default function App() {
             <DialogDescription>Fill in the contact details and addresses.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh]">
-            <div className="grid gap-6 py-4">
+            <div className="grid gap-6 pt-[3px] pb-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label className="flex items-center gap-2">
@@ -4966,7 +5110,7 @@ export default function App() {
 
       <Dialog open={isDeleteContactOpen} onOpenChange={setIsDeleteContactOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <ShieldAlert className="h-5 w-5" />
               Delete Contact
@@ -4984,7 +5128,7 @@ export default function App() {
 
       <Dialog open={isAddSceneOpen} onOpenChange={setIsAddSceneOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Film className="h-5 w-5 text-primary" />
               Add New Scene
@@ -4993,7 +5137,7 @@ export default function App() {
               Create a new automated scene for your home.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="scene-name">Scene Name</Label>
               <Input 
@@ -5031,14 +5175,14 @@ export default function App() {
 
       <Dialog open={isAddSectionOpen} onOpenChange={setIsAddSectionOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-primary" />
               Add New Section
             </DialogTitle>
             <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="sec-name" className="flex items-center gap-2">
                 <Layers className="h-3.5 w-3.5 text-muted-foreground" />
@@ -5195,7 +5339,7 @@ export default function App() {
             <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
           </DialogHeader>
           {editingDevice && (
-            <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
+            <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-name" className="flex items-center gap-2">
                   {(() => {
@@ -5409,7 +5553,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
               View {viewingRoom?.name || 'Room'}
@@ -5421,14 +5565,14 @@ export default function App() {
           {viewingRoom && (() => {
             const currentRoomDto = INITIAL_ROOMS.find(r => r.roomId === viewingRoom.id) as any;
             return (
-              <div className="py-4 space-y-5">
+              <div className="pt-[3px] pb-4 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
                     <div className="font-medium text-lg">{viewingRoom.name}</div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium">{sections.find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
                   </div>
                   {currentRoomDto && (
@@ -5442,7 +5586,7 @@ export default function App() {
                         <div className="font-medium">{currentRoomDto.createdOn ? format(new Date(currentRoomDto.createdOn), 'PPp') : 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
                         <div className="font-medium">{currentRoomDto.peronName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
@@ -5474,10 +5618,62 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Token Generation Modal */}
+      <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white" showCloseButton={false}>
+          <div className="absolute right-4 top-4 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 transition-colors" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="mb-0 text-left pb-4">
+            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900">
+              <Key className="h-6 w-6 text-primary" />
+              Generated Token
+            </DialogTitle>
+            <DialogDescription className="text-xs mt-1 text-slate-500">
+              Copy this token and keep it safe. It is required for external system integrations.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 pt-4">
+            <div className="bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Authentication Token</span>
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-100 text-[10px] font-bold">READY</Badge>
+              </div>
+              <div className="bg-white dark:bg-black p-4 rounded-xl border border-slate-100 dark:border-slate-800 font-mono text-sm break-all select-all text-primary shadow-inner">
+                {generatedToken}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Button 
+                className="w-full h-12 rounded-xl text-sm font-bold shadow-lg shadow-primary/20"
+                onClick={() => {
+                  navigator.clipboard.writeText(generatedToken);
+                  toast.success("Token copied to clipboard!");
+                }}
+              >
+                <ClipboardCheck className="mr-2 h-5 w-5" />
+                Copy to Clipboard
+              </Button>
+              <Button 
+                variant="outline" 
+                className="w-full h-12 rounded-xl text-sm font-bold border-slate-200 text-slate-600"
+                onClick={() => setIsTokenModalOpen(false)}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Room Dialog */}
       <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
               Edit {editingRoom?.name || 'Room'}
@@ -5485,7 +5681,7 @@ export default function App() {
             <DialogDescription>Update the details of this room.</DialogDescription>
           </DialogHeader>
           {editingRoom && (
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-4 pt-[3px] pb-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-name" className="flex items-center gap-2">
                   <Edit3 className="h-3 w-3 text-muted-foreground" />
@@ -5535,6 +5731,38 @@ export default function App() {
                     <SelectItem value="Bath">Bathroom (Bath)</SelectItem>
                     <SelectItem value="Car">Garage (Car)</SelectItem>
                     <SelectItem value="Trees">Outdoor (Trees)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-room-person" className="flex items-center gap-2">
+                  <UserIcon className="h-3 w-3 text-muted-foreground" />
+                  Assigned Person
+                </Label>
+                <Select 
+                  value={editingRoom.personId?.toString() || 'none'} 
+                  onValueChange={(v) => setEditingRoom({ ...editingRoom, personId: v === 'none' ? undefined : parseInt(v) })}
+                >
+                  <SelectTrigger id="edit-room-person">
+                    <SelectValue placeholder="Select person" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Person Assigned</SelectItem>
+                    {allUsers.map(u => (
+                      <SelectItem key={u.id} value={u.id.toString()}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
+                            <img 
+                              src={u.getPersonDetailsDto.imageUrl} 
+                              alt={u.getPersonDetailsDto.firstName} 
+                              className="h-full w-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -5594,14 +5822,14 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Contact className="h-5 w-5 text-primary" />
               View {viewingContact?.firstName || 'Contact'}
             </DialogTitle>
           </DialogHeader>
           {viewingContact && (
-            <div className="flex flex-col gap-6 py-4 overflow-y-auto max-h-[70vh] pr-2">
+            <div className="flex flex-col gap-6 pt-[3px] pb-4 overflow-y-auto max-h-[70vh] pr-2">
               <div className="flex items-center gap-4">
                 <div className="h-20 w-20 rounded-full overflow-hidden bg-muted flex items-center justify-center text-3xl font-bold border-4 border-primary/10">
                   {viewingContact.imageUrl ? (
@@ -5708,7 +5936,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
               View {selectedHardware?.hardwareName || 'Hardware'}
@@ -5719,7 +5947,7 @@ export default function App() {
           </DialogHeader>
 
           {selectedHardware && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] pb-4">
               {/* Left Column: Details */}
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
@@ -5845,7 +6073,7 @@ export default function App() {
       {/* Add Hardware Modal */}
       <Dialog open={isAddHardwareOpen} onOpenChange={setIsAddHardwareOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
               Add New Hardware
@@ -5855,7 +6083,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3">
+          <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
               <Label htmlFor="add-hw-name">Hardware Name</Label>
               <Input 
@@ -5897,7 +6125,7 @@ export default function App() {
       {/* Edit Hardware Modal (UpdateHardwareDto wrapper) */}
       <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
         <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-[90vw]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-6 w-6 text-primary" />
               Edit {hardwareForm?.hardwareName || 'Hardware'}
@@ -5907,7 +6135,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] py-4">
             {/* Left Column: Editable Details */}
             <div className="space-y-6">
               <div className="space-y-2">
@@ -5948,23 +6176,23 @@ export default function App() {
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Connected Appliances</span>
                 <div className="flex flex-wrap gap-2">
-                  {devices.filter(d => d.type === 'appliance').map(dev => {
-                    const isSelected = hardwareForm.applianceIdNames?.some(x => x.id.toString() === dev.id.toString());
+                  {appliances.map(dev => {
+                    const isSelected = hardwareForm.applianceIdNames?.some(x => x.id === dev.id);
                     return (
                       <Badge 
-                        key={dev.id} 
+                        key={`app-${dev.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.applianceIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id !== dev.id) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                            setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: dev.id, name: dev.applianceName }] }));
                           }
                         }}
                       >
-                        {dev.name} {isSelected && '✓'}
+                        {dev.applianceName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -5975,23 +6203,23 @@ export default function App() {
               <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Assigned Security Cameras</span>
                 <div className="flex flex-wrap gap-2">
-                  {devices.filter(d => d.type === 'camera').map(dev => {
-                    const isSelected = hardwareForm.cameraIdNames?.some(x => x.id.toString() === dev.id.toString());
+                  {cameras.map(dev => {
+                    const isSelected = hardwareForm.cameraIdNames?.some(x => x.id === dev.id);
                     return (
                       <Badge 
-                        key={dev.id} 
+                        key={`cam-${dev.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.cameraIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id !== dev.id) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                            setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: dev.id, name: dev.cameraName }] }));
                           }
                         }}
                       >
-                        {dev.name} {isSelected && '✓'}
+                        {dev.cameraName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -6002,23 +6230,23 @@ export default function App() {
               <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Controlled Lighting</span>
                 <div className="flex flex-wrap gap-2">
-                  {devices.filter(d => d.type === 'light').map(dev => {
-                    const isSelected = hardwareForm.lightIdNames?.some(x => x.id.toString() === dev.id.toString());
+                  {lights.map(dev => {
+                    const isSelected = hardwareForm.lightIdNames?.some(x => x.id === dev.id);
                     return (
                       <Badge 
-                        key={dev.id} 
+                        key={`light-${dev.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.lightIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id !== dev.id) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                            setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: dev.id, name: dev.lightName }] }));
                           }
                         }}
                       >
-                        {dev.name} {isSelected && '✓'}
+                        {dev.lightName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -6029,23 +6257,23 @@ export default function App() {
               <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Automated Windows</span>
                 <div className="flex flex-wrap gap-2">
-                  {devices.filter(d => d.type === 'window').map(dev => {
-                    const isSelected = hardwareForm.windowIdNames?.some(x => x.id.toString() === dev.id.toString());
+                  {windows.map(dev => {
+                    const isSelected = hardwareForm.windowIdNames?.some(x => x.id === dev.id);
                     return (
                       <Badge 
-                        key={dev.id} 
+                        key={`win-${dev.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.windowIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id !== dev.id) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                            setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: dev.id, name: dev.windowName }] }));
                           }
                         }}
                       >
-                        {dev.name} {isSelected && '✓'}
+                        {dev.windowName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -6056,23 +6284,23 @@ export default function App() {
               <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                 <span className="text-xs font-bold text-muted-foreground block">Select Automated Doors</span>
                 <div className="flex flex-wrap gap-2">
-                  {devices.filter(d => d.type === 'door').map(dev => {
-                    const isSelected = hardwareForm.doorIdNames?.some(x => x.id.toString() === dev.id.toString());
+                  {doors.map(dev => {
+                    const isSelected = hardwareForm.doorIdNames?.some(x => x.id === dev.id);
                     return (
                       <Badge 
-                        key={dev.id} 
+                        key={`door-${dev.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.doorIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id.toString() !== dev.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id !== dev.id) }));
                           } else {
-                            setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: parseInt(dev.id) || Math.floor(Math.random() * 100), name: dev.name }] }));
+                            setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: dev.id, name: dev.doorName }] }));
                           }
                         }}
                       >
-                        {dev.name} {isSelected && '✓'}
+                        {dev.doorName} {isSelected && '✓'}
                       </Badge>
                     );
                   })}
@@ -6084,16 +6312,16 @@ export default function App() {
                 <span className="text-xs font-bold text-muted-foreground block">Select Peripheral Auxiliaries</span>
                 <div className="flex flex-wrap gap-2">
                   {externals.map(ext => {
-                    const isSelected = hardwareForm.externalIdNames?.some(x => x.id.toString() === ext.id.toString());
+                    const isSelected = hardwareForm.externalIdNames?.some(x => x.id === ext.id);
                     return (
                       <Badge 
-                        key={ext.id} 
+                        key={`ext-${ext.id}`} 
                         variant={isSelected ? 'default' : 'outline'}
                         className="cursor-pointer hover:opacity-85"
                         onClick={() => {
                           const currentList = hardwareForm.externalIdNames || [];
                           if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id.toString() !== ext.id.toString()) }));
+                            setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id !== ext.id) }));
                           } else {
                             setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalName }] }));
                           }
@@ -6156,7 +6384,7 @@ export default function App() {
       {/* Add External Device Modal */}
       <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Radio className="h-6 w-6 text-primary" />
               Add External System
@@ -6166,7 +6394,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3">
+          <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
               <Label htmlFor="ext-name">External Device Name</Label>
               <Input 
@@ -6217,14 +6445,14 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground block">Link to Trigger Actions ({scenes.length} available)</Label>
+              <Label className="text-xs font-semibold text-muted-foreground block">Link to Trigger Actions</Label>
               <div className="flex flex-wrap gap-2">
-                {scenes.map(s => {
-                  const aid = parseInt(s.id) || 101;
+                {actions.map((s) => {
+                  const aid = s.id;
                   const isSelected = externalForm.actionIds?.includes(aid);
                   return (
                     <Badge 
-                      key={s.id}
+                      key={`add-ext-act-${s.id}`}
                       variant={isSelected ? 'default' : 'outline'}
                       className="cursor-pointer"
                       onClick={() => {
@@ -6236,7 +6464,7 @@ export default function App() {
                         }
                       }}
                     >
-                      {s.name}
+                      {s.actionName}
                     </Badge>
                   );
                 })}
@@ -6246,7 +6474,6 @@ export default function App() {
 
           <DialogFooter>
             <Button 
-              className="w-full rounded-2xl font-bold py-6 text-base"
               onClick={() => {
                 if (!externalForm.externalName) return;
                 const newExt: GetExternalDto = {
@@ -6318,7 +6545,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Radio className="h-5 w-5 text-primary" />
               View {selectedExternal?.externalName || 'External'}
@@ -6328,7 +6555,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedExternal && (
-            <div className="py-4 space-y-4">
+            <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Triggered Status</span>
@@ -6351,12 +6578,12 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                  <div className="font-medium">{selectedExternal.sectionId || 'N/A'}</div>
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                  <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === selectedExternal.sectionId)?.name || 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
-                  <div className="font-medium">{selectedExternal.roomId || 'N/A'}</div>
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                  <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === selectedExternal.roomId)?.name || 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
@@ -6382,20 +6609,18 @@ export default function App() {
 
       {/* Edit External Device Modal */}
       <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl">
-          <DialogHeader className="pb-4 border-b">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
-                <Pencil className="h-5 w-5" />
-              </div>
-              <DialogTitle className="text-xl font-bold tracking-tight">Edit {externalForm?.externalName || 'External'}</DialogTitle>
-            </div>
-            <DialogDescription className="mt-2 text-muted-foreground mr-6">
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader className="mb-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-6 w-6 text-primary" />
+              Edit {externalForm?.externalName || 'External'}
+            </DialogTitle>
+            <DialogDescription>
               Modify name pattern and linked trigger actions.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">External Device Name</Label>
               <Input 
@@ -6418,7 +6643,7 @@ export default function App() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-ext-section">Section</Label>
+                <Label htmlFor="edit-ext-section">Section Name</Label>
                 <Select 
                   value={externalForm.section || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, section: val === 'none' ? undefined : val }))}
@@ -6436,7 +6661,7 @@ export default function App() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="edit-ext-room">Room</Label>
+                <Label htmlFor="edit-ext-room">Room Name</Label>
                 <Select 
                   value={externalForm.room || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, room: val === 'none' ? undefined : val }))}
@@ -6457,12 +6682,12 @@ export default function App() {
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-muted-foreground block">Action Command Triggers</Label>
               <div className="flex flex-wrap gap-2">
-                {scenes.map(s => {
-                  const aid = parseInt(s.id) || 101;
+                {actions.map((s) => {
+                  const aid = s.id;
                   const isSelected = externalForm.actionIds?.includes(aid);
                   return (
                     <Badge 
-                      key={s.id}
+                      key={`edit-ext-act-${s.id}`}
                       variant={isSelected ? 'default' : 'outline'}
                       className="cursor-pointer"
                       onClick={() => {
@@ -6474,7 +6699,7 @@ export default function App() {
                         }
                       }}
                     >
-                      {s.name}
+                      {s.actionName}
                     </Badge>
                   );
                 })}
@@ -6483,17 +6708,6 @@ export default function App() {
           </div>
 
           <DialogFooter>
-            
-            <Button variant="destructive" size="icon" onClick={() => {
-              if (externalForm.id) {
-                requestAuth(() => {
-                  setExternals(prev => prev.filter(x => x.id !== externalForm.id));
-                  setIsEditExternalOpen(false);
-                });
-              }
-            }}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
             <Button onClick={() => {
               if (!externalForm.id || !externalForm.externalsName) return;
               requestAuth(() => {
@@ -6507,8 +6721,7 @@ export default function App() {
                 setIsEditExternalOpen(false);
               });
             }}>
-              <CheckCheck className="w-4 h-4 mr-2" />
-              Apply Update
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -6695,13 +6908,13 @@ export default function App() {
 
                       <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t">
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Assigned Room</span>
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
                           <span className="font-semibold text-foreground">
                             {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Unassigned Room'}
                           </span>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Assigned Section</span>
+                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
                           <span className="font-semibold text-foreground">
                             {selectedCamera?.section ? sections.find(s => s.id === selectedCamera.section)?.name : 'Security'}
                           </span>
@@ -6724,15 +6937,15 @@ export default function App() {
                           </div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                          <div className="font-medium">{currentCameraDto?.sectionId || 'N/A'}</div>
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                          <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentCameraDto?.sectionId)?.name || 'N/A'}</div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
-                          <div className="font-medium">{currentCameraDto?.roomId || 'N/A'}</div>
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                          <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentCameraDto?.roomId)?.name || 'N/A'}</div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
                           <div className="font-medium">{currentCameraDto?.peronName || 'System'}</div>
                         </div>
                         <div className="space-y-1">
@@ -6908,7 +7121,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Power className="h-5 w-5 text-primary" />
               View {selectedAppliance?.name || 'Appliance'}
@@ -6920,7 +7133,7 @@ export default function App() {
           {selectedAppliance && (() => {
             const currentApplianceDto = INITIAL_APPLIANCES.find(a => a.id.toString() === selectedAppliance.id.toString() || a.applianceName === selectedAppliance.name) as any;
             return (
-            <div className="py-4 space-y-4">
+            <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
@@ -6956,15 +7169,15 @@ export default function App() {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                      <div className="font-medium">{currentApplianceDto.sectionId || 'N/A'}</div>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                      <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentApplianceDto.sectionId)?.name || 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
-                      <div className="font-medium">{currentApplianceDto.roomId || 'N/A'}</div>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                      <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentApplianceDto.roomId)?.name || 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
                       <div className="font-medium">{currentApplianceDto.peronName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
@@ -7033,7 +7246,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-primary" />
               View {selectedDoor?.name || 'Door'}
@@ -7045,7 +7258,7 @@ export default function App() {
           {selectedDoor && (() => {
             const currentDoorDto = INITIAL_DOORS.find(d => d.id.toString() === selectedDoor.id.toString() || d.doorName === selectedDoor.name) as any;
             return (
-            <div className="py-4 space-y-4">
+            <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
@@ -7066,7 +7279,7 @@ export default function App() {
                   <div className="font-medium">{selectedDoor.room ? rooms.find(r => r.id === selectedDoor.room)?.name : 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                   <div className="font-medium">{selectedDoor.section ? sections.find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
                 </div>
                 {currentDoorDto && (
@@ -7084,16 +7297,16 @@ export default function App() {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Resident</span>
-                      <div className="font-medium">{currentDoorDto.peronName || 'System'} (ID: {currentDoorDto.personId || 0})</div>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
+                      <div className="font-medium">{currentDoorDto.peronName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Info</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || 'Hub'} (ID: {currentDoorDto.roomId || 0})</div>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || appNamesDetailList.roomIds.find(r => r.id === currentDoorDto.roomId)?.name || 'Hub'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Info</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || 'Area'} (ID: {currentDoorDto.sectionId || 0})</div>
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || appNamesDetailList.sectionIds.find(s => s.id === currentDoorDto.sectionId)?.name || 'Area'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Deletion Status</span>
@@ -7104,7 +7317,7 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                      <div className="font-medium">{currentDoorDto.createdByName || 'System'} (ID: {currentDoorDto.createdBy || 0})</div>
+                      <div className="font-medium">{currentDoorDto.createdByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -7112,7 +7325,7 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                      <div className="font-medium">{currentDoorDto.lastModifiedByName || 'System'} (ID: {currentDoorDto.lastModifiedBy || 0})</div>
+                      <div className="font-medium">{currentDoorDto.lastModifiedByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -7161,7 +7374,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Lightbulb className="h-5 w-5 text-primary" />
               View {selectedLight?.name || 'Light'}
@@ -7173,7 +7386,7 @@ export default function App() {
           {selectedLight && (() => {
             const currentLightDto = lights.find(l => l.lightName === selectedLight?.name || l.id.toString() === selectedLight?.id.toString());
             return (
-              <div className="py-4 space-y-4">
+              <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
@@ -7191,7 +7404,7 @@ export default function App() {
                     <div className="font-medium">{selectedLight.room ? rooms.find(r => r.id === selectedLight.room)?.name : 'N/A'}</div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium">{selectedLight.section ? sections.find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
                   </div>
                   {/* BaseDefaultDto Integration */}
@@ -7210,15 +7423,15 @@ export default function App() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                        <div className="font-medium">{currentLightDto.sectionId || 'N/A'}</div>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                        <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentLightDto.sectionId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
-                        <div className="font-medium">{currentLightDto.roomId || 'N/A'}</div>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                        <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentLightDto.roomId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
                         <div className="font-medium">{currentLightDto.peronName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
@@ -7287,7 +7500,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-primary" />
               View {viewingSection?.name || 'Section'}
@@ -7299,11 +7512,11 @@ export default function App() {
           {viewingSection && (() => {
             const currentSectionDto = INITIAL_SECTIONS.find(s => s.id.toString() === viewingSection.id.toString() || s.sectionId === viewingSection.id) as any;
             return (
-              <div className="py-4 space-y-4">
+              <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                    <div className="font-medium text-lg">{currentSectionDto?.sectionId || viewingSection.id}</div>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                    <div className="font-medium text-lg">{currentSectionDto?.sectionName || viewingSection.name}</div>
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Name</span>
@@ -7324,7 +7537,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
                         <div className="font-medium text-sm">{currentSectionDto.peronName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
@@ -7383,7 +7596,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="pr-24">
+          <DialogHeader className="mb-0 pr-24">
             <DialogTitle className="flex items-center gap-2">
               <WindowIcon className="h-5 w-5 text-primary" />
               View {selectedWindow?.name || 'Window'}
@@ -7395,7 +7608,7 @@ export default function App() {
           {selectedWindow && (() => {
             const currentWindowDto = windows.find(w => w.windowName === selectedWindow?.name || w.id.toString() === selectedWindow?.id.toString());
             return (
-              <div className="py-4 space-y-4">
+              <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
@@ -7422,7 +7635,7 @@ export default function App() {
                     <div className="font-medium text-sm">{selectedWindow.room ? rooms.find(r => r.id === selectedWindow.room)?.name : 'N/A'}</div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section</span>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium text-sm">{selectedWindow.section ? sections.find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
                   </div>
                   {/* BaseDefaultDto Integration */}
@@ -7441,16 +7654,16 @@ export default function App() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section ID</span>
-                        <div className="font-medium">{currentWindowDto.sectionId || 'N/A'}</div>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                        <div className="font-medium text-sm">{appNamesDetailList.sectionIds.find(s => s.id === currentWindowDto.sectionId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room ID</span>
-                        <div className="font-medium">{currentWindowDto.roomId || 'N/A'}</div>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                        <div className="font-medium text-sm">{appNamesDetailList.roomIds.find(r => r.id === currentWindowDto.roomId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Assigned Person</span>
-                        <div className="font-medium">{currentWindowDto.peronName || 'System'}</div>
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
+                        <div className="font-medium text-sm">{currentWindowDto.peronName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
@@ -7483,7 +7696,7 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl bg-slate-50 dark:bg-slate-900 rounded-[2rem]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900" showCloseButton={false}>
           <div className="absolute right-6 top-6 flex items-center gap-2 z-50">
             <Button 
               variant="ghost" 
@@ -7516,13 +7729,13 @@ export default function App() {
               <X className="h-5 w-5" />
             </DialogClose>
           </div>
-          <DialogHeader className="p-8 pb-4 bg-white dark:bg-slate-900 border-b shrink-0 pr-40">
+          <DialogHeader className="p-8 pb-[3px] bg-white dark:bg-slate-900 border-b mb-0 shrink-0 pr-40">
             <div className="flex items-center gap-4">
-              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/5">
-                <Zap className="h-8 w-8" />
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/5">
+                <Zap className="h-6 w-6" />
               </div>
               <div className="space-y-0.5">
-                <DialogTitle className="text-2xl font-bold tracking-tight">
+                <DialogTitle className="text-xl font-bold tracking-tight">
                   {selectedAction?.actionName}
                 </DialogTitle>
                 <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
@@ -7702,13 +7915,8 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
-          <div className="absolute right-4 top-4 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader className="mb-0">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
                 <Zap className="h-6 w-6" />
@@ -7719,7 +7927,7 @@ export default function App() {
               </div>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-4">
+          <div className="space-y-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
               <Input 
@@ -7741,9 +7949,10 @@ export default function App() {
               />
             </div>
           </div>
-          <DialogFooter className="p-6 pt-0">
+          <DialogFooter>
+            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsAddActionOpen(false)}>Cancel</Button>
             <Button 
-              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              className="bg-primary text-white"
               onClick={() => {
                 const newAction: GetActionDto = {
                   id: actions.length + 1,
@@ -7776,13 +7985,8 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
-          <div className="absolute right-4 top-4 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader className="mb-0">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
                 <Edit3 className="h-6 w-6" />
@@ -7793,7 +7997,7 @@ export default function App() {
               </div>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-4">
+          <div className="space-y-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
               <Input 
@@ -7815,9 +8019,10 @@ export default function App() {
               />
             </div>
           </div>
-          <DialogFooter className="p-6 pt-0">
+          <DialogFooter>
+            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsEditActionOpen(false)}>Cancel</Button>
             <Button 
-              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
+              className="bg-primary text-white"
               onClick={() => {
                 if (selectedAction) {
                   setActions(prev => prev.map(a => a.id === selectedAction.id ? {
@@ -7841,13 +8046,8 @@ export default function App() {
       {/* Add Action Step Modal */}
       {/* Add Action Step Modal */}
       <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
-          <div className="absolute right-4 top-4 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader className="mb-0">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
                 <PlusCircle className="h-6 w-6" />
@@ -7858,7 +8058,7 @@ export default function App() {
               </div>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-6">
+          <div className="space-y-6 pt-[3px] pb-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
@@ -7966,8 +8166,8 @@ export default function App() {
             </div>
           </div>
           <DialogFooter className="p-6 pt-0">
+            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsAddActionStepOpen(false)}>Cancel</Button>
             <Button 
-              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
               onClick={() => {
                 if (selectedAction) {
                   const newStep: GetActionStepDto = {
@@ -7996,13 +8196,8 @@ export default function App() {
 
       {/* Edit Action Step Modal */}
       <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-[2rem] border-none shadow-2xl p-0 overflow-hidden" showCloseButton={false}>
-          <div className="absolute right-4 top-4 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted transition-colors" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="p-6 pb-4 border-b bg-white dark:bg-slate-900 pr-16 text-left">
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
                 <Pencil className="h-6 w-6" />
@@ -8013,7 +8208,7 @@ export default function App() {
               </div>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-6">
+          <div className="space-y-6 pt-[3px] pb-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
@@ -8122,7 +8317,6 @@ export default function App() {
           </div>
           <DialogFooter className="p-6 pt-0">
             <Button 
-              className="w-full h-12 rounded-2xl font-bold bg-primary shadow-lg shadow-primary/20 text-white hover:bg-primary/90 transition-all active:scale-95 flex items-center justify-center gap-2"
               onClick={() => {
                 if (selectedAction && selectedActionStep) {
                   const updatedStep: GetActionStepDto = {
@@ -8179,14 +8373,26 @@ export default function App() {
             <ScrollArea className="flex-1 bg-white">
               <div className="divide-y divide-slate-50">
                 {chats.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                    <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
-                      <MessageSquare className="h-8 w-8 text-slate-300" />
+                  <div className="flex-1 flex flex-col items-center justify-center py-8 px-4">
+                    <p className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mb-6">Suggestions</p>
+                    <div className="w-full space-y-1">
+                      {allUsers.filter(u => u.id !== userProfile.id).slice(0, 5).map(user => (
+                        <button 
+                          key={user.id}
+                          onClick={() => startDirectChat(user)}
+                          className="w-full p-3 flex items-center gap-3 hover:bg-primary/5 rounded-xl transition-all group"
+                        >
+                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 shrink-0">
+                            <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                          </div>
+                          <div className="flex-1 text-left">
+                            <p className="text-sm font-bold text-slate-700 group-hover:text-primary">{user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}</p>
+                            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{user.getUserDto.roleName}</p>
+                          </div>
+                          <PlusCircle className="h-5 w-5 text-slate-300 group-hover:text-primary" />
+                        </button>
+                      ))}
                     </div>
-                    <p className="text-sm font-medium text-slate-500 mb-4">No active conversations</p>
-                    <Button onClick={() => setIsNewChatOpen(true)} size="sm" className="rounded-full px-6">
-                      Start your first chat
-                    </Button>
                   </div>
                 ) : (
                   chats.map((chat) => {
@@ -8289,6 +8495,24 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
+                        {chat.isGroup && (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
+                            onClick={() => {
+                              setEditingGroupId(chat.id);
+                              setNewGroupName(chat.name);
+                              setNewGroupDescription(chat.description || "");
+                              setNewGroupImageUrl(chat.imageUrl || "");
+                              setSelectedParticipants(chat.participants.map(p => p.personId).filter(id => id !== userProfile.id));
+                              setIsEditGroupOpen(true);
+                            }}
+                            title="Group Settings"
+                          >
+                            <Settings2 className="h-5 w-5" />
+                          </Button>
+                        )}
                         {isChatSearchVisible && (
                           <motion.div 
                             initial={{ width: 0, opacity: 0 }}
@@ -8637,23 +8861,182 @@ export default function App() {
               </footer>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] text-[#667781] p-12 text-center space-y-6">
-                <div className="h-48 w-48 rounded-full bg-slate-200 flex items-center justify-center shadow-inner relative">
-                  <div className="absolute inset-0 rounded-full border-4 border-white/50 border-dashed animate-[spin_20s_linear_infinite]" />
-                  <MessageSquare className="h-24 w-24 text-slate-400" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-bold text-[#111b21]">HanssonHub Chats</h3>
-                  <p className="text-[#667781] max-w-md mx-auto">
-                    Select a conversation to continue. Send and receive messages without keeping your phone online.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 text-xs font-medium text-[#8696a0] pt-12">
-                  <Lock className="h-3 w-3" />
-                  <span>End-to-end encrypted</span>
+              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] text-[#667781] p-12 text-center">
+                <div className="max-w-md w-full space-y-8 animate-in fade-in zoom-in duration-500">
+                  <div className="flex justify-center">
+                    <div className="h-48 w-48 rounded-full bg-white flex items-center justify-center shadow-xl relative">
+                      <div className="absolute inset-0 rounded-full border-4 border-primary/10 border-dashed animate-[spin_20s_linear_infinite]" />
+                      <MessageSquare className="h-24 w-24 text-primary/20" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">HanssonHub Connect</h2>
+                    <p className="text-sm text-[#667781] font-medium leading-relaxed">
+                      Select a contact from your sidebar to view history or start a new conversation.
+                    </p>
+                  </div>
+                  
+                  <div className="pt-4 space-y-4">
+                    <div className="flex items-center gap-2 justify-center">
+                      <div className="h-px w-8 bg-slate-300" />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Members</span>
+                      <div className="h-px w-8 bg-slate-300" />
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {allUsers.filter(u => u.id !== userProfile.id).slice(0, 4).map(user => (
+                        <button 
+                          key={user.id}
+                          onClick={() => startDirectChat(user)}
+                          className="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
+                        >
+                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50">
+                            <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-700 group-hover:text-primary transition-colors truncate w-full text-center">
+                            {user.getPersonDetailsDto.firstName}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-8">
+                    <Button 
+                      variant="outline" 
+                      className="rounded-full bg-white border-2 border-slate-100 text-[#54656f] font-bold h-12 px-8 hover:bg-slate-50 transition-all hover:scale-105 active:scale-95"
+                      onClick={() => setIsNewChatOpen(true)}
+                    >
+                      <PlusCircle className="mr-2 h-5 w-5" />
+                      New Conversation
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditGroupOpen} onOpenChange={(open) => {
+        setIsEditGroupOpen(open);
+        if (!open) {
+          setEditingGroupId(null);
+          setSelectedParticipants([]);
+          setNewGroupName("");
+          setNewGroupDescription("");
+          setNewGroupImageUrl("");
+        }
+      }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-0 shadow-2xl bg-white">
+          <DialogHeader className="p-6 pb-2 mb-0">
+            <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Settings className="h-5 w-5 text-primary" />
+              Edit Group Details
+            </DialogTitle>
+            <DialogDescription>
+              Update group name, image and manage participants.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
+            <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
+              <div className="relative group">
+                <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
+                  {newGroupImageUrl ? (
+                    <img src={newGroupImageUrl} alt="Group" className="h-full w-full object-cover" />
+                  ) : (
+                    <ImageIcon className="h-8 w-8 text-slate-300" />
+                  )}
+                </div>
+                <Button 
+                  size="icon" 
+                  variant="secondary" 
+                  className="absolute -bottom-2 -right-2 h-7 w-7 rounded-full shadow-lg border border-white"
+                  onClick={() => {
+                    const url = prompt("Enter Group Image URL:");
+                    if (url) setNewGroupImageUrl(url);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                  <Input 
+                    placeholder="e.g., Family Hub" 
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1.5 pt-1">
+              <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
+              <Input 
+                placeholder="What is this group about?" 
+                value={newGroupDescription}
+                onChange={(e) => setNewGroupDescription(e.target.value)}
+                className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-50 flex items-center justify-between border-b">
+             <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Manage Participants</Label>
+             <Badge variant="secondary" className="rounded-full">{selectedParticipants.length} selected</Badge>
+          </div>
+
+          <ScrollArea className="h-[250px] bg-white">
+            <div className="p-2 space-y-1">
+              {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+                const isSelected = selectedParticipants.includes(user.id);
+                return (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      setSelectedParticipants(prev => 
+                        isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
+                      );
+                    }}
+                    className={cn(
+                      "w-full p-3 flex items-center gap-4 rounded-2xl transition-all group",
+                      isSelected ? "bg-primary/5 ring-1 ring-primary/20 shadow-sm" : "hover:bg-slate-50"
+                    )}
+                  >
+                    <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-100 shrink-0 relative">
+                      <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                      <div className={cn(
+                         "absolute inset-0 flex items-center justify-center transition-all",
+                         isSelected ? "bg-primary/60" : "bg-transparent"
+                      )}>
+                        {isSelected && <Check className="h-5 w-5 text-white" />}
+                      </div>
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h4 className="font-bold text-sm text-slate-800">
+                        {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                      </h4>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        {user.getUserDto.roleName}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          <div className="p-4 border-t bg-slate-50 flex gap-3">
+             <Button variant="outline" className="flex-1 rounded-xl h-11" onClick={() => setIsEditGroupOpen(false)}>Cancel</Button>
+             <Button 
+              className="flex-1 rounded-xl h-11 shadow-lg shadow-primary/20" 
+              onClick={handleUpdateGroup}
+              disabled={!newGroupName.trim() || selectedParticipants.length === 0}
+             >
+               Save Changes
+             </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -8689,28 +9072,52 @@ export default function App() {
             </div>
           </DialogHeader>
 
-          {isGroupMode && (
-            <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
-                <Input 
-                  placeholder="e.g., Family Hub, Maintenance Team" 
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  className="bg-white border-slate-200 rounded-xl h-11"
-                />
+            {isGroupMode && (
+              <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
+                <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
+                  <div className="relative group">
+                    <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
+                      {newGroupImageUrl ? (
+                        <img src={newGroupImageUrl} alt="Group" className="h-full w-full object-cover" />
+                      ) : (
+                        <ImageIcon className="h-8 w-8 text-slate-300" />
+                      )}
+                    </div>
+                    <Button 
+                      size="icon" 
+                      variant="secondary" 
+                      className="absolute -bottom-2 -right-2 h-7 w-7 rounded-full shadow-lg border border-white"
+                      onClick={() => {
+                        const url = prompt("Enter Group Image URL:");
+                        if (url) setNewGroupImageUrl(url);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                      <Input 
+                        placeholder="e.g., Family Hub" 
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5 pt-1">
+                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
+                  <Input 
+                    placeholder="What is this group about?" 
+                    value={newGroupDescription}
+                    onChange={(e) => setNewGroupDescription(e.target.value)}
+                    className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
-                <Input 
-                  placeholder="What is this group about?" 
-                  value={newGroupDescription}
-                  onChange={(e) => setNewGroupDescription(e.target.value)}
-                  className="bg-white border-slate-200 rounded-xl h-11"
-                />
-              </div>
-            </div>
-          )}
+            )}
 
           <div className="p-4 bg-slate-50 border-b">
              <div className="relative">
@@ -8795,9 +9202,15 @@ export default function App() {
             className="fixed inset-0 z-[9999] bg-black cursor-pointer"
             onClick={() => setIsScreensaverOpen(false)}
           >
-            <div className="h-full w-full grid grid-cols-2 grid-rows-2 gap-1 p-1">
-              {[0, 1, 2, 3].map((i) => {
-                const cam = cameras.length > 0 ? cameras[i % cameras.length] : null;
+            
+            <div className={`h-full w-full grid gap-1 p-1 ${
+              (userProfile.cameraAccess?.length || 0) <= 1 ? 'grid-cols-1 grid-rows-1' :
+              (userProfile.cameraAccess?.length || 0) <= 2 ? 'grid-cols-1 sm:grid-cols-2 grid-rows-1' :
+              (userProfile.cameraAccess?.length || 0) <= 4 ? 'grid-cols-2 grid-rows-2' :
+              'grid-cols-3 grid-rows-2'
+            }`}>
+              {userProfile.cameraAccess?.map((camId, i) => {
+                const cam = cameras.find(c => c.id.toString() === camId.toString() || c.cameraName === camId);
                 const videoUrl = cam 
                   ? (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4")
                   : "";
@@ -8817,7 +9230,7 @@ export default function App() {
                         <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
                           <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
                           <span className="text-[10px] font-bold text-white uppercase tracking-widest">
-                            {(cam as any).cameraName || (cam as any).name || "Camera " + (i + 1)}
+                            {cam.cameraName || "Camera " + (i + 1)}
                           </span>
                         </div>
                         <div className="absolute bottom-4 right-4 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
@@ -8834,6 +9247,12 @@ export default function App() {
                   </div>
                 );
               })}
+              {(!userProfile.cameraAccess || userProfile.cameraAccess.length === 0) && (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600 col-span-full">
+                  <CameraOff className="h-12 w-12 opacity-20" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Cameras Configured in Profile</span>
+                </div>
+              )}
             </div>
             
             {/* Screensaver UI Overlays */}

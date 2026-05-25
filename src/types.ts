@@ -101,7 +101,7 @@ export interface Scene {
 }
 
 export interface Room {
-  id: string;
+  id: number | string;
   name: string;
   section: string;
   icon: string;
@@ -109,7 +109,7 @@ export interface Room {
 }
 
 export interface Section {
-  id: string;
+  id: number | string;
   name: string;
   type?: 'general' | 'secretive';
   isHidden?: boolean;
@@ -368,6 +368,29 @@ export type User = GetPersonDto;
 export interface GenericIdNames {
   id: number;
   name: string;
+}
+
+export interface GenericNames extends GenericIdNames {
+  isHidden: boolean;
+  imageUrl: string;
+}
+
+export interface AppNamesDetailList {
+  applianceIdNames: GenericNames[];
+  cameraIdNames: GenericNames[];
+  lightIdNames: GenericNames[];
+  windowIdNames: GenericNames[];
+  doorIdNames: GenericNames[];
+  externalIdNames: GenericNames[];
+  personIdNames: GenericNames[];
+  contactCategoryIdNames: GenericIdNames[];
+  applianceType: GenericIdNames[];
+  gender: GenericIdNames[];
+  doorType: GenericIdNames[];
+  facilityType: GenericIdNames[];
+  role: GenericIdNames[];
+  roomIds: GenericIdNames[]; 
+  sectionIds: GenericIdNames[]; 
 }
 
 export interface GetHardwareDto {
