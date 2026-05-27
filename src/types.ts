@@ -85,6 +85,7 @@ export interface Device {
   password?: string;
   streamPath?: string;
   port?: number;
+  applianceType?: number;
 }
 
 export interface SceneAction {
@@ -384,6 +385,7 @@ export interface AppNamesDetailList {
   externalIdNames: GenericNames[];
   personIdNames: GenericNames[];
   contactCategoryIdNames: GenericIdNames[];
+  actionIdNames: GenericIdNames[];
   applianceType: GenericIdNames[];
   gender: GenericIdNames[];
   doorType: GenericIdNames[];
@@ -642,11 +644,13 @@ export interface RoomsResponseModel extends BaseResponse {
 
 export interface CreateApplianceDto extends CreateBaseDefaultDto {
   applianceName: string;
+  applianceType: number;
 }
 
 export interface UpdateApplianceDto extends CreateBaseDefaultDto {
   id: number;
   applianceName: string;
+  applianceType: number;
   isActive: boolean;
 }
 
@@ -654,6 +658,13 @@ export interface GetApplianceDto extends BaseDefaultDto {
   id: number;
   applianceName: string;
   applianceId: string;
+  applianceType: string;
+  isActive: boolean;
+  powerActive: boolean;
+  roomId?: number;
+  roomName?: string;
+  sectionId?: number;
+  sectionName?: string;
 }
 
 export interface ApplianceResponseModel extends BaseResponse {
@@ -831,6 +842,7 @@ export interface MessageDto {
   isDeleted: boolean;
   sentAt: string; // ISO string
   attachments: MessageAttachmentDto[];
+  replyToId?: number;
 }
 
 export interface ChatParticipantDto {
@@ -851,6 +863,8 @@ export interface ChatDto {
   participants: ChatParticipantDto[];
   lastMessage?: MessageDto;
   unreadCount: number;
+  roomId?: number;
+  sectionId?: number;
 }
 
 export interface RealtimeMessageDto {

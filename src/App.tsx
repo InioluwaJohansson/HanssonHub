@@ -69,6 +69,7 @@ import {
   MessageDto,
   MessageType,
   SendMessageDto,
+  MessageAttachmentDto,
   CreateDirectChatDto,
   CreateGroupChatDto,
   CreateRoomDto
@@ -132,6 +133,8 @@ import {
   Layers,
   LayoutGrid,
   LayoutDashboard,
+  UserCog,
+  Users,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -158,7 +161,6 @@ import {
   ShieldAlert,
   MoreVertical,
   User as UserIcon,
-  Users,
   Heart,
   Wrench,
   Save,
@@ -171,6 +173,7 @@ import {
   Image as ImageIcon,
   FileText,
   Download,
+  Fingerprint,
   CalendarDays,
   X,
   Filter,
@@ -195,12 +198,19 @@ import {
   Info,
   Maximize,
   Minimize,
-  CameraOff
+  CameraOff,
+  ScanLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 
 const iconMap: Record<string, any> = {
   Film,
@@ -246,6 +256,8 @@ export default function App() {
   const [windows, setWindows] = React.useState<GetWindowDto[]>(INITIAL_WINDOWS);
   const [rooms, setRooms] = React.useState<Room[]>(ROOMS);
   const [sections, setSections] = React.useState<Section[]>(SECTIONS);
+  const [roomSearchQuery, setRoomSearchQuery] = React.useState('');
+  const [sectionSearchQuery, setSectionSearchQuery] = React.useState('');
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const [facilitySearchQuery, setFacilitySearchQuery] = React.useState('');
@@ -306,54 +318,6 @@ export default function App() {
   const [contactSortCategory, setContactSortCategory] = React.useState<string>('all');
   const [contactView, setContactView] = React.useState<'overview' | 'all'>('overview');
   const [allUsers, setAllUsers] = React.useState<GetPersonDto[]>(INITIAL_USERS);
-
-  const appNamesDetailList = React.useMemo(() => {
-    return {
-      applianceIdNames: appliances.map(a => ({ id: a.id, name: a.applianceName })),
-      cameraIdNames: cameras.map(c => ({ id: c.id, name: c.cameraName })),
-      lightIdNames: lights.map(l => ({ id: l.id, name: l.lightName })),
-      windowIdNames: windows.map(w => ({ id: w.id, name: w.windowName })),
-      doorIdNames: doors.map(d => ({ id: d.id, name: d.doorName })),
-      externalIdNames: externals.map(e => ({ id: e.id, name: e.externalName })),
-      personIdNames: allUsers.map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
-      contactCategoryIdNames: contactCategories.map(c => ({ id: c.id, name: c.name })),
-      applianceType: [
-        { id: 1, name: 'TV' },
-        { id: 2, name: 'Fridge' },
-        { id: 3, name: 'Coffee Maker' },
-        { id: 4, name: 'AC' },
-        { id: 5, name: 'Sprinklers' }
-      ],
-      gender: [
-        { id: 1, name: 'Male' },
-        { id: 2, name: 'Female' },
-        { id: 3, name: 'Other' }
-      ],
-      doorType: [
-        { id: 1, name: 'Interior' },
-        { id: 2, name: 'Exterior' }
-      ],
-      facilityType: [
-        { id: 1, name: 'Appliance' },
-        { id: 2, name: 'Camera' },
-        { id: 3, name: 'Light' },
-        { id: 4, name: 'Door' },
-        { id: 5, name: 'Window' }
-      ],
-      role: [
-        { id: 1, name: 'Owner' },
-        { id: 2, name: 'Wife' },
-        { id: 3, name: 'Husband' },
-        { id: 4, name: 'Son' },
-        { id: 5, name: 'Daughter' },
-        { id: 6, name: 'Relative' },
-        { id: 7, name: 'Visitor' }
-      ],
-      roomIds: INITIAL_ROOMS.map(r => ({ id: r.id, name: r.roomName })),
-      sectionIds: INITIAL_SECTIONS.map(s => ({ id: s.id, name: s.sectionName })),
-    };
-  }, [appliances, cameras, lights, windows, doors, externals, allUsers, contactCategories]);
-
   // Person/User Modals
   const [isAddPersonOpen, setIsAddPersonOpen] = React.useState(false);
   const [isEditPersonRoleOpen, setIsEditPersonRoleOpen] = React.useState(false);
@@ -432,7 +396,8 @@ export default function App() {
     username: '',
     password: '',
     streamPath: '',
-    port: 80
+    port: 80,
+    applianceType: 1
   });
 
   // Pre-select room/section when opening Add Device dialog
@@ -466,6 +431,55 @@ export default function App() {
     isOpen: false,
     isActive: false
   });
+
+  const appNamesDetailList = React.useMemo(() => {
+    return {
+      applianceIdNames: appliances.map(a => ({ id: a.id, name: a.applianceName })),
+      cameraIdNames: cameras.map(c => ({ id: c.id, name: c.cameraName })),
+      lightIdNames: lights.map(l => ({ id: l.id, name: l.lightName })),
+      windowIdNames: windows.map(w => ({ id: w.id, name: w.windowName })),
+      doorIdNames: doors.map(d => ({ id: d.id, name: d.doorName })),
+      externalIdNames: externals.map(e => ({ id: e.id, name: e.externalName })),
+      personIdNames: allUsers.map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
+      contactCategoryIdNames: contactCategories.map(c => ({ id: c.id, name: c.name })),
+      actionIdNames: actions.map(a => ({ id: a.id, name: a.actionName })),
+      applianceType: [
+        { id: 1, name: 'TV' },
+        { id: 2, name: 'Fridge' },
+        { id: 3, name: 'Coffee Maker' },
+        { id: 4, name: 'AC' },
+        { id: 5, name: 'Sprinklers' }
+      ],
+      gender: [
+        { id: 1, name: 'Male' },
+        { id: 2, name: 'Female' },
+        { id: 3, name: 'Other' }
+      ],
+      doorType: [
+        { id: 1, name: 'Interior' },
+        { id: 2, name: 'Exterior' }
+      ],
+      facilityType: [
+        { id: FacilityType.Appliance, name: 'Appliance' },
+        { id: FacilityType.Camera, name: 'Camera' },
+        { id: FacilityType.Door, name: 'Door' },
+        { id: FacilityType.External, name: 'External' },
+        { id: FacilityType.Light, name: 'Light' },
+        { id: FacilityType.Window, name: 'Window' }
+      ],
+      role: [
+        { id: 1, name: 'Owner' },
+        { id: 2, name: 'Wife' },
+        { id: 3, name: 'Husband' },
+        { id: 4, name: 'Son' },
+        { id: 5, name: 'Daughter' },
+        { id: 6, name: 'Relative' },
+        { id: 7, name: 'Visitor' }
+      ],
+      roomIds: INITIAL_ROOMS.map(r => ({ id: r.id, name: r.roomName })),
+      sectionIds: INITIAL_SECTIONS.map(s => ({ id: s.id, name: s.sectionName })),
+    };
+  }, [appliances, cameras, lights, windows, doors, externals, allUsers, contactCategories, actions]);
   const [actionForm, setActionForm] = React.useState<CreateActionDto>({
     actionName: '',
     description: '',
@@ -598,11 +612,6 @@ export default function App() {
   }, []);
 
   const handleActivity = React.useCallback(() => {
-    setIsScreensaverOpen(prev => {
-      if (prev) return false;
-      return prev;
-    });
-    // Throttle resets to avoiding excessive timer restarts on continuous motion
     if (inactivityTimerRef.current) {
       resetInactivityTimer();
     }
@@ -654,8 +663,24 @@ export default function App() {
 
   // Chat State
   const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
-  const [chats, setChats] = React.useState<ChatDto[]>(INITIAL_CHATS);
-  const [chatMessages, setChatMessages] = React.useState<MessageDto[]>(INITIAL_CHAT_MESSAGES);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = React.useState(false);
+  const [previewMediaUrl, setPreviewMediaUrl] = React.useState("");
+  const isChatModalOpenRef = React.useRef(isChatModalOpen);
+  React.useEffect(() => {
+    isChatModalOpenRef.current = isChatModalOpen;
+  }, [isChatModalOpen]);
+  const [chatPopups, setChatPopups] = React.useState<MessageDto[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = React.useState("");
+  const [isAddFingerprintOpen, setIsAddFingerprintOpen] = React.useState(false);
+  const [isRegisterNfidOpen, setIsRegisterNfidOpen] = React.useState(false);
+  const [selectedNfidUserId, setSelectedNfidUserId] = React.useState<string>("");
+  const [selectedNfidHardwareId, setSelectedNfidHardwareId] = React.useState<string>("");
+  const [fingerprintImages, setFingerprintImages] = React.useState<string[]>([]);
+  const [selectedFingerprintUserId, setSelectedFingerprintUserId] = React.useState<string>("");
+  const [chats, setChats] = React.useState<ChatDto[]>([]);
+  const [chatMessages, setChatMessages] = React.useState<MessageDto[]>([]);
+  const [newGroupRoom, setNewGroupRoom] = React.useState<string>("none");
+  const [newGroupSection, setNewGroupSection] = React.useState<string>("");
   const [chatInput, setChatInput] = React.useState("");
   const socketRef = React.useRef<any>(null);
   const chatEndRef = React.useRef<HTMLDivElement>(null);
@@ -671,9 +696,14 @@ export default function App() {
   const [activeChatId, setActiveChatId] = React.useState<number | null>(null);
   const [chatSearchQuery, setChatSearchQuery] = React.useState("");
   const [isChatSearchVisible, setIsChatSearchVisible] = React.useState(false);
+  const [isUploadPreviewOpen, setIsUploadPreviewOpen] = React.useState(false);
+  const [uploadPreviewFiles, setUploadPreviewFiles] = React.useState<File[]>([]);
+  const [uploadPreviewType, setUploadPreviewType] = React.useState<'image' | 'file' | null>(null);
+  const [uploadPreviewText, setUploadPreviewText] = React.useState("");
 
   // New Chat Selection State (for when user has no chats)
   const [isNewChatOpen, setIsNewChatOpen] = React.useState(false);
+  const [uploadPreviewActiveIndex, setUploadPreviewActiveIndex] = React.useState(0);
   const [isGroupMode, setIsGroupMode] = React.useState(false);
   const [selectedParticipants, setSelectedParticipants] = React.useState<number[]>([]);
   const [newGroupName, setNewGroupName] = React.useState("");
@@ -719,7 +749,21 @@ export default function App() {
     });
 
     socketRef.current.on("chat:message", (msg: any) => {
-      setChatMessages(prev => [...prev, msg]);
+      setChatMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        
+        if (!isChatModalOpenRef.current && msg.senderId !== userProfile.id) {
+          setChatPopups(p => {
+             if (p.some(p => p.id === msg.id)) return p;
+             return [...p, msg];
+          });
+          setTimeout(() => {
+            setChatPopups(p => p.filter(x => x.id !== msg.id));
+          }, 5000);
+        }
+        
+        return [...prev, msg];
+      });
     });
 
     return () => {
@@ -802,7 +846,8 @@ export default function App() {
       isEdited: false,
       isDeleted: false,
       sentAt: new Date().toISOString(),
-      attachments: []
+      attachments: [],
+      replyToId: replyingTo?.id
     };
     
     // Update local state and emit
@@ -819,36 +864,70 @@ export default function App() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'file') => {
-    if (e.target.files && e.target.files[0] && activeChatId !== null) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        const msg: MessageDto = {
-          id: Date.now(),
-          chatId: activeChatId,
-          senderPersonId: userProfile.id,
-          senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-          senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
-          content: `Sent a ${type}`,
-          type: type === 'image' ? MessageType.Image : MessageType.File,
-          isEdited: false,
-          isDeleted: false,
-          sentAt: new Date().toISOString(),
-          attachments: [{
+    if (e.target.files && e.target.files.length > 0 && activeChatId !== null) {
+      const files = type === 'file' ? [e.target.files[0]] : Array.from(e.target.files);
+      setUploadPreviewFiles(files);
+      setUploadPreviewType(type);
+      setUploadPreviewText("");
+      setUploadPreviewActiveIndex(0);
+      setIsUploadPreviewOpen(true);
+      e.target.value = '';
+    }
+  };
+
+  const handleSendUpload = () => {
+    if (uploadPreviewFiles.length === 0 || activeChatId === null || !uploadPreviewType) return;
+    
+    setIsUploadPreviewOpen(false);
+    
+    const uploadPromises = uploadPreviewFiles.map(file => {
+      return new Promise<MessageAttachmentDto>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve({
             fileName: file.name,
             filePath: reader.result?.toString() || '',
             contentType: file.type,
             fileSize: file.size
-          }]
+          });
         };
-        setChatMessages(prev => [...prev, msg]);
-        if (socketRef.current) {
-          socketRef.current.emit("chat:message", msg);
-        }
-        setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(uploadPromises).then(attachments => {
+      const type = uploadPreviewType;
+      let textContent = uploadPreviewText.trim();
+      if (!textContent) {
+        textContent = attachments.length > 1 ? `Sent ${attachments.length} ${type}s` : `Sent a ${type}`;
+      }
+
+      const msg: MessageDto = {
+        id: Date.now() + Math.random(),
+        chatId: activeChatId,
+        senderPersonId: userProfile.id,
+        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
+        content: textContent,
+        type: type === 'image' ? MessageType.Image : MessageType.File,
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+        attachments: attachments,
+        replyToId: replyingTo?.id
       };
-      reader.readAsDataURL(file);
-    }
+      
+      setChatMessages(prev => [...prev, msg]);
+      if (socketRef.current) {
+        socketRef.current.emit("chat:message", msg);
+      }
+      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
+      
+      setUploadPreviewFiles([]);
+      setUploadPreviewText("");
+      setUploadPreviewType(null);
+      setReplyingTo(null);
+    });
   };
 
   const startDirectChat = (person: GetPersonDto) => {
@@ -926,7 +1005,9 @@ export default function App() {
       imageUrl: groupPayload.imageUrl,
       createdAt: new Date().toISOString(),
       participants,
-      unreadCount: 0
+      unreadCount: 0,
+      roomId: newGroupRoom === "none" ? undefined : parseInt(newGroupRoom),
+      sectionId: newGroupSection ? parseInt(newGroupSection) : undefined
     };
 
     setChats(prev => [newChat, ...prev]);
@@ -969,7 +1050,9 @@ export default function App() {
             name: newGroupName, 
             description: newGroupDescription, 
             imageUrl: newGroupImageUrl || chat.imageUrl,
-            participants: participants
+            participants: participants,
+            roomId: newGroupRoom === "none" ? undefined : parseInt(newGroupRoom),
+            sectionId: newGroupSection ? parseInt(newGroupSection) : undefined
           } 
         : chat
     ));
@@ -1247,7 +1330,15 @@ export default function App() {
   const handleEditDevice = (id: string) => {
     const device = devices.find(d => d.id === id);
     if (device) {
-      setEditingDevice(device);
+      let finalDevice = { ...device };
+      if (device.type === 'appliance') {
+        const appDto = appliances.find(a => a.id.toString() === device.id.toString() || a.applianceName === device.name);
+        if (appDto) {
+          const typeId = appNamesDetailList.applianceType.find(t => t.name === appDto.applianceType)?.id || 1;
+          finalDevice.applianceType = typeId;
+        }
+      }
+      setEditingDevice(finalDevice);
       setIsEditDeviceOpen(true);
     }
   };
@@ -1282,6 +1373,17 @@ export default function App() {
             roomId: editingDevice.room ? parseInt(editingDevice.room) : c.roomId,
             sectionId: editingDevice.section ? parseInt(editingDevice.section) : c.sectionId
           } : c));
+        }
+        if (editingDevice.type === 'appliance') {
+          setAppliances(prev => prev.map(a => a.id.toString() === editingDevice.id!.toString() ? {
+            ...a,
+            applianceName: editingDevice.name || a.applianceName,
+            applianceType: appNamesDetailList.applianceType.find(t => t.id === editingDevice.applianceType)?.name || a.applianceType,
+            roomId: editingDevice.room ? parseInt(editingDevice.room) : a.roomId,
+            roomName: rooms.find(r => r.id === editingDevice.room)?.name,
+            sectionId: editingDevice.section ? parseInt(editingDevice.section) : a.sectionId,
+            sectionName: sections.find(s => s.id === editingDevice.section)?.name
+          } : a));
         }
         setIsEditDeviceOpen(false);
         setEditingDevice(null);
@@ -1343,7 +1445,7 @@ export default function App() {
 
       const numericId = Math.floor(Math.random() * 9000) + 1000;
       const device: Device = {
-        id: inferredType === 'camera' ? numericId.toString() : Math.random().toString(36).substring(2, 9),
+        id: (inferredType === 'camera' || inferredType === 'appliance') ? numericId.toString() : Math.random().toString(36).substring(2, 9),
         name: newDevice.name,
         type: inferredType as any,
         room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
@@ -1356,7 +1458,8 @@ export default function App() {
         username: newDevice.username,
         password: newDevice.password,
         streamPath: newDevice.streamPath,
-        port: newDevice.port
+        port: newDevice.port,
+        applianceType: inferredType === 'appliance' ? newDevice.applianceType : undefined
       };
 
       if (inferredType === 'camera') {
@@ -1380,9 +1483,26 @@ export default function App() {
         setCameras(prev => [...prev, newCameraDto]);
       }
 
+      if (inferredType === 'appliance') {
+        const appType = appNamesDetailList.applianceType.find(t => t.id === newDevice.applianceType)?.name || 'Unknown';
+        const newApplianceDto: GetApplianceDto = {
+          id: numericId,
+          applianceName: device.name,
+          applianceId: `APP-${numericId}`,
+          applianceType: appType,
+          isActive: false,
+          powerActive: false,
+          roomId: newDevice.room ? parseInt(newDevice.room) : undefined,
+          roomName: rooms.find(r => r.id === newDevice.room)?.name,
+          sectionId: newDevice.section ? parseInt(newDevice.section) : undefined,
+          sectionName: sections.find(s => s.id === newDevice.section)?.name
+        };
+        setAppliances(prev => [...prev, newApplianceDto]);
+      }
+
       setDevices(prev => [...prev, device]);
       setIsAddDeviceOpen(false);
-      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior' });
+      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior', applianceType: 1 });
     });
   };
 
@@ -1557,89 +1677,104 @@ export default function App() {
             <p className="text-muted-foreground">Everything is looking good. You have {activeDevices} active devices.</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4 flex items-center gap-4 bg-primary/5 border-primary/10">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                <Thermometer className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Temperature</p>
-                <p className="text-2xl font-bold">24°C</p>
-              </div>
-            </Card>
-            <Card className="p-4 flex items-center gap-4 bg-blue-500/5 border-blue-500/10">
-              <div className="h-12 w-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500">
-                <Cloud className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Humidity</p>
-                <p className="text-2xl font-bold">45%</p>
-              </div>
-            </Card>
-            <Card className="p-4 flex items-center gap-4 bg-green-500/5 border-green-500/10">
-              <div className="h-12 w-12 rounded-2xl bg-green-500/10 flex items-center justify-center text-green-500">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Security</p>
-                <p className="text-2xl font-bold">Armed</p>
-              </div>
-            </Card>
-            <Card className="p-4 flex items-center gap-4 bg-yellow-500/5 border-yellow-500/10">
-              <div className="h-12 w-12 rounded-2xl bg-yellow-500/10 flex items-center justify-center text-yellow-500">
-                <Zap className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Energy</p>
-                <p className="text-2xl font-bold">1.2 kW</p>
-              </div>
-            </Card>
-          </div>
-
-          {/* Navigation Boxes */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Button 
-              variant="outline" 
-              className="h-24 flex flex-col gap-2 rounded-2xl border-2 hover:border-primary hover:bg-primary/5 transition-all"
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <Card 
+              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('facility-overview')}
             >
-              <Layers className="h-6 w-6 text-primary" />
-              <span className="font-bold">Facilities</span>
-            </Button>
-            <Button 
-              variant="outline" 
-              className="h-24 flex flex-col gap-2 rounded-2xl border-2 hover:border-primary hover:bg-primary/5 transition-all"
+              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Layers className="h-8 w-8" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Facilities</p>
+                <p className="text-4xl font-bold text-slate-900">{rooms.length}</p>
+              </div>
+            </Card>
+            <Card 
+              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('contacts')}
             >
-              <Contact className="h-6 w-6 text-primary" />
-              <span className="font-bold">Contacts</span>
-            </Button>
-            <Button 
-              variant="outline" 
-              className="h-24 flex flex-col gap-2 rounded-2xl border-2 hover:border-primary hover:bg-primary/5 transition-all"
+              <div className="h-16 w-16 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                <Contact className="h-8 w-8" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Contacts</p>
+                <p className="text-4xl font-bold text-slate-900">{contacts.length}</p>
+              </div>
+            </Card>
+            <Card 
+              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('logs')}
             >
-              <ClipboardList className="h-6 w-6 text-primary" />
-              <span className="font-bold">Logs</span>
-            </Button>
+              <div className="h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                <ClipboardList className="h-8 w-8" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Logs</p>
+                <p className="text-4xl font-bold text-slate-900">{logs.length}</p>
+              </div>
+            </Card>
+            
+            {/* My Room Card */}
+            {(() => {
+              const myRoom = rooms.find(r => r.roomName === 'Bedroom') || rooms[0];
+              const roomDoors = doors.filter(d => d.roomId === myRoom?.id);
+              const roomLights = lights.filter(l => l.roomId === myRoom?.id);
+              const roomWindows = windows.filter(w => w.roomId === myRoom?.id);
+              const myRoomLocked = roomDoors.length > 0 ? roomDoors.every(d => d.isLocked) : false;
+              
+              return (
+                <Card className="p-8 sm:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-6 bg-slate-900 text-white border-0 shadow-xl rounded-3xl overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-32 bg-primary/20 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
+                  <div className="h-24 w-24 shrink-0 rounded-full bg-primary/20 flex items-center justify-center text-primary z-10 border border-primary/30">
+                    <HomeIcon className="h-12 w-12" />
+                  </div>
+                  <div className="flex-1 z-10 text-center sm:text-left flex flex-col justify-center">
+                    <h3 className="text-3xl font-bold mb-1">{myRoom?.roomName || "My Room"}</h3>
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 text-sm text-slate-300 mt-4">
+                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
+                        <Lock className="h-4 w-4" /> {roomDoors.length} Doors
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
+                        <Lightbulb className="h-4 w-4" /> {roomLights.length} Lights
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
+                        <Maximize className="h-4 w-4" /> {roomWindows.length} Windows
+                      </div>
+                    </div>
+                  </div>
+                  <div className="z-10 shrink-0 self-center sm:self-center bg-slate-800 px-6 py-4 rounded-2xl border border-slate-700 flex flex-col items-center">
+                    <span className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Status</span>
+                    <span className={cn("text-xl font-bold tracking-tight", myRoomLocked ? "text-green-400" : "text-yellow-400")}>
+                      {myRoomLocked ? "Locked" : "Unlocked"}
+                    </span>
+                  </div>
+                </Card>
+              );
+            })()}
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-hidden relative">
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <Shield className="h-5 w-5 text-primary" />
+              <Camera className="h-5 w-5 text-primary" />
               External Security Cameras
             </h2>
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {externalCameras.map(camera => (
-                <DeviceCard
-                  key={camera.id}
-                  device={camera}
-                  onToggle={handleToggle}
-                  onStatusChange={handleStatusChange}
-                  onValueChange={handleValueChange}
-                onClick={handleDeviceClick}
-              />
-              ))}
+            <div className="flex overflow-x-auto snap-x space-x-6 pb-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              {externalCameras.map(device => {
+                const currentCameraDto = cameras.find(c => c.id.toString() === device.id.toString() || c.cameraName === device.name);
+                const feedUrl = currentCameraDto?.liveStreamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+                return (
+                  <div key={device.id} className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md">
+                    <video src={feedUrl} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
+                    <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white flex justify-between items-end">
+                      <span className="font-semibold text-lg tracking-tight">{device.name}</span>
+                      <span className="text-[10px] bg-red-500 text-white px-2.5 py-1 rounded-full font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 bg-white rounded-full"></span> Live
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1647,23 +1782,32 @@ export default function App() {
             <div className="space-y-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Play className="h-5 w-5 text-primary" />
-                Quick Scenes
+                Actions
               </h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {scenes.map(scene => (
+                {actions.slice(0, 4).map(action => (
                   <Card 
-                    key={scene.id} 
-                    className="p-4 flex items-center justify-between hover:bg-accent transition-colors cursor-pointer group"
-                    onClick={() => triggerScene(scene)}
+                    key={action.id} 
+                    className="p-5 flex items-start gap-4 hover:border-primary/50 transition-colors cursor-pointer group bg-white shadow-sm"
+                    onClick={() => {
+                        setLogs(prev => [{
+                          id: Date.now(),
+                          personId: userProfile.id,
+                          logDetails: `Triggered action: ${action.actionName}`,
+                          timeOfAction: new Date().toISOString(),
+                          getPersonDto: { id: userProfile.id, getPersonDetailsDto: userProfile.getPersonDetailsDto, getUserDto: userProfile.getUserDto }
+                        } as any, ...prev]);
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                        {scene.icon === 'Film' ? <Film className="h-5 w-5" /> : scene.icon === 'Sun' ? <Sun className="h-5 w-5" /> : <HomeIcon className="h-5 w-5" />}
-                      </div>
-                      <span className="font-medium">{scene.name}</span>
+                    <div className="h-12 w-12 shrink-0 rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
+                      <Zap className="h-6 w-6" />
                     </div>
-                    <Button size="icon" variant="ghost" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Play className="h-4 w-4 fill-current" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-slate-800 text-base mb-1 truncate">{action.actionName}</h4>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{action.actionDescription || 'Automated device sequence execution.'}</p>
+                    </div>
+                    <Button size="icon" variant="ghost" className="opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0 h-8 w-8 bg-slate-100 rounded-full">
+                      <Play className="h-4 w-4 fill-primary" />
                     </Button>
                   </Card>
                 ))}
@@ -1838,11 +1982,17 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between w-full">
+            <div className="flex flex-col gap-1 w-full">
               <div className="flex items-center gap-3">
                 <ClipboardList className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Activity Logs</h1>
+                <div className="flex items-center justify-between w-full">
+                  <h1 className="text-3xl font-bold tracking-tight">Activity Logs</h1>
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                    <ClipboardList className="h-3 w-3" />
+                    {logs.length} Total Logs
+                  </Badge>
+                </div>
               </div>
               <p className="text-muted-foreground">Recent actions and events in your smart home.</p>
             </div>
@@ -2101,7 +2251,13 @@ export default function App() {
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
                 <Contact className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Contacts</h1>
+                <div className="flex items-center justify-between w-full">
+                  <h1 className="text-3xl font-bold tracking-tight">Contacts</h1>
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                    <Contact className="h-3 w-3" />
+                    {contacts.length} {contacts.length === 1 ? 'Contact' : 'Contacts'}
+                  </Badge>
+                </div>
               </div>
               <p className="text-muted-foreground">Manage your home contacts and emergency services.</p>
             </div>
@@ -2217,7 +2373,7 @@ export default function App() {
                     </SelectContent>
                   </Select>
                   <Button size="sm" onClick={() => setIsAddContactOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Add Contact
+                    <UserPlus className="mr-2 h-4 w-4" /> Add Contact
                   </Button>
                 </div>
               </div>
@@ -2560,7 +2716,7 @@ export default function App() {
                         }));
                       }}
                     >
-                      <Plus className="mr-1 h-3 w-3" /> Add Contact
+                      <UserPlus className="mr-1 h-3 w-3" /> Add Contact
                     </Button>
                   </div>
                   <div className="space-y-3">
@@ -2740,16 +2896,69 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
+          <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <UserCircle className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">All Users</h1>
+            <div className="flex items-center gap-4">
+              <UserCircle className="h-9 w-9 text-primary" />
+              <div className="space-y-0.5">
+                <h1 className="text-3xl font-bold tracking-tight">All Users</h1>
+              </div>
             </div>
-            <p className="text-muted-foreground">Manage users and their access levels.</p>
+            <p className="text-md text-muted-foreground">Manage system users, access levels and biometric tokens.</p>
+          </div>  
+            <div className="flex items-center gap-3 w-full">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
+                <Input 
+                  type="text"
+                  placeholder="Search users by name or role..." 
+                  className="pl-9 h-11 rounded-none bg-white border-0 border-b border-slate-200 w-full focus-visible:ring-0 focus-visible:border-b-black transition-all"
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="ml-auto flex items-center gap-3">
+                <Button 
+                  variant="outline"
+                  className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                  onClick={() => setIsAddFingerprintOpen(true)}
+                >
+                  <Fingerprint className="h-4 w-4" /> Add Fingerprint
+                </Button>
+                <Button 
+                  variant="outline"
+                  className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                  onClick={() => setIsRegisterNfidOpen(true)}
+                >
+                  <ScanLine className="h-4 w-4" /> Register NFID
+                </Button>
+                <Button 
+                  className="bg-black text-white hover:bg-black/90 transition-all font-medium px-6 flex items-center justify-center gap-2 shadow-sm"
+                  onClick={() => {
+                    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                    setGeneratedToken(token);
+                    setIsTokenModalOpen(true);
+                  }}
+                >
+                  <Key className="h-4 w-4" />
+                  Generate Token
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {allUsers.map(person => {
+            {allUsers
+              .filter(person => {
+                const query = userSearchQuery.toLowerCase();
+                const details = person.getPersonDetailsDto;
+                return (
+                  details.firstName.toLowerCase().includes(query) ||
+                  details.lastName.toLowerCase().includes(query) ||
+                  person.role?.toLowerCase().includes(query)
+                );
+              })
+              .map(person => {
               const details = person.getPersonDetailsDto;
               const user = person.getUserDto;
               return (
@@ -2785,21 +2994,9 @@ export default function App() {
             <Button 
               variant="outline" 
               className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
-              onClick={() => {
-                const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-                setGeneratedToken(token);
-                setIsTokenModalOpen(true);
-              }}
-            >
-              <Key className="h-6 w-6 text-muted-foreground" />
-              <span className="text-sm font-medium text-muted-foreground">Generate Token</span>
-            </Button>
-            <Button 
-              variant="outline" 
-              className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
               onClick={() => setIsAddPersonOpen(true)}
             >
-              <PlusCircle className="h-6 w-6 text-muted-foreground" />
+              <UserPlus className="h-6 w-6 text-muted-foreground" />
               <span className="text-sm font-medium text-muted-foreground">Add New User</span>
             </Button>
           </div>
@@ -2829,6 +3026,7 @@ export default function App() {
       const lights = sortedRoomDevices.filter(d => d.type === 'light');
       const appliances = sortedRoomDevices.filter(d => d.type === 'appliance');
       const cameras = sortedRoomDevices.filter(d => d.type === 'camera');
+      const roomExternals = externals.filter(e => e.roomId === userRoomId || e.room === userRoomId);
       
       const roomScenes = scenes.filter(scene => 
         scene.actions.some(action => roomDevices.some(d => d.id === action.deviceId))
@@ -2908,131 +3106,137 @@ export default function App() {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-            {/* Doors */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Lock className="h-5 w-5 text-primary" />
-                <h2 className="text-xl font-bold">Doors</h2>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-1 gap-4">
-                {doors.map(device => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    onToggle={handleToggle}
-                    onStatusChange={handleStatusChange}
-                    onValueChange={handleValueChange}
-                  />
-                ))}
-              </div>
+          <div className="flex flex-col lg:flex-row gap-12">
+            <div className="lg:w-2/3 space-y-12">
+              {/* Doors */}
+              {doors.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Lock className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Doors</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {doors.map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onValueChange={handleValueChange}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Windows */}
+              {windows.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <WindowIcon className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Windows</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {windows.map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onValueChange={handleValueChange}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Appliances */}
+              {appliances.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Power className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Appliances</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {appliances.map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onValueChange={handleValueChange}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Externals */}
+              {roomExternals.length > 0 && (
+                <div className="space-y-4 pt-4">
+                  <div className="flex items-center gap-2">
+                    <Radio className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Externals</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {roomExternals.map(ext => (
+                      <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
+                        <div className="flex items-start justify-between">
+                          <div className="space-y-1">
+                            <h3 className="font-bold text-lg">{ext.externalName}</h3>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
+                            </div>
+                          </div>
+                          <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
+                            {ext.isTriggered ? 'TRIGGERED' : 'STANDBY'}
+                          </Badge>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Windows */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <WindowIcon className="h-5 w-5 text-primary" />
-                <h2 className="text-xl font-bold">Windows</h2>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-1 gap-4">
-                {windows.map(device => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    onToggle={handleToggle}
-                    onStatusChange={handleStatusChange}
-                    onValueChange={handleValueChange}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Lights */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Lightbulb className="h-5 w-5 text-primary" />
-                <h2 className="text-xl font-bold">Lights</h2>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-1 gap-4">
-                {lights.map(device => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    onToggle={handleToggle}
-                    onStatusChange={handleStatusChange}
-                    onValueChange={handleValueChange}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Appliances */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Power className="h-5 w-5 text-primary" />
-                <h2 className="text-xl font-bold">Appliances</h2>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-1 gap-4">
-                {appliances.map(device => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    onToggle={handleToggle}
-                    onStatusChange={handleStatusChange}
-                    onValueChange={handleValueChange}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Room Scenes */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Film className="h-5 w-5 text-primary" />
-                <h2 className="text-xl font-bold">Room Scenes</h2>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-1 gap-4">
-                {roomScenes.map(scene => (
-                  <Card 
-                    key={scene.id} 
-                    className="p-4 flex flex-col gap-3 hover:bg-accent transition-all cursor-pointer group relative"
-                    onClick={() => triggerScene(scene)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                        {scene.icon === 'Film' ? <Film className="h-4 w-4" /> : scene.icon === 'Sun' ? <Sun className="h-4 w-4" /> : <HomeIcon className="h-4 w-4" />}
-                      </div>
-                      <Button size="icon" variant="ghost" className="rounded-full h-6 w-6">
-                        <Play className="h-3 w-3 fill-current" />
-                      </Button>
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold truncate">{scene.name}</h3>
-                      <p className="text-[10px] text-muted-foreground">{scene.actions.length} Actions</p>
-                    </div>
-                  </Card>
-                ))}
-                {roomScenes.length === 0 && (
-                  <p className="text-xs text-muted-foreground italic">No specific scenes for this room.</p>
-                )}
-              </div>
+            <div className="lg:w-1/3">
+              {/* Lights */}
+              {lights.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Lights</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 gap-4">
+                    {lights.map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onValueChange={handleValueChange}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-12">
-            {/* Cameras (Full Width) */}
+          {/* Cameras (Full Width 3/3) */}
+          {cameras.length > 0 && (
             <div className="space-y-4 pt-4">
               <div className="flex items-center gap-2">
                 <Camera className="h-5 w-5 text-primary" />
                 <h2 className="text-xl font-bold">Cameras</h2>
               </div>
               <Separator />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {cameras.map(device => (
                   <DeviceCard
                     key={device.id}
@@ -3043,14 +3247,9 @@ export default function App() {
                     onClick={handleDeviceClick}
                   />
                 ))}
-                {cameras.length === 0 && (
-                  <div className="col-span-full flex h-32 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
-                    <p className="text-xs text-muted-foreground">No cameras in this room.</p>
-                  </div>
-                )}
               </div>
             </div>
-          </div>
+          )}
         </motion.div>
       );
     }
@@ -3063,31 +3262,56 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                  onClick={() => setActiveView('facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-                <Sofa className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-row items-start justify-between w-full">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                    onClick={() => setActiveView('facility-overview')}
+                    title="Back to Overview"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                  <Sofa className="h-8 w-8 text-primary shrink-0" />
+                  <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
+                </div>
+                <p className="text-muted-foreground">Overview of all rooms in your home.</p>
               </div>
-              <p className="text-muted-foreground">Overview of all rooms in your home.</p>
+              
+              <div className="shrink-0 pt-1">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                  <Sofa className="h-3 w-3" />
+                  {rooms.length} {rooms.length === 1 ? 'Room' : 'Rooms'}
+                </Badge>
+              </div>
             </div>
-            <Button onClick={() => setIsAddRoomOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Room
-            </Button>
+
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
+                <Input 
+                  placeholder="Search rooms..." 
+                  className="pl-9 h-10 bg-white border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  value={roomSearchQuery}
+                  onChange={(e) => setRoomSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-row items-center gap-3 shrink-0">
+                {/* Rooms view doesn't have sort by room/section yet, adding placeholder or omit, user mentions it generally */}
+                {/* Let's just put Add button for Rooms */}
+                <Button onClick={() => setIsAddRoomOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                  <Plus className="mr-2 h-4 w-4" /> Add New Room
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {rooms.map(room => {
+            {rooms.filter(r => r.name.toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
               const Icon = iconMap[room.icon] || Sofa;
               const roomDevices = devices.filter(d => d.room === room.id);
               const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
@@ -3125,6 +3349,12 @@ export default function App() {
     }
 
     if (activeView === 'facility-actions') {
+      const filteredActions = actions.filter(action => 
+        !facilitySearchQuery || 
+        action.actionName.toLowerCase().includes(facilitySearchQuery.toLowerCase()) ||
+        action.actionDescription?.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+      );
+
       return (
         <motion.div
           key="facility-actions"
@@ -3132,31 +3362,55 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                  onClick={() => setActiveView('facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-                <Zap className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Actions & Automation</h1>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-row items-start justify-between w-full">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                    onClick={() => setActiveView('facility-overview')}
+                    title="Back to Overview"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                  <Zap className="h-8 w-8 text-primary shrink-0" />
+                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Actions & Automation</h1>
+                </div>
+                <p className="text-muted-foreground">Manage system-wide triggered events and automation sequences.</p>
               </div>
-              <p className="text-muted-foreground">Manage system-wide triggered events and automation sequences.</p>
+              
+              <div className="shrink-0 pt-1">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                  <Zap className="h-3 w-3" />
+                  {actions.length} {actions.length === 1 ? 'Action' : 'Actions'}
+                </Badge>
+              </div>
             </div>
-            <Button onClick={() => setIsAddActionOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Action
-            </Button>
+            
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
+                <Input
+                  type="text"
+                  placeholder="Search actions by name..."
+                  className="pl-10 h-10"
+                  value={facilitySearchQuery}
+                  onChange={(e) => setFacilitySearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-row items-center gap-3 shrink-0">
+                <Button onClick={() => setIsAddActionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                  <Plus className="mr-2 h-4 w-4" /> Add New Action
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {actions.map(action => (
+            {filteredActions.map(action => (
               <Card 
                 key={action.id} 
                 className="p-6 flex flex-col gap-4 hover:shadow-md transition-all border-l-4 border-l-primary cursor-pointer group relative overflow-hidden"
@@ -3215,6 +3469,10 @@ export default function App() {
     }
 
     if (activeView === 'facility-hardware') {
+      const filteredHardwares = hardwares.filter(hw => 
+        !facilitySearchQuery || hw.hardwareName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+      );
+
       return (
         <motion.div
           key="facility-hardware"
@@ -3222,68 +3480,122 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                  onClick={() => setActiveView('facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-                <Cpu className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Hardware Systems</h1>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-row items-start justify-between w-full">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3 w-full">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                    onClick={() => setActiveView('facility-overview')}
+                    title="Back to Overview"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                  <Cpu className="h-8 w-8 text-primary shrink-0" />
+                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Hardware Systems</h1>
+                </div>
+                <p className="text-muted-foreground">Manage and monitor hardware hubs and integration controllers.</p>
               </div>
-              <p className="text-muted-foreground">Manage and monitor hardware hubs and integration controllers.</p>
+              
+              <div className="shrink-0 pt-1">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                  <Cpu className="h-3 w-3" />
+                  {hardwares.length} {hardwares.length === 1 ? 'Controller' : 'Controllers'}
+                </Badge>
+              </div>
             </div>
-            <Button onClick={() => {
-              setHardwareForm({ hardwareName: '' });
-              setIsAddHardwareOpen(true);
-            }}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Hardware
-            </Button>
+
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
+                <Input
+                  type="text"
+                  placeholder="Search hardware by name..."
+                  className="pl-10 h-10"
+                  value={facilitySearchQuery}
+                  onChange={(e) => setFacilitySearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-row items-center gap-3 shrink-0">
+                <div className="flex items-center rounded-lg border bg-card p-1">
+                  <button
+                    className={cn(
+                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                      facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                    )}
+                    onClick={() => setFacilitySortBy('room')}
+                  >
+                    By Room
+                  </button>
+                  <button
+                    className={cn(
+                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                      facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                    )}
+                    onClick={() => setFacilitySortBy('section')}
+                  >
+                    By Section
+                  </button>
+                </div>
+                <Button onClick={() => {
+                  setHardwareForm({ hardwareName: '' });
+                  setIsAddHardwareOpen(true);
+                }} className="bg-primary text-primary-foreground shrink-0">
+                  <Plus className="mr-2 h-4 w-4" /> Add Hardware
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {hardwares.map(hw => (
-              <Card 
-                key={hw.id} 
-                className="p-6 space-y-4 hover:shadow-lg hover:border-primary/50 transition-all cursor-pointer bg-card"
-                onClick={() => {
-                  setSelectedHardware(hw);
-                  setIsHardwareDetailOpen(true);
-                }}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="h-5 w-5 text-primary" />
-                      <h3 className="text-lg font-bold">{hw.hardwareName}</h3>
+            {filteredHardwares.map(hw => {
+              const deviceCount = (hw.applianceIdNames?.length || 0) + 
+                                 (hw.cameraIdNames?.length || 0) + 
+                                 (hw.lightIdNames?.length || 0) + 
+                                 (hw.windowIdNames?.length || 0) + 
+                                 (hw.doorIdNames?.length || 0) + 
+                                 (hw.externalIdNames?.length || 0);
+
+              return (
+                <Card 
+                  key={hw.id} 
+                  className="p-6 space-y-4 hover:shadow-lg hover:border-primary/50 transition-all cursor-pointer bg-card"
+                  onClick={() => {
+                    setSelectedHardware(hw);
+                    setIsHardwareDetailOpen(true);
+                  }}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Cpu className="h-5 w-5 text-primary" />
+                        <h3 className="text-lg font-bold">{hw.hardwareName}</h3>
+                      </div>
+                      <Badge variant="secondary" className="px-2 py-0.5 text-[10px] font-bold">
+                        {deviceCount} {deviceCount === 1 ? 'Device' : 'Devices'} Linked
+                      </Badge>
+                    </div>
+                    <Badge variant={hw.isActive ? 'default' : 'secondary'}>
+                      {hw.isActive ? 'ONLINE' : 'OFFLINE'}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-2 text-sm pt-2 border-t">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground font-medium">Hardware ID</span>
+                      <span className="font-mono text-xs font-semibold">{hw.hardwareId}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground font-medium">Auth Key</span>
+                      <span className="font-mono text-xs select-all text-primary font-medium truncate max-w-[150px]">{hw.authKey}</span>
                     </div>
                   </div>
-                  <Badge variant={hw.isActive ? 'default' : 'secondary'}>
-                    {hw.isActive ? 'ONLINE' : 'OFFLINE'}
-                  </Badge>
-                </div>
-
-                <div className="space-y-2 text-sm pt-2 border-t">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground font-medium">Hardware ID</span>
-                    <span className="font-mono text-xs font-semibold">{hw.hardwareId}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-muted-foreground font-medium">Auth Key</span>
-                    <span className="font-mono text-xs select-all text-primary font-medium truncate max-w-[150px]">{hw.authKey}</span>
-                  </div>
-                </div>
-
-                
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
         </motion.div>
       );
@@ -3296,7 +3608,7 @@ export default function App() {
         // Search by name
         if (facilitySearchQuery) {
           result = result.filter(ext => 
-            ext.externalsName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+            ext.externalName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
           );
         }
 
@@ -3325,9 +3637,9 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
+            <div className="flex flex-col gap-1 w-full">
+              <div className="flex items-center gap-3 w-full">
                 <Button 
                   variant="ghost" 
                   size="icon" 
@@ -3339,16 +3651,16 @@ export default function App() {
                 </Button>
                 <div className="h-4 w-px bg-border mx-1" />
                 <Radio className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">External Systems & Peripherals</h1>
+                <div className="flex items-center justify-between w-full">
+                  <h1 className="text-3xl font-bold tracking-tight">External Systems</h1>
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                    <Radio className="h-3 w-3" />
+                    {externals.length} {externals.length === 1 ? 'External' : 'Externals'}
+                  </Badge>
+                </div>
               </div>
               <p className="text-muted-foreground">Monitor and trigger auxiliary external interfaces around the property boundary.</p>
             </div>
-            <Button onClick={() => {
-              setExternalForm({ externalsName: '', actionIds: [] });
-              setIsAddExternalOpen(true);
-            }}>
-              <Plus className="mr-2 h-4 w-4" /> Add External Device
-            </Button>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
@@ -3363,7 +3675,6 @@ export default function App() {
               />
             </div>
             <div className="flex items-center gap-3 w-full sm:w-auto">
-              <span className="text-xs text-muted-foreground font-medium">Sort:</span>
               <div className="flex items-center rounded-lg border bg-card p-1">
                 <button
                   className={cn(
@@ -3384,6 +3695,12 @@ export default function App() {
                   By Section
                 </button>
               </div>
+              <Button onClick={() => {
+                setExternalForm({ externalsName: '', actionIds: [] });
+                setIsAddExternalOpen(true);
+              }} className="bg-primary text-primary-foreground shrink-0">
+                <Plus className="mr-2 h-4 w-4" /> Add External Device
+              </Button>
             </div>
           </div>
 
@@ -3393,7 +3710,12 @@ export default function App() {
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg">{ext.externalName}</h3>
-                    <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
+                      <Badge variant="secondary" className="px-1.5 py-0 text-[9px] font-bold">
+                        {(ext.actionIds?.length || 0)} Linked Actions
+                      </Badge>
+                    </div>
                   </div>
                   <div className="flex flex-col items-end gap-3">
                     <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
@@ -3459,31 +3781,54 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                  onClick={() => setActiveView('facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-                <Layers className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-row items-start justify-between w-full">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3 w-full">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                    onClick={() => setActiveView('facility-overview')}
+                    title="Back to Overview"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                  <Layers className="h-8 w-8 text-primary shrink-0" />
+                  <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
+                </div>
+                <p className="text-muted-foreground">Manage devices and rooms grouped by section.</p>
               </div>
-              <p className="text-muted-foreground">Manage devices and rooms grouped by section.</p>
+              
+              <div className="shrink-0 pt-1">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                  <Layers className="h-3 w-3" />
+                  {sections.length} {sections.length === 1 ? 'Section' : 'Sections'}
+                </Badge>
+              </div>
             </div>
-            <Button onClick={() => setIsAddSectionOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add New Section
-            </Button>
+
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
+                <Input 
+                  placeholder="Search sections..." 
+                  className="pl-10 h-10 rounded-xl"
+                  value={sectionSearchQuery}
+                  onChange={(e) => setSectionSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-row items-center gap-3 shrink-0">
+                <Button onClick={() => setIsAddSectionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                  <Plus className="mr-2 h-4 w-4" /> Add New Section
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-8">
-            {sections.map(section => {
+            {sections.filter(s => s.name.toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
               const sectionRooms = rooms.filter(r => r.section === section.id);
               const sectionDevices = devices.filter(d => d.section === section.id);
               
@@ -3664,41 +4009,90 @@ export default function App() {
         exit={{ opacity: 0, x: -20 }}
         className="space-y-8"
       >
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facility-overview')}
-                title="Back to Overview"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <div className="h-4 w-px bg-border mx-1" />
-              <TitleIcon className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-row items-start justify-between w-full">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-3 w-full">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20 shrink-0"
+                  onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facility-overview')}
+                  title="Back to Overview"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                <TitleIcon className="h-8 w-8 text-primary shrink-0" />
+                <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+              </div>
+              <p className="text-muted-foreground">Manage all {title?.toLowerCase()} in your home.</p>
             </div>
-            <p className="text-muted-foreground">Manage all {title?.toLowerCase()} in your home.</p>
+            
+            <div className="shrink-0 pt-1">
+              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                <TitleIcon className="h-3 w-3" />
+                {filteredDevices.length} {filteredDevices.length === 1 ? 'Device' : 'Devices'}
+              </Badge>
+            </div>
           </div>
           
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="secondary" className="px-3 py-1">
-              {filteredDevices.length} Devices
-            </Badge>
-            {isRoom && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => {
-                  setViewingRoom(room!);
-                  setIsViewRoomOpen(true);
-                }}>
-                  <Info className="mr-2 h-4 w-4" />
-                  View Room Details
-                </Button>
-              </>
-            )}
-          </div>
+          {(isRoom || facilityType !== 'overview') && (
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
+              <div className="relative w-full max-w-md">
+                {!isRoom && (
+                  <>
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
+                    <Input
+                      type="text"
+                      placeholder={`Search ${title?.toLowerCase()}...`}
+                      className="pl-10 h-10"
+                      value={facilitySearchQuery}
+                      onChange={(e) => setFacilitySearchQuery(e.target.value)}
+                    />
+                  </>
+                )}
+              </div>
+              <div className="flex flex-row items-center gap-3 shrink-0">
+                {!isRoom && (
+                  <div className="flex items-center rounded-lg border bg-card p-1">
+                    <button
+                      className={cn(
+                        "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                        facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                      )}
+                      onClick={() => setFacilitySortBy('room')}
+                    >
+                      By Room
+                    </button>
+                    <button
+                      className={cn(
+                        "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                        facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                      )}
+                      onClick={() => setFacilitySortBy('section')}
+                    >
+                      By Section
+                    </button>
+                  </div>
+                )}
+                {isRoom ? (
+                  <Button variant="outline" onClick={() => {
+                    setViewingRoom(room!);
+                    setIsViewRoomOpen(true);
+                  }} className="rounded-xl h-10 px-6 shadow-sm font-bold shrink-0">
+                    <Info className="mr-2 h-4 w-4" />
+                    View Room Details
+                  </Button>
+                ) : (
+                  <Button onClick={() => setIsAddDeviceOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add New {singularName}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {isRoom && (
@@ -3739,47 +4133,6 @@ export default function App() {
                 </div>
               </div>
             </Card>
-          </div>
-        )}
-
-        {(!isRoom && facilityType !== 'overview') && (
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
-              <Input
-                type="text"
-                placeholder={`Search ${title?.toLowerCase()}...`}
-                className="pl-10 h-10"
-                value={facilitySearchQuery}
-                onChange={(e) => setFacilitySearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="flex items-center rounded-lg border bg-card p-1">
-                <button
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'room' ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-                  )}
-                  onClick={() => setFacilitySortBy('room')}
-                >
-                  By Room
-                </button>
-                <button
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'section' ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-                  )}
-                  onClick={() => setFacilitySortBy('section')}
-                >
-                  By Section
-                </button>
-              </div>
-              <Button onClick={() => setIsAddDeviceOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add New {singularName}
-              </Button>
-            </div>
           </div>
         )}
 
@@ -3872,12 +4225,10 @@ export default function App() {
       {/* Add Device Dialog */}
       <Dialog open={isAddDeviceOpen} onOpenChange={setIsAddDeviceOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               {(() => {
-                const type = activeView.replace('facility-', '');
-                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : PlusCircle;
-                return <Icon className="h-5 w-5 text-primary" />;
+                return <PlusCircle className="h-5 w-5 text-primary" />;
               })()}
               Add New {(() => {
                 const type = activeView.replace('facility-', '');
@@ -3886,32 +4237,33 @@ export default function App() {
                   'lights': 'Light',
                   'cameras': 'Camera',
                   'doors': 'Door',
-                  'windows': 'Light'
+                  'windows': 'Window'
                 };
                 return map[type] || 'Device';
               })()}
             </DialogTitle>
-            <DialogDescription>
-              Connect a new smart device to your HanssonHub.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="name" className="flex items-center gap-2">
-                {(() => {
-                  const type = activeView.replace('facility-', '');
-                  const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
-                  return <Icon className="h-3 w-3 text-muted-foreground" />;
-                })()}
-                {(() => {
-                  const type = activeView.replace('facility-', '');
-                  const map: Record<string, string> = {
-                    'appliances': 'Appliance Name',
-                    'lights': 'Light Name',
-                    'cameras': 'Camera Name',
-                    'doors': 'Door Name',
-                    'windows': 'Room Name'
-                  };
+          <DialogDescription>
+            Connect a new smart device to your HanssonHub.
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[60vh] pr-4">
+        <div className="grid gap-4 pt-[3px] pb-4 px-1">
+          <div className="grid gap-2">
+            <Label htmlFor="name" className="flex items-center gap-2">
+              {(() => {
+                const type = activeView.replace('facility-', '');
+                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
+                return <Icon className="h-3 w-3 text-muted-foreground" />;
+              })()}
+              {(() => {
+                const type = activeView.replace('facility-', '');
+                const map: Record<string, string> = {
+                  'appliances': 'Appliance Name',
+                  'lights': 'Light Name',
+                  'cameras': 'Camera Name',
+                  'doors': 'Door Name',
+                  'windows': 'Window Name'
+                };
                   return map[type] || 'Device Name';
                 })()}
               </Label>
@@ -3929,6 +4281,28 @@ export default function App() {
                 onChange={(e) => setNewDevice(prev => ({ ...prev, name: e.target.value }))}
               />
             </div>
+
+            {activeView === 'facility-appliances' && (
+              <div className="grid gap-2">
+                <Label htmlFor="appliance-type" className="flex items-center gap-2">
+                  <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                  Appliance Type
+                </Label>
+                <Select 
+                  value={newDevice.applianceType?.toString() || '1'} 
+                  onValueChange={(v) => setNewDevice(prev => ({ ...prev, applianceType: parseInt(v) }))}
+                >
+                  <SelectTrigger id="appliance-type">
+                    <SelectValue placeholder="Select appliance type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {appNamesDetailList.applianceType.map(t => (
+                      <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {activeView === 'facility-cameras' && (
               <div className="space-y-4 pt-2 border-t mt-2">
@@ -4073,10 +4447,11 @@ export default function App() {
               </Select>
             </div>
           </div>
+          </ScrollArea>
           <DialogFooter>
             
             <Button onClick={handleAddDevice} className="bg-primary text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
+              <PlusCircle className="mr-2 h-4 w-4" />
               Add {(() => {
                 const type = activeView.replace('facility-', '');
                 const map: Record<string, string> = {
@@ -4084,7 +4459,7 @@ export default function App() {
                   'lights': 'Light',
                   'cameras': 'Camera',
                   'doors': 'Door',
-                  'windows': 'Light'
+                  'windows': 'Window'
                 };
                 return map[type] || 'Device';
               })()}
@@ -4105,6 +4480,7 @@ export default function App() {
               Create a new room in your HanssonHub.
             </DialogDescription>
           </DialogHeader>
+          <ScrollArea className="max-h-[60vh] overflow-y-auto px-1">
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="room-name" className="flex items-center gap-2">
@@ -4204,6 +4580,7 @@ export default function App() {
               />
             </div>
           </div>
+          </ScrollArea>
           <DialogFooter>
             
             <Button onClick={handleAddRoom} className="bg-primary text-primary-foreground">
@@ -4273,7 +4650,7 @@ export default function App() {
                   setIsEditSectionOpen(false);
                 });
               }
-            }} className="flex items-center gap-2 bg-primary text-primary-foreground">
+            }} className="bg-primary text-primary-foreground">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -4573,11 +4950,9 @@ export default function App() {
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={Role.Owner.toString()}>Owner</SelectItem>
-                  <SelectItem value={Role.Wife.toString()}>Wife</SelectItem>
-                  <SelectItem value={Role.Child.toString()}>Child</SelectItem>
-                  <SelectItem value={Role.Relative.toString()}>Relative</SelectItem>
-                  <SelectItem value={Role.Visitor.toString()}>Visitor</SelectItem>
+                  {appNamesDetailList.role.map(r => (
+                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -4761,15 +5136,15 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden">
+          <DialogHeader className="p-6 pb-2">
             <DialogTitle className="flex items-center gap-2">
               <PlusCircle className="h-5 w-5 text-primary" />
               Add New Category
             </DialogTitle>
             <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
+          <div className="grid gap-4 p-6 pt-0 pb-4 overflow-y-auto max-h-[60vh]">
             <div className="grid gap-2">
               <Label htmlFor="cat-name">Category Name</Label>
               <Input 
@@ -4811,9 +5186,11 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            
-            <Button onClick={handleAddCategory}>Add Category</Button>
+          <DialogFooter className="p-6 border-t bg-slate-50 flex items-center justify-center sm:justify-center">
+            <Button onClick={handleAddCategory} className="bg-primary text-primary-foreground">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Add New Category
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4871,55 +5248,79 @@ export default function App() {
           </div>
           <DialogFooter>
             
-            <Button onClick={handleEditCategory}><CheckCheck className="mr-2 h-4 w-4" />Save Changes</Button>
+            <Button onClick={handleEditCategory} className="bg-primary text-primary-foreground">
+              <CheckCheck className="mr-2 h-4 w-4" />
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) setEditingContactId(null); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Contact className="h-5 w-5 text-primary" />
-              {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
-            </DialogTitle>
-            <DialogDescription>Fill in the contact details and addresses.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh]">
-            <div className="grid gap-6 pt-[3px] pb-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label className="flex items-center gap-2">
-                    <UserCircle className="h-4 w-4" /> First Name
-                  </Label>
-                  <Input 
-                    placeholder="First Name" 
-                    value={newContact.firstName}
-                    onChange={(e) => setNewContact(prev => ({ ...prev, firstName: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label className="flex items-center gap-2">
-                    <UserCircle className="h-4 w-4" /> Last Name
-                  </Label>
-                  <Input 
-                    placeholder="Last Name" 
-                    value={newContact.lastName}
-                    onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
-                  />
-                </div>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-black bg-white shadow-2xl">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b bg-white pr-16">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {editingContactId ? <UserCog className="h-5 w-5 text-primary" /> : <UserPlus className="h-5 w-5 text-primary" />}
+                <DialogTitle className="text-lg font-bold tracking-tight">
+                  {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
+                </DialogTitle>
               </div>
+            </div>
+            <DialogDescription className="text-xs font-medium mt-1 text-muted-foreground">Fill in the contact details and addresses.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh] p-8 pt-2">
+            <div className="grid gap-6 pt-[3px] pb-4">
+              <div className="flex gap-8 items-start">
+                <div className="flex-1 space-y-5">
+                  <div className="grid gap-2">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <UserCircle className="h-3 w-3" /> First Name
+                    </Label>
+                    <Input 
+                      placeholder="First Name" 
+                      className="h-10 rounded-none"
+                      value={newContact.firstName}
+                      onChange={(e) => setNewContact(prev => ({ ...prev, firstName: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <UserCircle className="h-3 w-3" /> Last Name
+                    </Label>
+                    <Input 
+                      placeholder="Last Name" 
+                      className="h-10 rounded-none"
+                      value={newContact.lastName}
+                      onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
+                    />
+                  </div>
+                </div>
 
-              <div className="grid gap-2">
-                <Label className="flex items-center gap-2">
-                  <Camera className="h-4 w-4" /> Avatar
-                </Label>
-                <div className="flex items-center gap-4">
-                  {newContact.imageUrl && (
-                    <img src={newContact.imageUrl} alt="Avatar Preview" className="h-12 w-12 rounded-full object-cover" />
-                  )}
-                  <Input 
-                    type="file"
+                <div className="flex flex-col items-center gap-3">
+                  <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground self-start ml-2">
+                    <Camera className="h-3 w-3" /> Avatar
+                  </Label>
+                  <div 
+                    className="relative h-40 w-40 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer group bg-muted/30 hover:bg-muted transition-all shadow-sm"
+                    onClick={() => document.getElementById('contact-avatar-upload')?.click()}
+                  >
+                    {newContact.imageUrl ? (
+                      <img src={newContact.imageUrl} alt="Avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <ImagePlus className="h-8 w-8" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity backdrop-blur-[2px]">
+                      <Pencil className="h-6 w-6 text-white" />
+                    </div>
+                  </div>
+                  <input 
+                    id="contact-avatar-upload"
+                    type="file" 
+                    className="hidden" 
                     accept="image/*"
                     onChange={(e) => handleImageSelect(e, 'contact')}
                   />
@@ -4938,7 +5339,7 @@ export default function App() {
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {contactCategories.map(cat => (
+                    {appNamesDetailList.contactCategoryIdNames.map(cat => (
                       <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -4979,6 +5380,7 @@ export default function App() {
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Phone</Label>
                         <Input 
                           placeholder="+123..." 
+                          className="h-10 rounded-none"
                           value={detail.phoneNumber}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -4991,6 +5393,7 @@ export default function App() {
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Email</Label>
                         <Input 
                           placeholder="email@example.com" 
+                          className="h-10 rounded-none"
                           value={detail.email}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -5038,7 +5441,7 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Number Line</Label>
-                        <Input value={addr.numberLine} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.numberLine} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].numberLine = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5046,7 +5449,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Street</Label>
-                        <Input value={addr.street} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.street} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].street = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5054,7 +5457,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">City</Label>
-                        <Input value={addr.city} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.city} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].city = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5062,7 +5465,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Region</Label>
-                        <Input value={addr.region} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.region} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].region = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5070,7 +5473,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">State</Label>
-                        <Input value={addr.state} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.state} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].state = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5078,7 +5481,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Country</Label>
-                        <Input value={addr.country} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.country} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].country = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5086,7 +5489,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1 col-span-2">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Postal Code</Label>
-                        <Input value={addr.postalCode} onChange={(e) => {
+                        <Input className="h-10 rounded-none" value={addr.postalCode} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].postalCode = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5098,10 +5501,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="pt-4 border-t">
-            
-            <Button onClick={handleAddContact}>
-              <ShieldCheck className="mr-2 h-4 w-4" />
+          <DialogFooter className="p-6 border-t gap-3 bg-slate-50 flex items-center justify-end sm:items-center">
+            <Button onClick={handleAddContact} className="bg-black hover:bg-black/90 text-white px-4 mb-3 font-normal flex items-center justify-center gap-2">
+              {editingContactId ? <Save className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
               {editingContactId ? 'Update Contact' : 'Save Contact'}
             </Button>
           </DialogFooter>
@@ -5328,7 +5730,7 @@ export default function App() {
       {/* Edit Device Dialog */}
       <Dialog open={isEditDeviceOpen} onOpenChange={setIsEditDeviceOpen}>
         <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+          <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               {editingDevice && (() => {
                 const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
@@ -5347,7 +5749,7 @@ export default function App() {
                     return <Icon className="h-3 w-3 text-muted-foreground" />;
                   })()}
                   {(() => {
-                    if (editingDevice.type === 'window') return 'Room Name';
+                    if (editingDevice.type === 'window') return 'Window Name';
                     const map: Record<string, string> = {
                       'appliance': 'Appliance Name',
                       'light': 'Light Name',
@@ -5432,6 +5834,28 @@ export default function App() {
                       />
                     </div>
                   </div>
+                </div>
+              )}
+
+              {editingDevice.type === 'appliance' && (
+                <div className="grid gap-2 text-left">
+                  <Label htmlFor="edit-appliance-type" className="flex items-center gap-2">
+                    <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                    Appliance Type
+                  </Label>
+                  <Select 
+                    value={editingDevice.applianceType?.toString() || '1'} 
+                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, applianceType: parseInt(v) })}
+                  >
+                    <SelectTrigger id="edit-appliance-type">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {appNamesDetailList.applianceType.map(t => (
+                        <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
@@ -5621,12 +6045,12 @@ export default function App() {
       {/* Token Generation Modal */}
       <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
         <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white" showCloseButton={false}>
-          <div className="absolute right-4 top-4 z-50">
+          <div className="absolute right-6 top-6 z-50">
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 transition-colors" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 text-left pb-4">
+          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white">
             <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900">
               <Key className="h-6 w-6 text-primary" />
               Generated Token
@@ -5642,29 +6066,22 @@ export default function App() {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Authentication Token</span>
                 <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-100 text-[10px] font-bold">READY</Badge>
               </div>
-              <div className="bg-white dark:bg-black p-4 rounded-xl border border-slate-100 dark:border-slate-800 font-mono text-sm break-all select-all text-primary shadow-inner">
-                {generatedToken}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-white dark:bg-black p-4 rounded-xl border border-slate-100 dark:border-slate-800 font-mono text-sm break-all select-all text-primary shadow-inner">
+                  {generatedToken}
+                </div>
+                <Button 
+                  size="icon"
+                  variant="outline"
+                  className="shrink-0 h-12 w-12 rounded-xl bg-white hover:bg-slate-50 transition-all border-slate-100 shadow-sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(generatedToken);
+                    toast.success("Token copied to clipboard!");
+                  }}
+                >
+                  <Copy className="h-5 w-5 text-primary" />
+                </Button>
               </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <Button 
-                className="w-full h-12 rounded-xl text-sm font-bold shadow-lg shadow-primary/20"
-                onClick={() => {
-                  navigator.clipboard.writeText(generatedToken);
-                  toast.success("Token copied to clipboard!");
-                }}
-              >
-                <ClipboardCheck className="mr-2 h-5 w-5" />
-                Copy to Clipboard
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full h-12 rounded-xl text-sm font-bold border-slate-200 text-slate-600"
-                onClick={() => setIsTokenModalOpen(false)}
-              >
-                Done
-              </Button>
             </div>
           </div>
         </DialogContent>
@@ -5681,7 +6098,8 @@ export default function App() {
             <DialogDescription>Update the details of this room.</DialogDescription>
           </DialogHeader>
           {editingRoom && (
-            <div className="grid gap-4 pt-[3px] pb-4">
+            <ScrollArea className="max-h-[60vh] pr-2 px-1">
+            <div className="grid gap-4 pt-[3px] pb-4 pr-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-name" className="flex items-center gap-2">
                   <Edit3 className="h-3 w-3 text-muted-foreground" />
@@ -5778,10 +6196,18 @@ export default function App() {
                 />
               </div>
             </div>
+            </ScrollArea>
           )}
           <DialogFooter>
             
-            <Button onClick={handleSaveRoom} className="bg-primary text-primary-foreground">
+            <Button 
+              className="bg-primary text-primary-foreground"
+              onClick={() => {
+                if (editingRoom?.id && editingRoom.name) {
+                  handleSaveRoom();
+                }
+              }}
+            >
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -6085,7 +6511,9 @@ export default function App() {
 
           <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
-              <Label htmlFor="add-hw-name">Hardware Name</Label>
+              <Label htmlFor="add-hw-name" className="flex items-center gap-2">
+                <Cpu className="h-3.5 w-3.5 text-muted-foreground" /> Hardware Name
+              </Label>
               <Input 
                 id="add-hw-name" 
                 placeholder="e.g. Living Room Node Bridge" 
@@ -6139,7 +6567,9 @@ export default function App() {
             {/* Left Column: Editable Details */}
             <div className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="edit-hw-name">Hardware Name</Label>
+                <Label htmlFor="edit-hw-name" className="flex items-center gap-2">
+                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" /> Hardware Name
+                </Label>
                 <Input 
                   id="edit-hw-name" 
                   value={hardwareForm.hardwareName || ''}
@@ -6147,7 +6577,9 @@ export default function App() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Hardware ID / Serial</Label>
+                <Label className="flex items-center gap-2">
+                  <Settings2 className="h-3.5 w-3.5 text-muted-foreground" /> Hardware ID / Serial
+                </Label>
                 <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
                   <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.hardwareId}</p>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.hardwareId || '')}>
@@ -6156,7 +6588,9 @@ export default function App() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Auth Security Key (Read-Only)</Label>
+                <Label className="flex items-center gap-2">
+                  <Key className="h-3.5 w-3.5 text-muted-foreground" /> Auth Security Key (Read-Only)
+                </Label>
                 <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
                   <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.authKey}</p>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.authKey || '')}>
@@ -6372,7 +6806,7 @@ export default function App() {
                 setIsEditHardwareOpen(false);
                 addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
               });
-            }}>
+            }} className="bg-primary text-primary-foreground">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -6396,7 +6830,9 @@ export default function App() {
 
           <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
-              <Label htmlFor="ext-name">External Device Name</Label>
+              <Label htmlFor="ext-name" className="flex items-center gap-2">
+                <Radio className="h-3.5 w-3.5 text-muted-foreground" /> External Device Name
+              </Label>
               <Input 
                 id="ext-name" 
                 placeholder="e.g. Laser Gate Switch" 
@@ -6408,7 +6844,9 @@ export default function App() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="ext-section">Section</Label>
+                <Label htmlFor="ext-section" className="flex items-center gap-2">
+                  <WindowIcon className="h-3.5 w-3.5 text-muted-foreground" /> Section
+                </Label>
                 <Select 
                   value={externalForm.sectionId?.toString() || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, sectionId: val === 'none' ? undefined : parseInt(val) }))}
@@ -6426,7 +6864,9 @@ export default function App() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="ext-room">Room</Label>
+                <Label htmlFor="ext-room" className="flex items-center gap-2">
+                  <HomeIcon className="h-3.5 w-3.5 text-muted-foreground" /> Room
+                </Label>
                 <Select 
                   value={externalForm.roomId?.toString() || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, roomId: val === 'none' ? undefined : parseInt(val) }))}
@@ -6445,7 +6885,9 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground block">Link to Trigger Actions</Label>
+              <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5 text-muted-foreground" /> Link to Trigger Actions
+              </Label>
               <div className="flex flex-wrap gap-2">
                 {actions.map((s) => {
                   const aid = s.id;
@@ -6601,6 +7043,23 @@ export default function App() {
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
                   <div className="font-medium">{selectedExternal.lastModifiedOn ? format(new Date(selectedExternal.lastModifiedOn), 'PPp') : 'Never'}</div>
                 </div>
+                <div className="space-y-1 col-span-2">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Linked Triggers</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
+                      selectedExternal.actionIds.map(aid => {
+                        const action = actions.find(a => a.id === aid);
+                        return (
+                          <Badge key={aid} variant="outline" className="bg-primary/5 text-primary border-primary/10">
+                            {action?.actionName || `Action #${aid}`}
+                          </Badge>
+                        );
+                      })
+                    ) : (
+                      <span className="text-sm text-muted-foreground font-medium">No actions linked</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -6622,7 +7081,9 @@ export default function App() {
 
           <div className="space-y-4 pt-[3px] pb-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">External Device Name</Label>
+              <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-2">
+                <Radio className="h-3 w-3" /> External Device Name
+              </Label>
               <Input 
                 id="edit-ext-name" 
                 value={externalForm.externalName || ''}
@@ -6632,7 +7093,9 @@ export default function App() {
             </div>
             <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
               <div className="space-y-0.5">
-                <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Device Active State</Label>
+                <Label className="text-sm font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                  <Power className="h-3.5 w-3.5 text-muted-foreground" /> Device Active State
+                </Label>
                 <p className="text-[10px] text-muted-foreground font-medium">Enable or disable this external interface</p>
               </div>
               <Switch 
@@ -6643,7 +7106,9 @@ export default function App() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-ext-section">Section Name</Label>
+                <Label htmlFor="edit-ext-section" className="flex items-center gap-2">
+                  <WindowIcon className="h-3.5 w-3.5 text-muted-foreground" /> Section Name
+                </Label>
                 <Select 
                   value={externalForm.section || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, section: val === 'none' ? undefined : val }))}
@@ -6661,7 +7126,9 @@ export default function App() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="edit-ext-room">Room Name</Label>
+                <Label htmlFor="edit-ext-room" className="flex items-center gap-2">
+                  <HomeIcon className="h-3.5 w-3.5 text-muted-foreground" /> Room Name
+                </Label>
                 <Select 
                   value={externalForm.room || 'none'} 
                   onValueChange={(val) => setExternalForm(prev => ({ ...prev, room: val === 'none' ? undefined : val }))}
@@ -6680,7 +7147,9 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground block">Action Command Triggers</Label>
+              <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5 text-muted-foreground" /> Action Command Triggers
+              </Label>
               <div className="flex flex-wrap gap-2">
                 {actions.map((s) => {
                   const aid = s.id;
@@ -6720,7 +7189,8 @@ export default function App() {
                 } : item));
                 setIsEditExternalOpen(false);
               });
-            }}>
+            }} className="bg-primary text-primary-foreground">
+              <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
           </DialogFooter>
@@ -7729,24 +8199,20 @@ export default function App() {
               <X className="h-5 w-5" />
             </DialogClose>
           </div>
-          <DialogHeader className="p-8 pb-[3px] bg-white dark:bg-slate-900 border-b mb-0 shrink-0 pr-40">
-            <div className="flex items-center gap-4">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/5">
-                <Zap className="h-6 w-6" />
-              </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-xl font-bold tracking-tight">
-                  {selectedAction?.actionName}
-                </DialogTitle>
-                <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
-                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md font-mono">{selectedAction?.actionId}</span>
-                  <span className="h-1 w-1 rounded-full bg-slate-300" />
-                  {selectedAction?.actionActive ? 
-                    <span className="text-emerald-500 font-bold text-xs uppercase tracking-wider">Active sequence</span> : 
-                    <span className="text-slate-400 font-bold text-xs uppercase tracking-wider">Disabled</span>
-                  }
-                </DialogDescription>
-              </div>
+          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-slate-900 border-b mb-0 shrink-0 pr-40 flex flex-col justify-center">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2">
+                <Zap className="h-6 w-6 text-primary shrink-0" />
+                {selectedAction?.actionName}
+              </DialogTitle>
+              <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2 leading-none whitespace-nowrap">
+                <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
+                <span className="h-1 w-1 rounded-full bg-slate-300 shrink-0" />
+                {selectedAction?.actionActive ? 
+                  <span className="text-emerald-500 font-bold text-[11px] uppercase tracking-wider shrink-0">Active sequence</span> : 
+                  <span className="text-slate-400 font-bold text-[11px] uppercase tracking-wider shrink-0">Disabled</span>
+                }
+              </DialogDescription>
             </div>
           </DialogHeader>
 
@@ -7916,15 +8382,13 @@ export default function App() {
 
       <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
-                <Zap className="h-6 w-6" />
-              </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-xl font-bold tracking-tight">Create New Action</DialogTitle>
-                <DialogDescription className="text-xs font-medium">Define a new automated sequence</DialogDescription>
-              </div>
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <Zap className="h-6 w-6 text-primary shrink-0" />
+                Create New Action
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium">Define a new automated sequence</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-4 pt-[3px] pb-4">
@@ -7950,9 +8414,8 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsAddActionOpen(false)}>Cancel</Button>
             <Button 
-              className="bg-primary text-white"
+              className="bg-primary text-white px-4 font-normal flex items-center justify-center gap-2"
               onClick={() => {
                 const newAction: GetActionDto = {
                   id: actions.length + 1,
@@ -7986,15 +8449,13 @@ export default function App() {
 
       <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
-                <Edit3 className="h-6 w-6" />
-              </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-xl font-bold tracking-tight">Edit Action</DialogTitle>
-                <DialogDescription className="text-xs font-medium">Update action details</DialogDescription>
-              </div>
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <Edit3 className="h-6 w-6 text-primary shrink-0" />
+                Edit Action
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium">Update action details</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-4 pt-[3px] pb-4">
@@ -8020,9 +8481,8 @@ export default function App() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsEditActionOpen(false)}>Cancel</Button>
             <Button 
-              className="bg-primary text-white"
+              className="bg-primary text-primary-foreground px-4 font-normal flex items-center justify-center gap-2"
               onClick={() => {
                 if (selectedAction) {
                   setActions(prev => prev.map(a => a.id === selectedAction.id ? {
@@ -8036,7 +8496,7 @@ export default function App() {
                 }
               }}
             >
-              <Save className="h-5 w-5" />
+              <CheckCheck className="h-4 w-4" />
               Save Changes
             </Button>
           </DialogFooter>
@@ -8047,15 +8507,13 @@ export default function App() {
       {/* Add Action Step Modal */}
       <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
-                <PlusCircle className="h-6 w-6" />
-              </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-xl font-bold tracking-tight">Add Sequence Step</DialogTitle>
-                <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
-              </div>
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <PlusCircle className="h-6 w-6 text-primary shrink-0" />
+                Add Sequence Step
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-6 pt-[3px] pb-4">
@@ -8070,12 +8528,9 @@ export default function App() {
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    <SelectItem value={FacilityType.Appliance.toString()}>Appliance</SelectItem>
-                    <SelectItem value={FacilityType.Camera.toString()}>Camera</SelectItem>
-                    <SelectItem value={FacilityType.Door.toString()}>Door</SelectItem>
-                    <SelectItem value={FacilityType.External.toString()}>External</SelectItem>
-                    <SelectItem value={FacilityType.Light.toString()}>Light</SelectItem>
-                    <SelectItem value={FacilityType.Window.toString()}>Window</SelectItem>
+                    {appNamesDetailList.facilityType.map(ft => (
+                      <SelectItem key={ft.id} value={ft.id.toString()}>{ft.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -8092,12 +8547,12 @@ export default function App() {
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
                     {(() => {
                       switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return appliances.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.applianceName}</SelectItem>);
-                        case FacilityType.Camera: return cameras.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.cameraName}</SelectItem>);
-                        case FacilityType.Door: return doors.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.doorName}</SelectItem>);
-                        case FacilityType.External: return externals.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.externalName}</SelectItem>);
-                        case FacilityType.Light: return lights.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.lightName}</SelectItem>);
-                        case FacilityType.Window: return windows.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.windowName}</SelectItem>);
+                        case FacilityType.Appliance: return appNamesDetailList.applianceIdNames.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case FacilityType.Camera: return appNamesDetailList.cameraIdNames.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case FacilityType.Door: return appNamesDetailList.doorIdNames.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case FacilityType.External: return appNamesDetailList.externalIdNames.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case FacilityType.Light: return appNamesDetailList.lightIdNames.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case FacilityType.Window: return appNamesDetailList.windowIdNames.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
                         default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
                       }
                     })()}
@@ -8165,9 +8620,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pt-0">
-            <Button variant="outline" className="rounded-xl h-11" onClick={() => setIsAddActionStepOpen(false)}>Cancel</Button>
+          <DialogFooter className="p-6 flex items-center justify-center">
             <Button 
+              className="flex items-center justify-center gap-2 px-4 font-normal"
               onClick={() => {
                 if (selectedAction) {
                   const newStep: GetActionStepDto = {
@@ -8188,7 +8643,7 @@ export default function App() {
               }}
             >
               <PlusCircle className="h-5 w-5" />
-              Confirm Step
+              Add Action Step
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -8197,15 +8652,13 @@ export default function App() {
       {/* Edit Action Step Modal */}
       <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
         <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm shrink-0">
-                <Pencil className="h-6 w-6" />
-              </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-xl font-bold tracking-tight">Edit Sequence Step</DialogTitle>
-                <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
-              </div>
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <Pencil className="h-6 w-6 text-primary shrink-0" />
+                Edit Sequence Step
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-6 pt-[3px] pb-4">
@@ -8220,12 +8673,9 @@ export default function App() {
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    <SelectItem value={FacilityType.Appliance.toString()}>Appliance</SelectItem>
-                    <SelectItem value={FacilityType.Camera.toString()}>Camera</SelectItem>
-                    <SelectItem value={FacilityType.Door.toString()}>Door</SelectItem>
-                    <SelectItem value={FacilityType.External.toString()}>External</SelectItem>
-                    <SelectItem value={FacilityType.Light.toString()}>Light</SelectItem>
-                    <SelectItem value={FacilityType.Window.toString()}>Window</SelectItem>
+                    {appNamesDetailList.facilityType.map(ft => (
+                      <SelectItem key={ft.id} value={ft.id.toString()}>{ft.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -8242,12 +8692,12 @@ export default function App() {
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
                     {(() => {
                       switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return appliances.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.applianceName}</SelectItem>);
-                        case FacilityType.Camera: return cameras.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.cameraName}</SelectItem>);
-                        case FacilityType.Door: return doors.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.doorName}</SelectItem>);
-                        case FacilityType.External: return externals.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.externalName}</SelectItem>);
-                        case FacilityType.Light: return lights.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.lightName}</SelectItem>);
-                        case FacilityType.Window: return windows.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.windowName}</SelectItem>);
+                        case FacilityType.Appliance: return appNamesDetailList.applianceIdNames.map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case FacilityType.Camera: return appNamesDetailList.cameraIdNames.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case FacilityType.Door: return appNamesDetailList.doorIdNames.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case FacilityType.External: return appNamesDetailList.externalIdNames.map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case FacilityType.Light: return appNamesDetailList.lightIdNames.map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case FacilityType.Window: return appNamesDetailList.windowIdNames.map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
                         default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
                       }
                     })()}
@@ -8315,8 +8765,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pt-0">
+          <DialogFooter className="p-6 flex items-center justify-center">
             <Button 
+              className="flex items-center justify-center gap-2 px-4 font-normal"
               onClick={() => {
                 if (selectedAction && selectedActionStep) {
                   const updatedStep: GetActionStepDto = {
@@ -8337,65 +8788,107 @@ export default function App() {
               }}
             >
               <Save className="h-5 w-5" />
-              Update Step
+              Update Action Step
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 flex flex-row overflow-hidden rounded-3xl border-0 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] bg-white">
-          {/* WhatsApp Style Sidebar - List View (Increased width: 25-30%) */}
-          <div className="w-[35%] lg:w-[30%] xl:w-[25%] bg-[#ffffff] flex flex-col shrink-0 border-r-[1px] border-black relative z-10">
-            <div className="p-4 pb-2 bg-[#f0f2f5] space-y-3 shrink-0">
+        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+          {chats.length === 0 ? (
+            <div className="flex flex-row w-full h-full relative">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="absolute top-4 right-4 h-8 w-8 text-slate-500 hover:text-black z-50 rounded-full" 
+                onClick={() => setIsChatModalOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <div className="w-[40%] bg-slate-50 border-r-[1px] border-slate-200 flex flex-col items-center justify-center p-8 text-center shrink-0 relative z-10">
+                <div className="relative mb-8 flex items-center justify-center">
+                  <Settings className="h-28 w-28 text-slate-300 animate-[spin_4s_linear_infinite]" />
+                  <MessageSquare className="h-10 w-10 text-primary absolute" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight mb-2">The HanssonHub Chats</h2>
+                <p className="text-sm text-slate-500 max-w-xs">Start connecting with your peers. Pick a contact to begin a conversation.</p>
+              </div>
+              
+              <div className="flex-1 flex items-center bg-white p-8 relative overflow-hidden">
+                <div className="w-full">
+                  <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                    {allUsers.filter(u => u.id !== userProfile.id).map(user => (
+                      <button 
+                        key={user.id}
+                        onClick={() => startDirectChat(user)}
+                        className="min-w-[140px] flex flex-col items-center p-5 bg-slate-50 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0"
+                      >
+                        <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-16 w-16 rounded-full mb-3 object-cover shadow-sm border border-slate-100" referrerPolicy="no-referrer" />
+                        <span className="font-semibold text-sm text-slate-800">{user.getPersonDetailsDto.firstName}</span>
+                        <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{user.getUserDto.roleName}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* WhatsApp Style Sidebar - List View (Increased width: 25-30%) */}
+              <div className="w-[35%] lg:w-[30%] xl:w-[25%] bg-[#ffffff] flex flex-col shrink-0 border-r-[1px] border-black relative z-10">
+            <div className="p-5 bg-[#f0f2f5] shrink-0 border-b border-black/10 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-slate-300 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
                     <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                   </div>
-                  <h2 className="text-lg font-bold tracking-tight text-[#111b21]">HanssonHub Chats</h2>
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-bold tracking-tight text-[#111b21]">Chats</h2>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-9 w-9 rounded-full text-[#54656f]" 
-                    onClick={() => setIsNewChatOpen(true)}
-                    title="New Chat"
-                  >
-                    <PlusCircle className="h-5 w-5" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-9 w-9 rounded-full text-[#54656f] hover:bg-slate-200" 
+                        title="New Chat / Group"
+                      >
+                        <PlusCircle className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-200">
+                      <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}>
+                        <UserPlus className="mr-3 h-4 w-4 text-[#54656f]" />
+                        <span className="font-medium text-[#111b21]">Start a chat</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(true); setIsNewChatOpen(true); }}>
+                        <Users className="mr-3 h-4 w-4 text-[#54656f]" />
+                        <span className="font-medium text-[#111b21]">Create a group</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <MessageSquare className="h-5 w-5 text-[#54656f]" />
                 </div>
+              </div>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input 
+                  placeholder="Search or start new chat" 
+                  className="pl-10 h-10 bg-white border-none rounded-[5px] text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                  value={chatSearchQuery}
+                  onChange={(e) => setChatSearchQuery(e.target.value)}
+                />
               </div>
             </div>
 
             <ScrollArea className="flex-1 bg-white">
               <div className="divide-y divide-slate-50">
-                {chats.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center py-8 px-4">
-                    <p className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mb-6">Suggestions</p>
-                    <div className="w-full space-y-1">
-                      {allUsers.filter(u => u.id !== userProfile.id).slice(0, 5).map(user => (
-                        <button 
-                          key={user.id}
-                          onClick={() => startDirectChat(user)}
-                          className="w-full p-3 flex items-center gap-3 hover:bg-primary/5 rounded-xl transition-all group"
-                        >
-                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 shrink-0">
-                            <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <p className="text-sm font-bold text-slate-700 group-hover:text-primary">{user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}</p>
-                            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{user.getUserDto.roleName}</p>
-                          </div>
-                          <PlusCircle className="h-5 w-5 text-slate-300 group-hover:text-primary" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  chats.map((chat) => {
+                {chats.map((chat) => {
                     const lastMsg = chat.lastMessage;
                     const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
                     
@@ -8453,8 +8946,7 @@ export default function App() {
                         </div>
                       </button>
                     );
-                  })
-                )}
+                  })}
               </div>
             </ScrollArea>
           </div>
@@ -8502,9 +8994,11 @@ export default function App() {
                             className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
                             onClick={() => {
                               setEditingGroupId(chat.id);
-                              setNewGroupName(chat.name);
+                              setNewGroupName(chat.name || "");
                               setNewGroupDescription(chat.description || "");
                               setNewGroupImageUrl(chat.imageUrl || "");
+                              setNewGroupRoom(chat.roomId?.toString() || "none");
+                              setNewGroupSection(chat.sectionId?.toString() || "");
                               setSelectedParticipants(chat.participants.map(p => p.personId).filter(id => id !== userProfile.id));
                               setIsEditGroupOpen(true);
                             }}
@@ -8521,7 +9015,7 @@ export default function App() {
                           >
                             <Input 
                               placeholder="Search messages..." 
-                              className="h-8 text-xs bg-white border-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded-lg"
+                              className="h-8 text-xs bg-white border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-lg"
                               value={chatSearchQuery}
                               onChange={(e) => setChatSearchQuery(e.target.value)}
                             />
@@ -8550,9 +9044,9 @@ export default function App() {
                   );
                 })()}
 
-                <div className="flex-1 relative overflow-hidden">
+                <div className="flex-1 relative overflow-hidden bg-[#efeae2]">
                   {/* WhatsApp background pattern */}
-                  <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-repeat z-0" />
+                  <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat z-0" />
                   
                   <ScrollArea className="h-full w-full chat-scroll-viewport">
                     <div className="p-6 md:px-12 xl:px-24 relative z-10 flex flex-col min-h-full">
@@ -8615,34 +9109,72 @@ export default function App() {
                                       )}
 
                                       <div className="px-1 py-0.5">
+                                        {msg.replyToId && (
+                                          <div className="mb-2 p-2 bg-black/5 rounded-lg border-l-4 border-primary text-[13px] bg-white/40">
+                                            {(() => {
+                                              const repliedMsg = chatMessages.find(m => m.id === msg.replyToId);
+                                              return repliedMsg ? (
+                                                <>
+                                                  <p className="font-bold text-primary text-[11px] mb-0.5">{repliedMsg.senderName}</p>
+                                                  <p className="truncate text-slate-500 italic">
+                                                    {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type]}]`}
+                                                  </p>
+                                                </>
+                                              ) : (
+                                                <p className="text-slate-400 italic">Original message unavailable</p>
+                                              );
+                                            })()}
+                                          </div>
+                                        )}
                                         {msg.type === MessageType.Text && (
                                           <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.content}</p>
                                         )}
-                                        {msg.type === MessageType.Image && msg.attachments?.[0] && (
+                                        {msg.type === MessageType.Image && msg.attachments && msg.attachments.length > 0 && (
                                           <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
-                                            <img 
-                                              src={msg.attachments[0].filePath} 
-                                              alt="uploaded" 
-                                              className="rounded-lg w-full h-auto max-h-[400px] object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm" 
-                                              referrerPolicy="no-referrer"
-                                            />
+                                            <div className={cn(
+                                              "grid gap-0.5 rounded-md overflow-hidden",
+                                              msg.attachments.length === 1 ? "grid-cols-1" : 
+                                              msg.attachments.length === 2 ? "grid-cols-2" : 
+                                              "grid-cols-2"
+                                            )}>
+                                              {msg.attachments.map((att, idx) => (
+                                                <img 
+                                                  key={idx}
+                                                  src={att.filePath} 
+                                                  alt="uploaded" 
+                                                  className={cn(
+                                                    "w-full h-auto object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm",
+                                                    msg.attachments.length > 1 ? "aspect-square" : "max-h-[400px]"
+                                                  )}
+                                                  onClick={() => {
+                                                    setPreviewMediaUrl(att.filePath);
+                                                    setIsPreviewModalOpen(true);
+                                                  }}
+                                                  referrerPolicy="no-referrer"
+                                                />
+                                              ))}
+                                            </div>
                                             {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
                                           </div>
                                         )}
-                                        {msg.type === MessageType.File && msg.attachments?.[0] && (
-                                          <div className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
-                                            <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
-                                              <FileText className="h-7 w-7 text-white" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                              <p className="text-sm font-bold truncate text-[#111b21]">{msg.attachments[0].fileName}</p>
-                                              <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
-                                                {msg.attachments[0].contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(msg.attachments[0].fileSize / 1024 / 1024).toFixed(1)} MB
-                                              </p>
-                                            </div>
-                                            <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
-                                              <Download className="h-4 w-4" />
-                                            </Button>
+                                        {msg.type === MessageType.File && msg.attachments && msg.attachments.length > 0 && (
+                                          <div className="space-y-1">
+                                            {msg.attachments.map((att, idx) => (
+                                              <div key={idx} className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
+                                                <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
+                                                  <FileText className="h-7 w-7 text-white" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
+                                                  <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
+                                                    {att.contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(att.fileSize / 1024 / 1024).toFixed(1)} MB
+                                                  </p>
+                                                </div>
+                                                <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
+                                                  <Download className="h-4 w-4" />
+                                                </Button>
+                                              </div>
+                                            ))}
                                           </div>
                                         )}
                                         
@@ -8727,15 +9259,29 @@ export default function App() {
                         </label>
 
                         <label htmlFor="image-upload" className="cursor-pointer">
-                          <input type="file" id="image-upload" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, 'image')} />
+                          <input type="file" id="image-upload" className="hidden" accept="image/*,video/*" multiple onChange={(e) => handleFileUpload(e, 'image')} />
                           <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
                             <ImageIcon className="h-6 w-6" />
                           </div>
                         </label>
                       </div>
 
-                    <div className="flex-1 relative">
-                      {isRecording ? (
+              <div className="flex flex-col flex-1 relative gap-1 min-w-0">
+                {replyingTo && (
+                  <div className="mx-2 p-2 bg-slate-100 rounded-t-lg border-l-4 border-primary flex items-center justify-between animate-in slide-in-from-bottom-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-primary truncate leading-tight uppercase tracking-widest">{replyingTo.senderName}</p>
+                      <p className="text-xs text-slate-500 truncate italic">
+                        {replyingTo.type === MessageType.Text ? replyingTo.content : `[${MessageType[replyingTo.type]}]`}
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setReplyingTo(null)}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+                <div className="relative">
+                  {isRecording ? (
                         <div className="flex-1 h-12 flex items-center px-4 bg-white rounded-xl shadow-sm border animate-in fade-in slide-in-from-bottom-2">
                           <div className="flex items-center gap-3 w-full">
                             <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse shrink-0" />
@@ -8774,8 +9320,9 @@ export default function App() {
                         />
                       )}
                     </div>
+                  </div>
 
-                    <div className="flex items-center shrink-0">
+                <div className="flex items-center shrink-0">
                       {isRecording ? (
                         <Button 
                           onClick={() => {
@@ -8914,6 +9461,8 @@ export default function App() {
               </div>
             )}
           </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -8927,18 +9476,21 @@ export default function App() {
           setNewGroupImageUrl("");
         }
       }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-0 shadow-2xl bg-white">
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
           <DialogHeader className="p-6 pb-2 mb-0">
-            <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Settings className="h-5 w-5 text-primary" />
-              Edit Group Details
-            </DialogTitle>
-            <DialogDescription>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Settings className="h-5 w-5 text-primary" />
+                <DialogTitle className="text-xl font-bold text-slate-900 mb-[3px]">
+                  Edit Group Details
+                </DialogTitle>
+              </div>
+            </div>
+            <DialogDescription className="pl-7 text-[13px] leading-tight">
               Update group name, image and manage participants.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
+          <div className="px-8 py-4 space-y-6 bg-white max-h-[400px] overflow-y-auto pt-0">
             <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
               <div className="relative group">
                 <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
@@ -8972,15 +9524,17 @@ export default function App() {
                 </div>
               </div>
             </div>
+
             <div className="space-y-1.5 pt-1">
               <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
               <Input 
                 placeholder="What is this group about?" 
                 value={newGroupDescription}
                 onChange={(e) => setNewGroupDescription(e.target.value)}
-                className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </div>
+
           </div>
 
           <div className="p-4 bg-slate-50 flex items-center justify-between border-b">
@@ -8988,53 +9542,67 @@ export default function App() {
              <Badge variant="secondary" className="rounded-full">{selectedParticipants.length} selected</Badge>
           </div>
 
-          <ScrollArea className="h-[250px] bg-white">
-            <div className="p-2 space-y-1">
+          <ScrollArea className="h-[240px] bg-white">
+            <div className="p-4 space-y-4">
               {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
                 const isSelected = selectedParticipants.includes(user.id);
                 return (
-                  <button
+                  <div
                     key={user.id}
-                    onClick={() => {
-                      setSelectedParticipants(prev => 
-                        isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
-                      );
-                    }}
                     className={cn(
-                      "w-full p-3 flex items-center gap-4 rounded-2xl transition-all group",
-                      isSelected ? "bg-primary/5 ring-1 ring-primary/20 shadow-sm" : "hover:bg-slate-50"
+                      "w-full p-4 flex items-center gap-4 rounded-xl transition-all border",
+                      isSelected ? "bg-primary/5 border-primary/20 shadow-sm" : "bg-white border-transparent hover:bg-slate-50"
                     )}
                   >
-                    <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-100 shrink-0 relative">
+                    <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-100 shrink-0">
                       <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                      <div className={cn(
-                         "absolute inset-0 flex items-center justify-center transition-all",
-                         isSelected ? "bg-primary/60" : "bg-transparent"
-                      )}>
-                        {isSelected && <Check className="h-5 w-5 text-white" />}
-                      </div>
                     </div>
                     <div className="flex-1 text-left">
                       <h4 className="font-bold text-sm text-slate-800">
                         {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
                       </h4>
-                      <p className="text-[10px] text-slate-500 font-medium">
+                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
                         {user.getUserDto.roleName}
                       </p>
                     </div>
-                  </button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className={cn(
+                        "h-8 px-3 rounded-lg text-xs font-bold transition-all",
+                        isSelected ? "text-destructive hover:bg-destructive/10 bg-destructive/5" : "text-primary hover:bg-primary/10 bg-primary/5"
+                      )}
+                      onClick={() => {
+                        setSelectedParticipants(prev => 
+                          isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
+                        );
+                      }}
+                    >
+                      {isSelected ? (
+                        <>
+                          <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                          Remove
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-3.5 w-3.5 mr-1.5" />
+                          Add
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 );
               })}
             </div>
           </ScrollArea>
 
-          <div className="p-4 border-t bg-slate-50 flex gap-3">
-             <Button variant="outline" className="flex-1 rounded-xl h-11" onClick={() => setIsEditGroupOpen(false)}>Cancel</Button>
+          <div className="p-6 border-t bg-slate-50">
              <Button 
-              className="flex-1 rounded-xl h-11 shadow-lg shadow-primary/20" 
+              className="w-full bg-primary text-primary-foreground" 
               onClick={handleUpdateGroup}
               disabled={!newGroupName.trim() || selectedParticipants.length === 0}
              >
+               <CheckCheck className="mr-2 h-4 w-4" />
                Save Changes
              </Button>
           </div>
@@ -9050,30 +9618,26 @@ export default function App() {
           setNewGroupDescription("");
         }
       }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-0 shadow-2xl bg-white">
-          <DialogHeader className="p-6 pb-2">
-            <div className="flex items-center justify-between">
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white max-h-[90vh] flex flex-col">
+          <DialogHeader className="p-6 pb-2 mb-0 flex flex-row items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-[5px] bg-emerald-100 flex items-center justify-center text-emerald-600">
+                {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
+              </div>
               <div>
-                <DialogTitle className="text-xl font-bold text-slate-900">
+                <DialogTitle className="text-xl font-bold mb-[3px]">
                   {isGroupMode ? "Create New Group" : "Start New Chat"}
                 </DialogTitle>
-                <DialogDescription className="text-slate-500">
-                  {isGroupMode ? "Select participants to add to the group." : "Select a person to start a private conversation with."}
+                <DialogDescription className="text-slate-500 text-sm">
+                  {isGroupMode ? "Add participants to the group." : "Select a person to start a chat."}
                 </DialogDescription>
               </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-primary font-bold hover:bg-primary/5 rounded-full px-4"
-                onClick={() => setIsGroupMode(!isGroupMode)}
-              >
-                {isGroupMode ? "Cancel" : "New Group"}
-              </Button>
             </div>
           </DialogHeader>
 
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
             {isGroupMode && (
-              <div className="px-6 py-2 space-y-3 bg-slate-50 border-y py-4">
+              <div className="px-6 py-4 space-y-4 bg-white border-b shrink-0 text-left">
                 <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
                   <div className="relative group">
                     <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
@@ -9102,7 +9666,7 @@ export default function App() {
                         placeholder="e.g., Family Hub" 
                         value={newGroupName}
                         onChange={(e) => setNewGroupName(e.target.value)}
-                        className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                        className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                       />
                     </div>
                   </div>
@@ -9113,77 +9677,75 @@ export default function App() {
                     placeholder="What is this group about?" 
                     value={newGroupDescription}
                     onChange={(e) => setNewGroupDescription(e.target.value)}
-                    className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                    className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                   />
                 </div>
               </div>
             )}
 
-          <div className="p-4 bg-slate-50 border-b">
-             <div className="relative">
-               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-               <Input 
-                 placeholder={isGroupMode ? "Search participants..." : "Search people..."} 
-                 className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-1"
-               />
-             </div>
-          </div>
+            <div className="p-4 bg-slate-50 border-b shrink-0">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input 
+                  placeholder={isGroupMode ? "Search participants..." : "Search people..."} 
+                  className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-0 focus-visible:ring-offset-0"
+                />
+              </div>
+            </div>
 
-          <ScrollArea className="h-[350px]">
-            <div className="p-2 space-y-1">
-              {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
-                const isSelected = selectedParticipants.includes(user.id);
-                return (
-                  <button
-                    key={user.id}
-                    onClick={() => {
-                      if (isGroupMode) {
-                        setSelectedParticipants(prev => 
-                          isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
-                        );
-                      } else {
-                        startDirectChat(user);
-                      }
-                    }}
-                    className={cn(
-                      "w-full p-3 flex items-center gap-4 rounded-2xl transition-all group",
-                      isSelected ? "bg-primary/5 ring-1 ring-primary/20 shadow-sm" : "hover:bg-slate-50"
-                    )}
-                  >
-                    <div className="h-12 w-12 rounded-full overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-slate-100 shrink-0 relative">
-                      <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                      {isGroupMode && (
-                        <div className={cn(
-                          "absolute inset-0 flex items-center justify-center transition-all",
-                          isSelected ? "bg-primary/60" : "bg-transparent"
-                        )}>
-                          {isSelected && <Check className="h-6 w-6 text-white" />}
+            <ScrollArea className="flex-1">
+              <div className="p-4 space-y-3">
+                {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+                  const isSelected = selectedParticipants.includes(user.id);
+                  return (
+                    <button
+                      key={user.id}
+                      onClick={() => {
+                        if (isGroupMode) {
+                          setSelectedParticipants(prev => 
+                            isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
+                          );
+                        } else {
+                          startDirectChat(user);
+                        }
+                      }}
+                      className={cn(
+                        "w-full p-4 flex items-center gap-4 rounded-xl transition-all group border text-left",
+                        isSelected ? "bg-primary/5 border-primary/20 shadow-sm" : "bg-white border-transparent hover:bg-slate-50"
+                      )}
+                    >
+                      <div className="h-12 w-12 rounded-full overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-slate-100 shrink-0 relative">
+                        <img src={user.getPersonDetailsDto.firstName && user.getPersonDetailsDto.imageUrl ? user.getPersonDetailsDto.imageUrl : `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.getUserDto.userName}`} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                        {isGroupMode && isSelected && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-primary/60 transition-all">
+                            <Check className="h-6 w-6 text-white" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <h4 className="font-bold text-slate-800 group-hover:text-primary transition-colors">
+                          {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                        </h4>
+                        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
+                          {user.getUserDto.roleName} • {user.disabled ? 'Offline' : 'Available'}
+                        </p>
+                      </div>
+                      {!isGroupMode && (
+                        <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                          <ChevronRight className="h-5 w-5" />
                         </div>
                       )}
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h4 className="font-bold text-slate-800 group-hover:text-primary transition-colors">
-                        {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                      </h4>
-                      <p className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
-                        {user.getUserDto.roleName} • {user.disabled ? 'Offline' : 'Available'}
-                      </p>
-                    </div>
-                    {!isGroupMode && (
-                      <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                        <ChevronRight className="h-5 w-5" />
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </ScrollArea>
-          <div className="p-4 border-t bg-slate-50 flex gap-3">
-             <Button variant="outline" className="flex-1 rounded-xl h-11" onClick={() => setIsNewChatOpen(false)}>Cancel</Button>
+                    </button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0">
              {isGroupMode && (
                <Button 
-                className="flex-1 rounded-xl h-11 shadow-lg shadow-primary/20" 
+                className="flex-1 rounded-xl h-10 font-bold shadow-sm" 
                 onClick={handleCreateGroup}
                 disabled={!newGroupName.trim() || selectedParticipants.length === 0}
                >
@@ -9193,6 +9755,330 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Upload Preview Dialog */}
+      <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
+        <DialogContent className="sm:max-w-[700px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+          <DialogHeader className="p-4 border-b">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                <ImageIcon className="h-5 w-5" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-lg font-bold tracking-tight">Send Images</DialogTitle>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Preview and add captions</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full ml-auto" onClick={() => setIsUploadPreviewOpen(false)}>
+              <X className="h-5 w-5" />
+            </Button>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50">
+            {uploadPreviewFiles.length > 0 ? (
+              <div className="flex-1 w-full relative flex flex-col items-center justify-center">
+                <div className="flex-1 w-full flex items-center justify-center p-6 relative">
+                  {uploadPreviewActiveIndex > 0 && (
+                    <Button variant="ghost" className="absolute left-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i - 1)}>
+                      <ChevronLeft className="h-6 w-6" />
+                    </Button>
+                  )}
+                  {uploadPreviewActiveIndex < uploadPreviewFiles.length - 1 && (
+                    <Button variant="ghost" className="absolute right-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i + 1)}>
+                      <ChevronRight className="h-6 w-6" />
+                    </Button>
+                  )}
+                  {(() => {
+                    const file = uploadPreviewFiles[uploadPreviewActiveIndex];
+                    if (!file) return null;
+                    const url = URL.createObjectURL(file);
+                    return (
+                      <img src={url} alt="Preview" className="max-w-full max-h-full object-contain rounded-lg shadow-sm" />
+                    );
+                  })()}
+                </div>
+                
+                {/* Overlay thumbnail div */}
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
+                  {uploadPreviewFiles.map((file, idx) => {
+                    const url = URL.createObjectURL(file);
+                    return (
+                      <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'}`} onClick={() => setUploadPreviewActiveIndex(idx)}>
+                        <img src={url} className="w-full h-full object-cover" />
+                        <button 
+                          className="absolute top-0 right-0 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 scale-75 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newFiles = [...uploadPreviewFiles];
+                            newFiles.splice(idx, 1);
+                            if (newFiles.length === 0) {
+                              setIsUploadPreviewOpen(false);
+                            } else {
+                              setUploadPreviewFiles(newFiles);
+                              if (idx <= uploadPreviewActiveIndex && uploadPreviewActiveIndex > 0) {
+                                setUploadPreviewActiveIndex(uploadPreviewActiveIndex - 1);
+                              } else if (idx === uploadPreviewActiveIndex && uploadPreviewActiveIndex === newFiles.length) {
+                                setUploadPreviewActiveIndex(newFiles.length - 1);
+                              }
+                            }
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-6 gap-4">
+                 <div className="h-16 w-16 rounded-full bg-white shadow-sm flex items-center justify-center">
+                   <ImageIcon className="h-8 w-8 text-slate-500" />
+                 </div>
+                 <div className="text-center">
+                   <p className="text-sm font-bold truncate max-w-[200px] text-slate-800">No images selected</p>
+                 </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-[#f0f2f5] p-3 flex items-center gap-2 border-t shrink-0">
+            <Input 
+              autoFocus
+              placeholder="Add a caption..." 
+              value={uploadPreviewText}
+              onChange={(e) => setUploadPreviewText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSendUpload();
+                }
+              }}
+              className="flex-1 bg-white border-none h-11 rounded-[9px] px-4 focus-visible:ring-0 shadow-sm"
+            />
+            <Button 
+              className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
+              onClick={handleSendUpload}
+            >
+              <Send className="h-7 w-7 fill-current" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Media Preview Modal */}
+      <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
+        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+          <DialogHeader className="p-4 border-b">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                <ImageIcon className="h-5 w-5" />
+              </div>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-lg font-bold tracking-tight">Image Preview</DialogTitle>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Viewing full size image</p>
+              </div>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-full ml-auto" 
+              onClick={() => setIsPreviewModalOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </DialogHeader>
+          <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 overflow-hidden">
+            <div className="relative w-full h-full flex items-center justify-center">
+              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-full object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Fingerprint Modal */}
+      <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <Fingerprint className="h-6 w-6 text-primary shrink-0" />
+                Add Fingerprint
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register biometric data for a user</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-6">
+            <div className="flex gap-3 items-end">
+              <div className="flex-1 space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
+                <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Chose a user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                className="w-[220px] px-4 font-medium bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2"
+                onClick={() => {
+                  // Simulate image acquisition
+                  const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+                  setFingerprintImages(prev => [...prev, dummyImg]);
+                }}
+              >
+                <Radio className="h-4 w-4" />
+                Request Fingerprint
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Fingerprint Previews</label>
+              <div className="border border-dashed border-slate-300 rounded-2xl p-4 min-h-[150px] bg-white grid grid-cols-4 gap-4">
+                {fingerprintImages.map((img, idx) => (
+                  <div key={idx} className="relative group aspect-square rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden">
+                    <img src={img} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Button 
+                        size="icon" 
+                        variant="destructive" 
+                        className="h-8 w-8 rounded-full"
+                        onClick={() => setFingerprintImages(prev => prev.filter((_, i) => i !== idx))}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {fingerprintImages.length === 0 && (
+                  <div className="col-span-full flex items-center justify-center text-slate-400 text-xs italic">
+                    Images will appear here...
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+            <Button 
+              className="w-[220px] bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
+              disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
+              onClick={() => {
+                const payload = {
+                  userId: selectedFingerprintUserId,
+                  images: fingerprintImages.map(img => img.split(',')[1]) // Send base64 data (bytes)
+                };
+                console.log("Submitting fingerprint data:", payload);
+                // Implementation for actual sending will be added later
+                setIsAddFingerprintOpen(false);
+                setFingerprintImages([]);
+                setSelectedFingerprintUserId("");
+              }}
+            >
+              <CheckCircle2 className="h-5 w-5" />
+              Add Fingerprint(s)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Register NFID Modal */}
+      <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+                <ScanLine className="h-6 w-6 text-primary shrink-0" />
+                Register NFID
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register NFID tag or device for a user</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="p-6 space-y-6">
+            <div className="bg-slate-100 p-4 rounded-xl border border-dashed border-slate-300 text-center text-sm font-medium text-slate-600">
+               Kindly place the Card/Tag/Device on the RFID Sensor.
+            </div>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1 space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
+                <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Choose a user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id.toString()}>
+                        {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1 space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select Hardware</label>
+                <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Choose hardware" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {hardwares.map((h) => (
+                      <SelectItem key={h.id} value={h.id.toString()}>
+                        {h.hardwareName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="p-6 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+            <Button 
+              className="bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
+              disabled={!selectedNfidUserId || !selectedNfidHardwareId}
+              onClick={() => {
+                console.log("Sending NFID Data for user", selectedNfidUserId, "to hardware", selectedNfidHardwareId);
+                setIsRegisterNfidOpen(false);
+                setSelectedNfidUserId("");
+                setSelectedNfidHardwareId("");
+              }}
+            >
+              <Send className="h-5 w-5" />
+              Send NFID Data
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none">
+        <AnimatePresence>
+          {chatPopups.map((popup) => {
+            const sender = allUsers.find(u => u.id === popup.senderPersonId);
+            return (
+            <motion.div
+              key={popup.id}
+              initial={{ opacity: 0, y: 50, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              className="bg-white rounded-[9px] shadow-2xl p-4 w-[300px] pointer-events-auto border border-black cursor-pointer hover:bg-slate-50 transition-colors"
+              onClick={() => setIsChatModalOpen(true)}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 text-sm font-bold shrink-0">
+                  {sender?.getPersonDetailsDto.firstName[0] || 'U'}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <p className="text-sm font-bold truncate">{sender?.getPersonDetailsDto.firstName} {sender?.getPersonDetailsDto.lastName}</p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 line-clamp-2 break-words">{popup.text || (popup.audioUrl ? '🎤 Voice Message' : popup.images?.length ? '🖼️ Media' : 'File Attached')}</p>
+            </motion.div>
+          )})}
+        </AnimatePresence>
+      </div>
+
       <AnimatePresence>
         {isScreensaverOpen && (
           <motion.div 
@@ -9200,7 +10086,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[9999] bg-black cursor-pointer"
-            onClick={() => setIsScreensaverOpen(false)}
+            onDoubleClick={() => setIsScreensaverOpen(false)}
           >
             
             <div className={`h-full w-full grid gap-1 p-1 ${
@@ -9271,10 +10157,10 @@ export default function App() {
                  <div className="h-8 w-px bg-white/10" />
                  <div className="flex flex-col items-center">
                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Active Feeds</span>
-                   <span className="text-xl font-bold text-emerald-400">04</span>
+                   <span className="text-xl font-bold text-emerald-400">{(userProfile.cameraAccess?.length || 0).toString().padStart(2, '0')}</span>
                  </div>
               </div>
-              <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Click anywhere to resume session</p>
+              <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Double tap anywhere to resume session</p>
             </div>
           </motion.div>
         )}

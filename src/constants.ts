@@ -403,11 +403,11 @@ export const INITIAL_EXTERNALS: GetExternalDto[] = [
 ];
 
 export const INITIAL_APPLIANCES: GetApplianceDto[] = [
-  { id: 3, applianceName: 'Smart TV', applianceId: 'APP-01', isActive: false, powerActive: false, roomId: 101, roomName: 'Living Room', sectionId: 201, sectionName: 'Indoor' },
-  { id: 6, applianceName: 'Refrigerator', applianceId: 'APP-02', isActive: true, powerActive: true, roomId: 102, roomName: 'Kitchen', sectionId: 201, sectionName: 'Indoor' },
-  { id: 7, applianceName: 'Coffee Maker', applianceId: 'APP-03', isActive: false, powerActive: false, roomId: 102, roomName: 'Kitchen', sectionId: 201, sectionName: 'Indoor' },
-  { id: 8, applianceName: 'Air Conditioner', applianceId: 'APP-04', isActive: false, powerActive: false, roomId: 103, roomName: 'Bedroom', sectionId: 201, sectionName: 'Indoor' },
-  { id: 12, applianceName: 'Sprinklers', applianceId: 'APP-05', isActive: false, powerActive: false, roomId: 104, roomName: 'Backyard', sectionId: 202, sectionName: 'Outdoor' },
+  { id: 3, applianceName: 'Smart TV', applianceId: 'APP-01', applianceType: 'Television', isActive: false, powerActive: false, roomId: 101, roomName: 'Living Room', sectionId: 201, sectionName: 'Indoor' },
+  { id: 6, applianceName: 'Refrigerator', applianceId: 'APP-02', applianceType: 'Kitchen Appliance', isActive: true, powerActive: true, roomId: 102, roomName: 'Kitchen', sectionId: 201, sectionName: 'Indoor' },
+  { id: 7, applianceName: 'Coffee Maker', applianceId: 'APP-03', applianceType: 'Coffee Machine', isActive: false, powerActive: false, roomId: 102, roomName: 'Kitchen', sectionId: 201, sectionName: 'Indoor' },
+  { id: 8, applianceName: 'Air Conditioner', applianceId: 'APP-04', applianceType: 'HVAC', isActive: false, powerActive: false, roomId: 103, roomName: 'Bedroom', sectionId: 201, sectionName: 'Indoor' },
+  { id: 12, applianceName: 'Sprinklers', applianceId: 'APP-05', applianceType: 'Other', isActive: false, powerActive: false, roomId: 104, roomName: 'Backyard', sectionId: 202, sectionName: 'Outdoor' },
 ];
 
 export const INITIAL_DOORS: GetDoorDto[] = [

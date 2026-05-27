@@ -4,6 +4,8 @@ import 'react-image-crop/dist/ReactCrop.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 
+import { Check } from 'lucide-react';
+
 interface ImageCropperModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -95,9 +97,12 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
             </ReactCrop>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleCropComplete}>Apply Crop</Button>
+        <DialogFooter className="border-t pt-4">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={handleCropComplete} className="bg-black hover:bg-black/90 text-white rounded-xl flex items-center gap-2">
+            <Check className="h-4 w-4" />
+            Save Image
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

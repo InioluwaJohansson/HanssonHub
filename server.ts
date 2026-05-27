@@ -41,8 +41,7 @@ async function startServer() {
     socket.on("chat:message", (msg) => {
       const newMessage = {
         ...msg,
-        id: Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toISOString()
+        timestamp: msg.timestamp || new Date().toISOString()
       };
       messages.push(newMessage);
       io.emit("chat:message", newMessage);
