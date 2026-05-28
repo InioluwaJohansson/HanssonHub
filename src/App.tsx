@@ -136,6 +136,7 @@ import {
   UserCog,
   Users,
   ChevronLeft,
+  ArrowLeftCircle,
   ChevronRight,
   Clock,
   Power,
@@ -199,10 +200,12 @@ import {
   Maximize,
   Minimize,
   CameraOff,
-  ScanLine
+  ScanLine,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { LoginScreen } from './components/LoginScreen';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
 import {
@@ -259,6 +262,8 @@ export default function App() {
   const [roomSearchQuery, setRoomSearchQuery] = React.useState('');
   const [sectionSearchQuery, setSectionSearchQuery] = React.useState('');
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
+  const [selectedUserRoomId, setSelectedUserRoomId] = React.useState<string | number | null>(null);
+  const [myRoomsSearchQuery, setMyRoomsSearchQuery] = React.useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
   const [facilitySearchQuery, setFacilitySearchQuery] = React.useState('');
   const [facilitySortBy, setFacilitySortBy] = React.useState<'room' | 'section'>('room');
@@ -271,6 +276,7 @@ export default function App() {
   const loaderRef = React.useRef<HTMLDivElement>(null);
   const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
 
+  const [isLoggedIn, setIsLoggedIn] = React.useState(true);
   const [userProfile, setUserProfile] = React.useState<UserProfile>(INITIAL_USER);
 
   const addLogEntry = React.useCallback((actionType: string, logDetails: string) => {
@@ -677,6 +683,7 @@ export default function App() {
   const [selectedNfidHardwareId, setSelectedNfidHardwareId] = React.useState<string>("");
   const [fingerprintImages, setFingerprintImages] = React.useState<string[]>([]);
   const [selectedFingerprintUserId, setSelectedFingerprintUserId] = React.useState<string>("");
+  const [selectedFingerprintHardwareId, setSelectedFingerprintHardwareId] = React.useState<string>("");
   const [chats, setChats] = React.useState<ChatDto[]>([]);
   const [chatMessages, setChatMessages] = React.useState<MessageDto[]>([]);
   const [newGroupRoom, setNewGroupRoom] = React.useState<string>("none");
@@ -1605,7 +1612,14 @@ export default function App() {
       title = 'Dashboard';
     } else if (activeView === 'user-room') {
       Icon = HomeIcon;
-      title = `${userProfile.getPersonDetailsDto.firstName}'s Room`;
+      if (rooms.length > 1 && !selectedUserRoomId) {
+        title = 'My Rooms';
+      } else if (rooms.length > 1 && selectedUserRoomId) {
+        const r = rooms.find(room => room.id === selectedUserRoomId);
+        title = r ? `${userProfile.getPersonDetailsDto.firstName}'s ${r.name}` : `${userProfile.getPersonDetailsDto.firstName}'s Room`;
+      } else {
+        title = `${userProfile.getPersonDetailsDto.firstName}'s Room`;
+      }
     } else if (activeView === 'facilities' || activeView === 'facility-overview') {
       Icon = Layers;
       title = 'Facilities Overview';
@@ -1679,39 +1693,51 @@ export default function App() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Card 
-              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('facility-overview')}
             >
-              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <Layers className="h-8 w-8" />
+              <div className="flex flex-col items-start gap-2">
+                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                  <Layers className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Facilities</p>
               </div>
-              <div className="text-center">
-                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Facilities</p>
-                <p className="text-4xl font-bold text-slate-900">{rooms.length}</p>
+              <div className="text-right flex flex-col items-end justify-center">
+                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{rooms.length}</p>
+                <div className="text-xs text-muted-foreground max-w-[120px] text-right">
+                  Appliances, Cameras, Doors, Lights, Windows, Externals
+                </div>
               </div>
             </Card>
             <Card 
-              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('contacts')}
             >
-              <div className="h-16 w-16 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
-                <Contact className="h-8 w-8" />
+              <div className="flex flex-col items-start gap-2">
+                <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                  <Contact className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Contacts</p>
               </div>
-              <div className="text-center">
-                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Contacts</p>
-                <p className="text-4xl font-bold text-slate-900">{contacts.length}</p>
+              <div className="text-right flex flex-col items-end justify-center h-full">
+                <p className="text-4xl font-bold text-slate-900 leading-none">{contacts.length}</p>
               </div>
             </Card>
             <Card 
-              className="p-6 flex flex-col items-center justify-center gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('logs')}
             >
-              <div className="h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
-                <ClipboardList className="h-8 w-8" />
+              <div className="flex flex-col items-start gap-2">
+                <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                  <ClipboardList className="h-6 w-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Logs</p>
               </div>
-              <div className="text-center">
-                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Logs</p>
-                <p className="text-4xl font-bold text-slate-900">{logs.length}</p>
+              <div className="text-right flex flex-col items-end justify-center">
+                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{logs.length}</p>
+                <div className="text-xs text-muted-foreground max-w-[120px] text-right">
+                  Create, Update, Delete, Locked, Unlocked, Open, Closed
+                </div>
               </div>
             </Card>
             
@@ -1721,33 +1747,57 @@ export default function App() {
               const roomDoors = doors.filter(d => d.roomId === myRoom?.id);
               const roomLights = lights.filter(l => l.roomId === myRoom?.id);
               const roomWindows = windows.filter(w => w.roomId === myRoom?.id);
+              const roomAppliances = appliances.filter(a => a.roomId === myRoom?.id);
+              const roomCameras = cameras.filter(c => c.roomId === myRoom?.id);
+              const roomExternals = externals.filter(e => e.roomId === myRoom?.id);
+              
               const myRoomLocked = roomDoors.length > 0 ? roomDoors.every(d => d.isLocked) : false;
               
               return (
-                <Card className="p-8 sm:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-6 bg-slate-900 text-white border-0 shadow-xl rounded-3xl overflow-hidden relative">
-                  <div className="absolute top-0 right-0 p-32 bg-primary/20 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
-                  <div className="h-24 w-24 shrink-0 rounded-full bg-primary/20 flex items-center justify-center text-primary z-10 border border-primary/30">
-                    <HomeIcon className="h-12 w-12" />
+                <Card 
+                  className="p-8 sm:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-6 bg-slate-50 text-slate-800 border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer rounded-3xl overflow-hidden relative"
+                  onClick={() => setActiveView('user-room')}
+                >
+                  <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
+                  
+                  <div className="flex flex-col items-center justify-center gap-3 z-10 shrink-0 self-center">
+                    <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
+                      <HomeIcon className="h-12 w-12" />
+                    </div>
+                    <h3 className="text-lg font-bold tracking-tight text-slate-900">{userProfile.getPersonDetailsDto.firstName}'s Room</h3>
                   </div>
-                  <div className="flex-1 z-10 text-center sm:text-left flex flex-col justify-center">
-                    <h3 className="text-3xl font-bold mb-1">{myRoom?.roomName || "My Room"}</h3>
-                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 text-sm text-slate-300 mt-4">
-                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
-                        <Lock className="h-4 w-4" /> {roomDoors.length} Doors
+
+                  <div className="flex-1 z-10 text-center sm:text-left flex flex-col justify-center self-center pt-2 sm:pt-0">
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-sm text-slate-600 font-medium">
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Power className="h-4 w-4 text-primary" /> {roomAppliances.length} Appliances
                       </div>
-                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
-                        <Lightbulb className="h-4 w-4" /> {roomLights.length} Lights
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Lightbulb className="h-4 w-4 text-primary" /> {roomLights.length} Lights
                       </div>
-                      <div className="flex items-center gap-1.5 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
-                        <Maximize className="h-4 w-4" /> {roomWindows.length} Windows
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Camera className="h-4 w-4 text-primary" /> {roomCameras.length} Cameras
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Maximize className="h-4 w-4 text-primary" /> {roomWindows.length} Windows
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Lock className="h-4 w-4 text-primary" /> {roomDoors.length} Doors
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-full border border-slate-200 shadow-sm">
+                        <Globe className="h-4 w-4 text-primary" /> {roomExternals.length} Externals
                       </div>
                     </div>
                   </div>
-                  <div className="z-10 shrink-0 self-center sm:self-center bg-slate-800 px-6 py-4 rounded-2xl border border-slate-700 flex flex-col items-center">
-                    <span className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Status</span>
-                    <span className={cn("text-xl font-bold tracking-tight", myRoomLocked ? "text-green-400" : "text-yellow-400")}>
-                      {myRoomLocked ? "Locked" : "Unlocked"}
-                    </span>
+                  
+                  <div className="z-10 shrink-0 self-center bg-slate-100 px-6 py-4 rounded-2xl border border-slate-200 flex flex-col items-center">
+                    <span className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-1">Status</span>
+                    <div className="flex items-center gap-2 text-slate-500">
+                      {myRoomLocked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
+                      <span className="text-xl font-bold tracking-tight">
+                        {myRoomLocked ? "Locked" : "Unlocked"}
+                      </span>
+                    </div>
                   </div>
                 </Card>
               );
@@ -1789,15 +1839,7 @@ export default function App() {
                   <Card 
                     key={action.id} 
                     className="p-5 flex items-start gap-4 hover:border-primary/50 transition-colors cursor-pointer group bg-white shadow-sm"
-                    onClick={() => {
-                        setLogs(prev => [{
-                          id: Date.now(),
-                          personId: userProfile.id,
-                          logDetails: `Triggered action: ${action.actionName}`,
-                          timeOfAction: new Date().toISOString(),
-                          getPersonDto: { id: userProfile.id, getPersonDetailsDto: userProfile.getPersonDetailsDto, getUserDto: userProfile.getUserDto }
-                        } as any, ...prev]);
-                    }}
+                    onClick={() => setActiveView('facility-actions')}
                   >
                     <div className="h-12 w-12 shrink-0 rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
                       <Zap className="h-6 w-6" />
@@ -1806,9 +1848,6 @@ export default function App() {
                       <h4 className="font-bold text-slate-800 text-base mb-1 truncate">{action.actionName}</h4>
                       <p className="text-xs text-muted-foreground line-clamp-2">{action.actionDescription || 'Automated device sequence execution.'}</p>
                     </div>
-                    <Button size="icon" variant="ghost" className="opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0 h-8 w-8 bg-slate-100 rounded-full">
-                      <Play className="h-4 w-4 fill-primary" />
-                    </Button>
                   </Card>
                 ))}
               </div>
@@ -2465,7 +2504,7 @@ export default function App() {
                       Full Name
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.firstName ? "border-b-green-400 text-lg font-medium bg-transparent text-black" : "text-lg font-medium bg-transparent text-black"} 
+                      className={userProfile.getPersonDetailsDto.firstName ? "border-b-2 border-b-green-400 text-lg font-medium bg-transparent text-black" : "border-b-2 border-b-slate-200 text-lg font-medium bg-transparent text-black"} 
                       value={userProfile.getPersonDetailsDto.firstName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, firstName: e.target.value } }))} 
                     />
@@ -2476,7 +2515,7 @@ export default function App() {
                       Last Name
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.lastName ? "border-b-green-400 text-lg font-medium bg-transparent text-black" : "text-lg font-medium bg-transparent text-black"} 
+                      className={userProfile.getPersonDetailsDto.lastName ? "border-b-2 border-b-green-400 text-lg font-medium bg-transparent text-black" : "border-b-2 border-b-slate-200 text-lg font-medium bg-transparent text-black"} 
                       value={userProfile.getPersonDetailsDto.lastName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, lastName: e.target.value } }))} 
                     />
@@ -2487,7 +2526,7 @@ export default function App() {
                       Username
                     </Label>
                     <Input 
-                      className={userProfile.getUserDto.userName ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      className={userProfile.getUserDto.userName ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
                       value={userProfile.getUserDto.userName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getUserDto: { ...p.getUserDto, userName: e.target.value } }))} 
                     />
@@ -2498,7 +2537,7 @@ export default function App() {
                       Email Address
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email || ''} 
                       onChange={(e) => {
                         const email = e.target.value;
@@ -2517,7 +2556,7 @@ export default function App() {
                       Phone Number
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber ? "border-b-green-400 bg-transparent text-black" : "bg-transparent text-black"} 
+                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber || ''} 
                       onChange={(e) => {
                         const phoneNumber = e.target.value;
@@ -2581,7 +2620,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Number/Line</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.numberLine ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.numberLine}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2596,7 +2635,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Street</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.street ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.street}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2611,9 +2650,9 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">City</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.city ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.city}
-                               onChange={(e) => {
+                              onChange={(e) => {
                                 const val = e.target.value;
                                 setUserProfile(p => {
                                   const addrs = [...p.getPersonDetailsDto.getAddressDtos];
@@ -2626,9 +2665,9 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Region</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.region ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.region}
-                               onChange={(e) => {
+                              onChange={(e) => {
                                 const val = e.target.value;
                                 setUserProfile(p => {
                                   const addrs = [...p.getPersonDetailsDto.getAddressDtos];
@@ -2641,9 +2680,9 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">State</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.state ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.state}
-                               onChange={(e) => {
+                              onChange={(e) => {
                                 const val = e.target.value;
                                 setUserProfile(p => {
                                   const addrs = [...p.getPersonDetailsDto.getAddressDtos];
@@ -2653,12 +2692,12 @@ export default function App() {
                               }}
                             />
                           </div>
-                           <div className="space-y-1">
+                          <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Country</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.country ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.country}
-                               onChange={(e) => {
+                              onChange={(e) => {
                                 const val = e.target.value;
                                 setUserProfile(p => {
                                   const addrs = [...p.getPersonDetailsDto.getAddressDtos];
@@ -2671,9 +2710,9 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Postal Code</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={addr.postalCode ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={addr.postalCode || ''}
-                               onChange={(e) => {
+                              onChange={(e) => {
                                 const val = e.target.value;
                                 setUserProfile(p => {
                                   const addrs = [...p.getPersonDetailsDto.getAddressDtos];
@@ -2737,7 +2776,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Email Address</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={contact.email ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={contact.email}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2752,7 +2791,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Phone Number</Label>
                             <Input 
-                              className="h-8 text-xs bg-transparent border-primary/20 text-black"
+                              className={contact.phoneNumber ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
                               value={contact.phoneNumber}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -3005,7 +3044,94 @@ export default function App() {
     }
 
     if (activeView === 'user-room') {
-      const userRoomId = 'bedroom'; // Assuming Inioluwa's room is the bedroom
+      if (rooms.length > 1 && !selectedUserRoomId) {
+        const filteredUserRooms = rooms.filter(room => 
+          room.name.toLowerCase().includes(myRoomsSearchQuery.toLowerCase())
+        );
+
+        return (
+          <motion.div
+            key="my-rooms"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-row items-center justify-between w-full">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-3">
+                    <HomeIcon className="h-8 w-8 text-primary shrink-0" />
+                    <h1 className="text-3xl font-bold tracking-tight">My Rooms</h1>
+                  </div>
+                  <p className="text-muted-foreground">Select a room to manage its devices.</p>
+                </div>
+                
+                <div className="shrink-0 pt-1">
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                    <Sofa className="h-3 w-3" />
+                    {rooms.length} {rooms.length === 1 ? 'Room' : 'Rooms'}
+                  </Badge>
+                </div>
+              </div>
+              
+              <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
+                <Input 
+                  placeholder="Search your rooms..." 
+                  className="pl-9 h-10 bg-white border border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none shadow-none"
+                  value={myRoomsSearchQuery}
+                  onChange={(e) => setMyRoomsSearchQuery(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {filteredUserRooms.map(room => {
+                const RoomIcon = iconMap[room.icon || ''] || Sofa;
+                const roomDevices = devices.filter(d => d.room === room.id);
+                const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
+
+                return (
+                  <Card 
+                    key={room.id}
+                    className="p-6 hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
+                    onClick={() => setSelectedUserRoomId(room.id)}
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                      <RoomIcon className="h-24 w-24" />
+                    </div>
+                    <div className="relative z-10 space-y-4">
+                      <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                        <RoomIcon className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg text-slate-800">{room.name}</h3>
+                        <p className="text-sm text-slate-500">{roomDevices.length} Devices</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={activeCount > 0 ? 'default' : 'secondary'}>
+                          {activeCount} Active
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 ml-auto text-muted-foreground group-hover:text-primary transition-colors" />
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+              {filteredUserRooms.length === 0 && (
+                <div className="col-span-full py-12 text-center text-slate-500">
+                  <Sofa className="h-12 w-12 mx-auto text-slate-300 mb-4" />
+                  <h3 className="text-lg font-bold text-slate-700">No rooms found</h3>
+                  <p className="text-sm">We couldn't find any rooms matching your search.</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        );
+      }
+
+      const userRoomId = selectedUserRoomId || rooms[0]?.id || 'bedroom'; // Assuming fallback to the first room
+      const currentRoom = rooms.find(r => r.id === userRoomId);
       const roomDevices = devices.filter(d => d.room === userRoomId);
       
       const securityPriority: Record<string, number> = {
@@ -3034,15 +3160,29 @@ export default function App() {
       
       return (
         <motion.div
-          key="user-room"
+          key={`room-${userRoomId}`}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="space-y-12"
         >
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
+              {rooms.length > 1 && (
+                <>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
+                    onClick={() => setSelectedUserRoomId(null)}
+                    title="Back to My Rooms"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <div className="h-5 w-[2px] bg-border mx-1 shrink-0" />
+                </>
+              )}
               <HomeIcon className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s Room</h1>
+              <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s {currentRoom?.name || 'Room'}</h1>
             </div>
             <p className="text-muted-foreground">Manage devices in your personal space.</p>
           </div>
@@ -4165,6 +4305,15 @@ export default function App() {
     );
   };
 
+  if (!isLoggedIn) {
+    return (
+      <>
+        <Toaster position="top-center" richColors />
+        <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />
+      </>
+    );
+  }
+
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
       <Toaster position="top-center" richColors />
@@ -4197,19 +4346,26 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <Cloud className="h-4 w-4" />
-              <span>24°C Sunny</span>
-            </div>
             <div className="flex items-center gap-4">
               <button 
                 className="relative rounded-full p-2 hover:bg-muted"
                 onClick={() => setIsChatModalOpen(true)}
+                title="Chats"
               >
                 <MessageSquare className="h-5 w-5" />
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
               </button>
             </div>
+            <button 
+              className="p-1 text-red-500 hover:text-red-600 transition-colors bg-transparent border-0 outline-none flex items-center justify-center cursor-pointer font-sans"
+              onClick={() => {
+                setIsLoggedIn(false);
+                toast.success("Successfully logged out");
+              }}
+              title="Logout"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
           </div>
         </header>
 
@@ -4246,7 +4402,7 @@ export default function App() {
             Connect a new smart device to your HanssonHub.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh] pr-4">
+        <div className="overflow-y-auto max-h-[60vh] pr-4 scrollbar-hide">
         <div className="grid gap-4 pt-[3px] pb-4 px-1">
           <div className="grid gap-2">
             <Label htmlFor="name" className="flex items-center gap-2">
@@ -4447,7 +4603,7 @@ export default function App() {
               </Select>
             </div>
           </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             
             <Button onClick={handleAddDevice} className="bg-primary text-primary-foreground">
@@ -4831,15 +4987,15 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="p-fname">First Name</Label>
-                    <Input id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-green-400" : ""} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
+                    <Input id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-lname">Last Name</Label>
-                    <Input id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-green-400" : ""} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
+                    <Input id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-dob">Date of Birth</Label>
-                    <Input id="p-dob" type="date" value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
+                    <Input id="p-dob" type="date" className={newPerson.createPersonDetailsDto.dateOfBirth ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-gender">Gender</Label>
@@ -4857,7 +5013,7 @@ export default function App() {
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="p-relation">Relation to Owner</Label>
-                  <Input id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-green-400" : ""} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
+                  <Input id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
                 </div>
               </div>
 
@@ -4869,7 +5025,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="p-uname">Username</Label>
-                    <Input id="p-uname" className={newPerson.createUserDto.userName ? "border-b-green-400" : ""} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
+                    <Input id="p-uname" className={newPerson.createUserDto.userName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-role">System Role</Label>
@@ -4887,11 +5043,11 @@ export default function App() {
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-pwd">Password</Label>
-                    <Input id="p-pwd" type="password" className={newPerson.createUserDto.password ? "border-b-green-400" : ""} value={newPerson.createUserDto.password} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} />
+                    <Input id="p-pwd" type="password" className={newPerson.createUserDto.password ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.password} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-auth">Initial Auth Code (6 digits)</Label>
-                    <Input id="p-auth" placeholder="000000" maxLength={6} className={newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-green-400" : ""} value={newPerson.createUserDto.authorizationCode} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} />
+                    <Input id="p-auth" placeholder="000000" maxLength={6} className={newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.authorizationCode} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} />
                   </div>
                 </div>
               </div>
@@ -5150,6 +5306,7 @@ export default function App() {
               <Input 
                 id="cat-name" 
                 placeholder="e.g. Emergency, Family, Services" 
+                className={newCategoryName ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"}
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
               />
@@ -5159,6 +5316,7 @@ export default function App() {
               <Input 
                 id="cat-desc" 
                 placeholder="Brief description of this category" 
+                className={newCategoryDescription ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"}
                 value={newCategoryDescription}
                 onChange={(e) => setNewCategoryDescription(e.target.value)}
               />
@@ -5279,7 +5437,7 @@ export default function App() {
                     </Label>
                     <Input 
                       placeholder="First Name" 
-                      className="h-10 rounded-none"
+                      className={newContact.firstName ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
                       value={newContact.firstName}
                       onChange={(e) => setNewContact(prev => ({ ...prev, firstName: e.target.value }))}
                     />
@@ -5290,7 +5448,7 @@ export default function App() {
                     </Label>
                     <Input 
                       placeholder="Last Name" 
-                      className="h-10 rounded-none"
+                      className={newContact.lastName ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
                       value={newContact.lastName}
                       onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
                     />
@@ -5380,7 +5538,7 @@ export default function App() {
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Phone</Label>
                         <Input 
                           placeholder="+123..." 
-                          className="h-10 rounded-none"
+                          className={detail.phoneNumber ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
                           value={detail.phoneNumber}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -5393,7 +5551,7 @@ export default function App() {
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Email</Label>
                         <Input 
                           placeholder="email@example.com" 
-                          className="h-10 rounded-none"
+                          className={detail.email ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
                           value={detail.email}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -5441,7 +5599,7 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Number Line</Label>
-                        <Input className="h-10 rounded-none" value={addr.numberLine} onChange={(e) => {
+                        <Input className={addr.numberLine ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.numberLine} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].numberLine = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5449,7 +5607,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Street</Label>
-                        <Input className="h-10 rounded-none" value={addr.street} onChange={(e) => {
+                        <Input className={addr.street ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.street} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].street = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5457,7 +5615,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">City</Label>
-                        <Input className="h-10 rounded-none" value={addr.city} onChange={(e) => {
+                        <Input className={addr.city ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.city} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].city = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5465,7 +5623,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Region</Label>
-                        <Input className="h-10 rounded-none" value={addr.region} onChange={(e) => {
+                        <Input className={addr.region ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.region} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].region = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5473,7 +5631,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">State</Label>
-                        <Input className="h-10 rounded-none" value={addr.state} onChange={(e) => {
+                        <Input className={addr.state ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.state} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].state = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5481,7 +5639,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Country</Label>
-                        <Input className="h-10 rounded-none" value={addr.country} onChange={(e) => {
+                        <Input className={addr.country ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.country} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].country = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -5489,7 +5647,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1 col-span-2">
                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Postal Code</Label>
-                        <Input className="h-10 rounded-none" value={addr.postalCode} onChange={(e) => {
+                        <Input className={addr.postalCode ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.postalCode} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].postalCode = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -8795,7 +8953,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
           {chats.length === 0 ? (
             <div className="flex flex-row w-full h-full relative">
               <Button 
@@ -8817,16 +8975,18 @@ export default function App() {
               
               <div className="flex-1 flex items-center bg-white p-8 relative overflow-hidden">
                 <div className="w-full">
-                  <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                  <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                     {allUsers.filter(u => u.id !== userProfile.id).map(user => (
                       <button 
                         key={user.id}
                         onClick={() => startDirectChat(user)}
-                        className="min-w-[140px] flex flex-col items-center p-5 bg-slate-50 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0"
+                        className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 rounded-3xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0 group"
                       >
-                        <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-16 w-16 rounded-full mb-3 object-cover shadow-sm border border-slate-100" referrerPolicy="no-referrer" />
-                        <span className="font-semibold text-sm text-slate-800">{user.getPersonDetailsDto.firstName}</span>
-                        <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{user.getUserDto.roleName}</span>
+                        <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white overflow-hidden bg-slate-100 group-hover:scale-105 transition-transform">
+                          <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                        <span className="font-semibold text-lg text-slate-800">{user.getPersonDetailsDto.firstName}</span>
+                        <span className="text-xs text-slate-500 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
                       </button>
                     ))}
                   </div>
@@ -8835,16 +8995,15 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* WhatsApp Style Sidebar - List View (Increased width: 25-30%) */}
-              <div className="w-[35%] lg:w-[30%] xl:w-[25%] bg-[#ffffff] flex flex-col shrink-0 border-r-[1px] border-black relative z-10">
-            <div className="p-5 bg-[#f0f2f5] shrink-0 border-b border-black/10 space-y-4">
+              {/* WhatsApp Style Sidebar - List View (30% width) */}
+              <div className="w-[30%] bg-[#ffffff] flex flex-col shrink-0 relative z-10">
+            <div className="p-5 bg-[#f0f2f5] shrink-0 border-b space-y-4 w-full" style={{ borderColor: "#060101" }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-slate-300 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
+                  <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
                     <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                   </div>
                   <div className="flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5 text-primary" />
                     <h2 className="text-lg font-bold tracking-tight text-[#111b21]">Chats</h2>
                   </div>
                 </div>
@@ -8871,14 +9030,13 @@ export default function App() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <MessageSquare className="h-5 w-5 text-[#54656f]" />
                 </div>
               </div>
 
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input 
-                  placeholder="Search or start new chat" 
+                   placeholder="Search or start new chat" 
                   className="pl-10 h-10 bg-white border-none rounded-[5px] text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
@@ -8887,7 +9045,7 @@ export default function App() {
             </div>
 
             <ScrollArea className="flex-1 bg-white">
-              <div className="divide-y divide-slate-50">
+              <div className="divide-y divide-slate-50 w-full">
                 {chats.map((chat) => {
                     const lastMsg = chat.lastMessage;
                     const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
@@ -8951,8 +9109,8 @@ export default function App() {
             </ScrollArea>
           </div>
 
-          {/* Chat Box (Proportional 70-75%) */}
-          <div className="flex-1 flex flex-col bg-[#efeae2] relative overflow-hidden">
+          {/* Chat Box (Proportional 70%) */}
+          <div className="w-[70%] flex flex-col bg-[#efeae2] relative overflow-hidden shrink-0">
             {activeChatId ? (
               <>
                 {(() => {
@@ -9010,12 +9168,13 @@ export default function App() {
                         {isChatSearchVisible && (
                           <motion.div 
                             initial={{ width: 0, opacity: 0 }}
-                            animate={{ width: 200, opacity: 1 }}
-                            className="mr-2"
+                            animate={{ width: 220, opacity: 1 }}
+                            className="mr-2 relative"
                           >
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                             <Input 
                               placeholder="Search messages..." 
-                              className="h-8 text-xs bg-white border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-lg"
+                              className="h-8 pl-8 text-xs bg-white border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
                               value={chatSearchQuery}
                               onChange={(e) => setChatSearchQuery(e.target.value)}
                             />
@@ -9313,7 +9472,7 @@ export default function App() {
                       ) : (
                         <Input 
                           placeholder="Type a message" 
-                          className="py-6 px-4 rounded-xl border-none bg-white focus-visible:ring-0 shadow-sm text-[16px] placeholder:text-[#667781]"
+                          className="py-6 px-4 rounded-none border-none bg-white focus-visible:ring-0 shadow-sm text-[16px] placeholder:text-[#667781]"
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -9750,94 +9909,111 @@ export default function App() {
                 disabled={!newGroupName.trim() || selectedParticipants.length === 0}
                >
                  Create Group ({selectedParticipants.length})
-               </Button>
+                </Button>
              )}
           </div>
         </DialogContent>
       </Dialog>
+
       {/* Upload Preview Dialog */}
       <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
-        <DialogContent className="sm:max-w-[700px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="p-4 border-b">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                <ImageIcon className="h-5 w-5" />
+        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+          <DialogHeader className="p-4 border-b flex flex-row items-center justify-between select-none">
+            <div className="flex flex-col gap-1 text-left">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="h-5 w-5 text-primary shrink-0" />
+                <DialogTitle className="text-lg font-bold tracking-tight">Send file(s)</DialogTitle>
               </div>
-              <div className="space-y-0.5">
-                <DialogTitle className="text-lg font-bold tracking-tight">Send Images</DialogTitle>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Preview and add captions</p>
-              </div>
+              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Preview and add captions</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full ml-auto" onClick={() => setIsUploadPreviewOpen(false)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" onClick={() => setIsUploadPreviewOpen(false)}>
               <X className="h-5 w-5" />
             </Button>
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50">
             {uploadPreviewFiles.length > 0 ? (
-              <div className="flex-1 w-full relative flex flex-col items-center justify-center">
-                <div className="flex-1 w-full flex items-center justify-center p-6 relative">
-                  {uploadPreviewActiveIndex > 0 && (
-                    <Button variant="ghost" className="absolute left-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i - 1)}>
-                      <ChevronLeft className="h-6 w-6" />
-                    </Button>
-                  )}
-                  {uploadPreviewActiveIndex < uploadPreviewFiles.length - 1 && (
-                    <Button variant="ghost" className="absolute right-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i + 1)}>
-                      <ChevronRight className="h-6 w-6" />
-                    </Button>
-                  )}
-                  {(() => {
-                    const file = uploadPreviewFiles[uploadPreviewActiveIndex];
-                    if (!file) return null;
-                    const url = URL.createObjectURL(file);
-                    return (
-                      <img src={url} alt="Preview" className="max-w-full max-h-full object-contain rounded-lg shadow-sm" />
-                    );
-                  })()}
-                </div>
-                
-                {/* Overlay thumbnail div */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
-                  {uploadPreviewFiles.map((file, idx) => {
-                    const url = URL.createObjectURL(file);
-                    return (
-                      <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'}`} onClick={() => setUploadPreviewActiveIndex(idx)}>
-                        <img src={url} className="w-full h-full object-cover" />
-                        <button 
-                          className="absolute top-0 right-0 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 scale-75 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const newFiles = [...uploadPreviewFiles];
-                            newFiles.splice(idx, 1);
-                            if (newFiles.length === 0) {
-                              setIsUploadPreviewOpen(false);
-                            } else {
-                              setUploadPreviewFiles(newFiles);
-                              if (idx <= uploadPreviewActiveIndex && uploadPreviewActiveIndex > 0) {
-                                setUploadPreviewActiveIndex(uploadPreviewActiveIndex - 1);
-                              } else if (idx === uploadPreviewActiveIndex && uploadPreviewActiveIndex === newFiles.length) {
-                                setUploadPreviewActiveIndex(newFiles.length - 1);
-                              }
-                            }
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+               <div className="flex-1 w-full relative flex flex-col items-center justify-center">
+                 <div className="flex-1 w-full flex items-center justify-center p-6 relative">
+                   {uploadPreviewActiveIndex > 0 && (
+                     <Button variant="ghost" className="absolute left-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i - 1)}>
+                       <ChevronLeft className="h-6 w-6" />
+                     </Button>
+                   )}
+                   {uploadPreviewActiveIndex < uploadPreviewFiles.length - 1 && (
+                     <Button variant="ghost" className="absolute right-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i + 1)}>
+                       <ChevronRight className="h-6 w-6" />
+                     </Button>
+                   )}
+                   {(() => {
+                     const file = uploadPreviewFiles[uploadPreviewActiveIndex];
+                     if (!file) return null;
+                     const isImage = file.type?.startsWith('image/');
+                     if (isImage) {
+                       const url = URL.createObjectURL(file);
+                       return (
+                         <img src={url} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ height: "300px", width: "300px" }} />
+                       );
+                     } else {
+                       return (
+                         <div className="flex flex-col items-center justify-center p-8 bg-white border border-slate-200 rounded-[12px] shadow-sm gap-3 max-w-sm text-center">
+                           <Paperclip className="h-8 w-8 text-[#54656f]" />
+                           <div className="space-y-1">
+                             <p className="font-bold text-slate-800 text-sm truncate max-w-[240px] px-2">{file.name}</p>
+                             <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">{file.type || 'Unknown Type'}</p>
+                           </div>
+                         </div>
+                       );
+                     }
+                   })()}
+                 </div>
+                 
+                 {/* Overlay thumbnail div */}
+                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
+                   {uploadPreviewFiles.map((file, idx) => {
+                     const isImage = file.type?.startsWith('image/');
+                     const url = isImage ? URL.createObjectURL(file) : '';
+                     return (
+                       <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'} flex items-center justify-center bg-white`} onClick={() => setUploadPreviewActiveIndex(idx)}>
+                         {isImage ? (
+                           <img src={url} className="w-full h-full object-cover" />
+                         ) : (
+                           <Paperclip className="h-5 w-5 text-slate-500" />
+                         )}
+                         <button 
+                           className="absolute top-0 right-0 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 scale-75 transition-colors"
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             const newFiles = [...uploadPreviewFiles];
+                             newFiles.splice(idx, 1);
+                             if (newFiles.length === 0) {
+                               setIsUploadPreviewOpen(false);
+                             } else {
+                               setUploadPreviewFiles(newFiles);
+                               if (idx <= uploadPreviewActiveIndex && uploadPreviewActiveIndex > 0) {
+                                 setUploadPreviewActiveIndex(uploadPreviewActiveIndex - 1);
+                               } else if (idx === uploadPreviewActiveIndex && uploadPreviewActiveIndex === newFiles.length) {
+                                 setUploadPreviewActiveIndex(newFiles.length - 1);
+                               }
+                             }
+                           }}
+                         >
+                           <X className="h-3 w-3" />
+                         </button>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-6 gap-4">
-                 <div className="h-16 w-16 rounded-full bg-white shadow-sm flex items-center justify-center">
-                   <ImageIcon className="h-8 w-8 text-slate-500" />
-                 </div>
-                 <div className="text-center">
-                   <p className="text-sm font-bold truncate max-w-[200px] text-slate-800">No images selected</p>
-                 </div>
-              </div>
+               <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-6 gap-4">
+                  <div className="h-16 w-16 rounded-full bg-white shadow-sm flex items-center justify-center">
+                    <ImageIcon className="h-8 w-8 text-slate-500" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold truncate max-w-[200px] text-slate-800">No images selected</p>
+                  </div>
+               </div>
             )}
           </div>
 
@@ -9853,7 +10029,7 @@ export default function App() {
                   handleSendUpload();
                 }
               }}
-              className="flex-1 bg-white border-none h-11 rounded-[9px] px-4 focus-visible:ring-0 shadow-sm"
+              className="flex-1 bg-white border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-sm"
             />
             <Button 
               className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
@@ -9867,21 +10043,19 @@ export default function App() {
 
       {/* Media Preview Modal */}
       <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
-        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="p-4 border-b">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                <ImageIcon className="h-5 w-5" />
-              </div>
-              <div className="space-y-0.5">
+        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+          <DialogHeader className="p-4 border-b flex flex-row items-center justify-between">
+            <div className="flex flex-col gap-1 text-left select-none">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="h-5 w-5 text-primary shrink-0" />
                 <DialogTitle className="text-lg font-bold tracking-tight">Image Preview</DialogTitle>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Viewing full size image</p>
               </div>
+              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Viewing full size image</p>
             </div>
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-8 w-8 rounded-full ml-auto" 
+              className="h-8 w-8 rounded-full shrink-0" 
               onClick={() => setIsPreviewModalOpen(false)}
             >
               <X className="h-5 w-5" />
@@ -9889,7 +10063,7 @@ export default function App() {
           </DialogHeader>
           <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 overflow-hidden">
             <div className="relative w-full h-full flex items-center justify-center">
-              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-full object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
+              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-[80%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
             </div>
           </div>
         </DialogContent>
@@ -9897,7 +10071,7 @@ export default function App() {
 
       {/* Add Fingerprint Modal */}
       <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col max-h-[90vh]">
           <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
             <div className="space-y-1">
               <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
@@ -9907,41 +10081,60 @@ export default function App() {
               <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register biometric data for a user</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-6">
-            <div className="flex gap-3 items-end">
-              <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
-                <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
-                  <SelectTrigger className="h-10">
-                    <SelectValue placeholder="Chose a user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          <div className="px-10 pt-3 pb-6 space-y-4 overflow-y-auto flex-1">
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
+                  <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Chose a user" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select Hardware</label>
+                  <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="Chose a hardware" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hardwares.map((h) => (
+                        <SelectItem key={h.id} value={h.id.toString()}>
+                          {h.hardwareName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <Button 
-                className="w-[220px] px-4 font-medium bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2"
-                onClick={() => {
-                  // Simulate image acquisition
-                  const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-                  setFingerprintImages(prev => [...prev, dummyImg]);
-                }}
-              >
-                <Radio className="h-4 w-4" />
-                Request Fingerprint
-              </Button>
+              <div className="flex justify-end">
+                <Button 
+                  className="w-[220px] px-4 font-medium bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2"
+                  onClick={() => {
+                    // Simulate image acquisition
+                    const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+                    setFingerprintImages(prev => [...prev, dummyImg]);
+                  }}
+                >
+                  <Radio className="h-4 w-4" />
+                  Request Fingerprint
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Fingerprint Previews</label>
-              <div className="border border-dashed border-slate-300 rounded-2xl p-4 min-h-[150px] bg-white grid grid-cols-4 gap-4">
+              <div className="border border-dashed border-slate-300 rounded-2xl p-4 h-[150px] bg-white flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {fingerprintImages.map((img, idx) => (
-                  <div key={idx} className="relative group aspect-square rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden">
+                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
                     <img src={img} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Button 

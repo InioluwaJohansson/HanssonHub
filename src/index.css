@@ -131,32 +131,25 @@
     }
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar - Invisible */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: transparent !important;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
-  border-radius: 10px;
-  border: 2px solid transparent;
-  background-clip: content-box;
+  background: transparent !important;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
-  background-clip: content-box;
-}
-
-/* For Firefox */
+/* For browsers */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: var(--muted-foreground) transparent;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 @keyframes spotify-bounce {

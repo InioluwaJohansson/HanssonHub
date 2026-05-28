@@ -83,9 +83,11 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
   const lastName = userProfile.getPersonDetailsDto.lastName;
   const roleName = userProfile.getUserDto.roleName;
 
+  const hasMultipleRooms = rooms.length > 1;
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'user-room', label: `${firstName}'s Room`, icon: HomeIcon },
+    { id: 'user-room', label: hasMultipleRooms ? "My Rooms" : `${firstName}'s Room`, icon: HomeIcon },
   ];
 
   const facilityItems = [
