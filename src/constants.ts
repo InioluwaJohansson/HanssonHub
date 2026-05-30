@@ -190,6 +190,7 @@ export const INITIAL_USER: UserProfile = {
   id: 1,
   personId: "P-001",
   disabled: false,
+  cameraIds: [],
   getPersonDetailsDto: {
     id: 1,
     firstName: "Inioluwa",
@@ -220,6 +221,7 @@ export const INITIAL_USERS: GetPersonDto[] = [
     id: 2,
     personId: "P-002",
     disabled: false,
+    cameraIds: [],
     getPersonDetailsDto: {
       id: 2,
       firstName: "Jane",
@@ -242,6 +244,7 @@ export const INITIAL_USERS: GetPersonDto[] = [
     id: 3,
     personId: "P-003",
     disabled: true,
+    cameraIds: [],
     getPersonDetailsDto: {
       id: 3,
       firstName: "Bob",

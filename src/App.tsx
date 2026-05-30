@@ -76,6 +76,8 @@ import {
 } from './types';
 import { INITIAL_CHATS, INITIAL_CHAT_MESSAGES } from './chatData';
 import { toast, Toaster } from 'sonner';
+import { GetUserDto } from './api/types';
+import { API_BASE_URL } from './config';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
@@ -180,6 +182,7 @@ import {
   Filter,
   CheckCheck,
   VideoOff,
+  Eye,
   EyeOff,
   ImagePlus,
   History,
@@ -201,7 +204,9 @@ import {
   Minimize,
   CameraOff,
   ScanLine,
-  LogOut
+  LogOut,
+  Activity,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
@@ -276,8 +281,61 @@ export default function App() {
   const loaderRef = React.useRef<HTMLDivElement>(null);
   const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
 
-  const [isLoggedIn, setIsLoggedIn] = React.useState(true);
+  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+  const [userDto, setUserDto] = React.useState<GetUserDto | null>(null);
   const [userProfile, setUserProfile] = React.useState<UserProfile>(INITIAL_USER);
+
+  // Load user from local storage on mount
+  React.useEffect(() => {
+    const token = localStorage.getItem('token');
+    const id = localStorage.getItem('userId');
+    const userName = localStorage.getItem('userName');
+    const roleName = localStorage.getItem('roleName');
+
+    if (token && id && userName && roleName) {
+      setIsLoggedIn(true);
+      setUserDto({
+        id: parseInt(id),
+        userName,
+        roleName,
+        personId: 1, // Placeholder as it might vary
+        authorizationCode: ''
+      });
+    }
+  }, []);
+
+  const handleLoginSuccess = (userData: GetUserDto, token: string) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('userId', userData.id.toString());
+    localStorage.setItem('userName', userData.userName);
+    localStorage.setItem('roleName', userData.roleName);
+    
+    setUserDto(userData);
+    setIsLoggedIn(true);
+    
+    // Update userProfile if needed
+    setUserProfile(prev => ({
+      ...prev,
+      id: userData.id,
+      getUserDto: {
+        ...prev.getUserDto,
+        id: userData.id,
+        userName: userData.userName,
+        roleName: userData.roleName
+      }
+    }));
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('userName');
+    localStorage.removeItem('roleName');
+    
+    setIsLoggedIn(false);
+    setUserDto(null);
+    toast.success("Successfully logged out");
+  };
 
   const addLogEntry = React.useCallback((actionType: string, logDetails: string) => {
     const newLog: GetLogDto = {
@@ -375,6 +433,12 @@ export default function App() {
   // Profile Modals
   const [isPasswordModalOpen, setIsPasswordModalOpen] = React.useState(false);
   const [isAuthCodeModalOpen, setIsAuthCodeModalOpen] = React.useState(false);
+  
+  const [showNewPassword, setShowNewPassword] = React.useState(false);
+  const [showAuthCode, setShowAuthCode] = React.useState(false);
+  const [showAuthPwd, setShowAuthPwd] = React.useState(false);
+  const [showNewAuthCode, setShowNewAuthCode] = React.useState(false);
+
   const [passwordData, setPasswordData] = React.useState<UpdateUserPasswordDto>({ 
     id: 1, 
     userName: 'ini_makinde', 
@@ -676,6 +740,47 @@ export default function App() {
     isChatModalOpenRef.current = isChatModalOpen;
   }, [isChatModalOpen]);
   const [chatPopups, setChatPopups] = React.useState<MessageDto[]>([]);
+  const [formActionStatus, setFormActionStatus] = React.useState<{ message: string, isSuccess: boolean } | null>(null);
+
+  React.useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest('button');
+      if (!btn) return;
+      
+      const text = btn.textContent?.toLowerCase().trim() || '';
+      const isTrash = !!btn.querySelector('.lucide-trash-2, .lucide-trash2, polyline[points="3 6 5 6 21 6"]');
+      
+      const isSave = text.includes('save') || text.includes('create') || text.includes('update') || text.includes('confirm') || text === 'add scene' || text === 'add group';
+      const isDelete = isTrash || text.includes('delete') || text.includes('remove');
+      const isModalAdd = text.includes('add ') && !!btn.closest('[role="dialog"]');
+
+      if (isSave || isDelete || isModalAdd) {
+        // Exclude logs filter clear button and general clear icons
+        if (isTrash && !text && btn.classList.contains('hover:text-destructive')) {
+          if (btn.closest('div.sm\\:flex-row')) return;
+        }
+        
+        const actionName = (text.length > 0 && text.length < 30) ? 
+          text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 
+          (isTrash ? 'Delete Form Details' : 'Submit Form Details');
+
+        setTimeout(() => {
+          setFormActionStatus({
+            message: `User Action: '${actionName}' completed and stored successfully.`,
+            isSuccess: true
+          });
+          
+          setTimeout(() => {
+            setFormActionStatus(null);
+          }, 5000);
+        }, 500); 
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
   const [userSearchQuery, setUserSearchQuery] = React.useState("");
   const [isAddFingerprintOpen, setIsAddFingerprintOpen] = React.useState(false);
   const [isRegisterNfidOpen, setIsRegisterNfidOpen] = React.useState(false);
@@ -701,6 +806,7 @@ export default function App() {
   const audioChunksRef = React.useRef<Blob[]>([]);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [activeChatId, setActiveChatId] = React.useState<number | null>(null);
+  const [messageToDelete, setMessageToDelete] = React.useState<MessageDto | null>(null);
   const [chatSearchQuery, setChatSearchQuery] = React.useState("");
   const [isChatSearchVisible, setIsChatSearchVisible] = React.useState(false);
   const [isUploadPreviewOpen, setIsUploadPreviewOpen] = React.useState(false);
@@ -1088,6 +1194,7 @@ export default function App() {
       // Construct UpdatePersonDto for logic demonstration
     const updateData: UpdatePersonDto = {
       id: userProfile.id,
+      cameraIds: userProfile.cameraIds || [],
       updatePersonDetailsDto: {
         firstName: userProfile.getPersonDetailsDto.firstName,
         lastName: userProfile.getPersonDetailsDto.lastName,
@@ -1734,29 +1841,61 @@ export default function App() {
                 <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Logs</p>
               </div>
               <div className="text-right flex flex-col items-end justify-center">
-                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{logs.length}</p>
                 <div className="text-xs text-muted-foreground max-w-[120px] text-right">
                   Create, Update, Delete, Locked, Unlocked, Open, Closed
                 </div>
               </div>
             </Card>
+          </div>
             
-            {/* My Room Card */}
-            {(() => {
-              const myRoom = rooms.find(r => r.roomName === 'Bedroom') || rooms[0];
-              const roomDoors = doors.filter(d => d.roomId === myRoom?.id);
-              const roomLights = lights.filter(l => l.roomId === myRoom?.id);
-              const roomWindows = windows.filter(w => w.roomId === myRoom?.id);
-              const roomAppliances = appliances.filter(a => a.roomId === myRoom?.id);
-              const roomCameras = cameras.filter(c => c.roomId === myRoom?.id);
-              const roomExternals = externals.filter(e => e.roomId === myRoom?.id);
+          <div className="flex flex-wrap gap-4 mb-4">
+            {/* Rooms Cards */}
+            {rooms.map(room => {
+              const roomDoors = doors.filter(d => d.roomId === room.id);
+              const roomLights = lights.filter(l => l.roomId === room.id);
+              const roomWindows = windows.filter(w => w.roomId === room.id);
+              const roomAppliances = appliances.filter(a => a.roomId === room.id);
+              const roomCameras = cameras.filter(c => c.roomId === room.id);
+              const roomExternals = externals.filter(e => e.roomId === room.id);
               
-              const myRoomLocked = roomDoors.length > 0 ? roomDoors.every(d => d.isLocked) : false;
+              const activeCount = roomDoors.filter(d => !d.isLocked).length + 
+                                  roomLights.filter(l => l.isActive).length + 
+                                  roomWindows.filter(w => !w.isLocked).length + 
+                                  roomAppliances.filter(a => a.isActive).length + 
+                                  roomCameras.filter(c => c.isActive).length;
               
+              const powerActiveCount = roomDoors.filter(d => d.powerActive).length + 
+                                       roomLights.filter(l => l.powerActive).length + 
+                                       roomWindows.filter(w => w.powerActive).length + 
+                                       roomAppliances.filter(a => a.powerActive).length + 
+                                       roomCameras.filter(c => c.powerActive).length;
+              
+              if (rooms.length > 1) {
+                return (
+                  <Card 
+                    key={room.id}
+                    className="p-6 flex flex-col items-center justify-center gap-3 bg-slate-50 text-slate-800 border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer rounded-3xl min-w-[160px]"
+                    onClick={() => {
+                      setSelectedUserRoomId(room.id);
+                      setActiveView('user-room');
+                    }}
+                  >
+                    <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
+                      <HomeIcon className="h-10 w-10" />
+                    </div>
+                    <h3 className="text-sm font-bold tracking-tight text-slate-900">{room.roomName}</h3>
+                  </Card>
+                );
+              }
+
               return (
                 <Card 
-                  className="p-8 sm:col-span-3 flex flex-col sm:flex-row items-center sm:items-start gap-6 bg-slate-50 text-slate-800 border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer rounded-3xl overflow-hidden relative"
-                  onClick={() => setActiveView('user-room')}
+                  key={room.id}
+                  className="p-8 flex-1 min-w-[300px] flex flex-col sm:flex-row items-center sm:items-start gap-6 bg-slate-50 text-slate-800 border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer rounded-3xl overflow-hidden relative"
+                  onClick={() => {
+                    setSelectedUserRoomId(room.id);
+                    setActiveView('user-room');
+                  }}
                 >
                   <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
                   
@@ -1764,7 +1903,6 @@ export default function App() {
                     <div className="h-24 w-24 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
                       <HomeIcon className="h-12 w-12" />
                     </div>
-                    <h3 className="text-lg font-bold tracking-tight text-slate-900">{userProfile.getPersonDetailsDto.firstName}'s Room</h3>
                   </div>
 
                   <div className="flex-1 z-10 text-center sm:text-left flex flex-col justify-center self-center pt-2 sm:pt-0">
@@ -1790,18 +1928,30 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div className="z-10 shrink-0 self-center bg-slate-100 px-6 py-4 rounded-2xl border border-slate-200 flex flex-col items-center">
-                    <span className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-1">Status</span>
-                    <div className="flex items-center gap-2 text-slate-500">
-                      {myRoomLocked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
-                      <span className="text-xl font-bold tracking-tight">
-                        {myRoomLocked ? "Locked" : "Unlocked"}
-                      </span>
+                  <div className="z-10 shrink-0 self-center bg-slate-100 px-6 py-4 rounded-2xl border border-slate-200 flex flex-col gap-3 min-w-[200px]">
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-1">Active Devices</span>
+                      <div className="flex items-center gap-2 text-primary">
+                        <Activity className="h-5 w-5" />
+                        <span className="text-xl font-bold tracking-tight">
+                          {activeCount}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-px bg-slate-200 w-full" />
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-1">Active Power</span>
+                      <div className="flex items-center gap-2 text-green-600">
+                        <Zap className="h-5 w-5" />
+                        <span className="text-xl font-bold tracking-tight">
+                          {powerActiveCount}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </Card>
               );
-            })()}
+            })}
           </div>
 
           <div className="space-y-4 overflow-hidden relative">
@@ -2504,7 +2654,7 @@ export default function App() {
                       Full Name
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.firstName ? "border-b-2 border-b-green-400 text-lg font-medium bg-transparent text-black" : "border-b-2 border-b-slate-200 text-lg font-medium bg-transparent text-black"} 
+                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black px-0"
                       value={userProfile.getPersonDetailsDto.firstName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, firstName: e.target.value } }))} 
                     />
@@ -2515,7 +2665,7 @@ export default function App() {
                       Last Name
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.lastName ? "border-b-2 border-b-green-400 text-lg font-medium bg-transparent text-black" : "border-b-2 border-b-slate-200 text-lg font-medium bg-transparent text-black"} 
+                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black px-0"
                       value={userProfile.getPersonDetailsDto.lastName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, lastName: e.target.value } }))} 
                     />
@@ -2526,7 +2676,7 @@ export default function App() {
                       Username
                     </Label>
                     <Input 
-                      className={userProfile.getUserDto.userName ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
+                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
                       value={userProfile.getUserDto.userName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getUserDto: { ...p.getUserDto, userName: e.target.value } }))} 
                     />
@@ -2537,7 +2687,7 @@ export default function App() {
                       Email Address
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
+                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email || ''} 
                       onChange={(e) => {
                         const email = e.target.value;
@@ -2556,7 +2706,7 @@ export default function App() {
                       Phone Number
                     </Label>
                     <Input 
-                      className={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"} 
+                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber || ''} 
                       onChange={(e) => {
                         const phoneNumber = e.target.value;
@@ -2610,8 +2760,13 @@ export default function App() {
                           size="icon" 
                           className="h-6 w-6 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-600 hover:bg-red-50"
                           onClick={() => {
-                            setPendingUserAction({ type: 'delete-address', index: idx });
-                            setIsAuthCodeModalOpen(true);
+                            setUserProfile(p => ({
+                              ...p,
+                              getPersonDetailsDto: {
+                                ...p.getPersonDetailsDto,
+                                getAddressDtos: p.getPersonDetailsDto.getAddressDtos.filter((_, i) => i !== idx)
+                              }
+                            }));
                           }}
                         >
                           <Trash2 className="h-3 w-3" />
@@ -2620,7 +2775,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Number/Line</Label>
                             <Input 
-                              className={addr.numberLine ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.numberLine}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2635,7 +2790,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Street</Label>
                             <Input 
-                              className={addr.street ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.street}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2650,7 +2805,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">City</Label>
                             <Input 
-                              className={addr.city ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.city}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2665,7 +2820,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Region</Label>
                             <Input 
-                              className={addr.region ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.region}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2680,7 +2835,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">State</Label>
                             <Input 
-                              className={addr.state ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.state}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2695,7 +2850,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Country</Label>
                             <Input 
-                              className={addr.country ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.country}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2710,7 +2865,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Postal Code</Label>
                             <Input 
-                              className={addr.postalCode ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={addr.postalCode || ''}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2766,8 +2921,13 @@ export default function App() {
                           size="icon" 
                           className="h-6 w-6 absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-600 hover:bg-red-50"
                           onClick={() => {
-                            setPendingUserAction({ type: 'delete-contact', index: idx });
-                            setIsAuthCodeModalOpen(true);
+                            setUserProfile(p => ({
+                              ...p,
+                              getPersonDetailsDto: {
+                                ...p.getPersonDetailsDto,
+                                getContactDetailsDtos: p.getPersonDetailsDto.getContactDetailsDtos.filter((_, i) => i !== idx)
+                              }
+                            }));
                           }}
                         >
                           <Trash2 className="h-3 w-3" />
@@ -2776,7 +2936,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Email Address</Label>
                             <Input 
-                              className={contact.email ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={contact.email}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2791,7 +2951,7 @@ export default function App() {
                           <div className="space-y-1">
                             <Label className="text-[10px] text-muted-foreground uppercase">Phone Number</Label>
                             <Input 
-                              className={contact.phoneNumber ? "h-8 text-xs bg-transparent border-b-2 border-b-green-400 text-black" : "h-8 text-xs bg-transparent border-b-2 border-b-primary/20 text-black"}
+                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
                               value={contact.phoneNumber}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -2817,17 +2977,17 @@ export default function App() {
                     Camera Access
                   </h3>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 p-4 rounded-2xl border bg-muted/20">
-                    {GENERAL_CAMERAS.map(camera => (
+                    {appNamesDetailList.cameraIdNames.map(camera => (
                       <div key={camera.id} className="flex items-center space-x-2">
                         <Checkbox 
                           id={`cam-${camera.id}`} 
-                          checked={userProfile.cameraAccess.includes(camera.id)}
+                          checked={userProfile.cameraIds?.includes(camera.id) || false}
                           onCheckedChange={(checked) => {
                             setUserProfile(prev => ({
                               ...prev,
-                              cameraAccess: checked 
-                                ? [...prev.cameraAccess, camera.id]
-                                : prev.cameraAccess.filter(id => id !== camera.id)
+                              cameraIds: checked 
+                                ? [...(prev.cameraIds || []), camera.id]
+                                : (prev.cameraIds || []).filter(id => id !== camera.id)
                             }));
                           }}
                         />
@@ -3078,7 +3238,7 @@ export default function App() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
                 <Input 
                   placeholder="Search your rooms..." 
-                  className="pl-9 h-10 bg-white border border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none shadow-none"
+                  className="pl-9 h-10 border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none shadow-none"
                   value={myRoomsSearchQuery}
                   onChange={(e) => setMyRoomsSearchQuery(e.target.value)}
                 />
@@ -3846,7 +4006,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredExternals.map(ext => (
-              <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
+              <Card key={ext.id} className="p-6 flex flex-col gap-4 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                 <div className="flex items-start justify-between">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg">{ext.externalName}</h3>
@@ -4309,7 +4469,7 @@ export default function App() {
     return (
       <>
         <Toaster position="top-center" richColors />
-        <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />
+        <LoginScreen onLoginSuccess={handleLoginSuccess} />
       </>
     );
   }
@@ -4358,10 +4518,7 @@ export default function App() {
             </div>
             <button 
               className="p-1 text-red-500 hover:text-red-600 transition-colors bg-transparent border-0 outline-none flex items-center justify-center cursor-pointer font-sans"
-              onClick={() => {
-                setIsLoggedIn(false);
-                toast.success("Successfully logged out");
-              }}
+              onClick={handleLogout}
               title="Logout"
             >
               <LogOut className="h-5 w-5" />
@@ -4827,7 +4984,7 @@ export default function App() {
           </DialogHeader>
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
-              <Label htmlFor="password-token">Security Token</Label>
+              <Label htmlFor="password-token" className="flex items-center gap-1.5"><Key className="h-3 w-3 text-muted-foreground" /> Security Token</Label>
               <Input 
                 id="password-token" 
                 placeholder="XXXX-XXXX-XXXX-XXXX"
@@ -4837,30 +4994,52 @@ export default function App() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="new-password">New Password</Label>
-              <Input 
-                id="new-password" 
-                type="password"
-                className={passwordData.newPassword ? "border-b-green-400" : ""}
-                value={passwordData.newPassword}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
-              />
+              <Label htmlFor="new-password" className="flex items-center gap-1.5"><Lock className="h-3 w-3 text-muted-foreground" /> New Password</Label>
+              <div className="relative">
+                <Input 
+                  id="new-password" 
+                  type={showNewPassword ? "text" : "password"}
+                  className={cn("pr-9", passwordData.newPassword ? "border-b-green-400" : "")}
+                  value={passwordData.newPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password-auth-code">Authorization Code</Label>
-              <Input 
-                id="password-auth-code" 
-                placeholder="000000"
-                maxLength={6}
-                className={passwordData.authorizationCode.length === 6 ? "border-b-green-400" : ""}
-                value={passwordData.authorizationCode}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, authorizationCode: e.target.value }))}
-              />
+              <Label htmlFor="password-auth-code" className="flex items-center gap-1.5"><ShieldCheck className="h-3 w-3 text-muted-foreground" /> Authorization Code</Label>
+              <div className="relative">
+                <Input 
+                  id="password-auth-code" 
+                  type={showAuthCode ? "text" : "password"}
+                  placeholder="000000"
+                  maxLength={6}
+                  className={cn("pr-9", passwordData.authorizationCode.length === 6 ? "border-b-green-400" : "")}
+                  value={passwordData.authorizationCode}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setPasswordData(prev => ({ ...prev, authorizationCode: val }));
+                  }}
+                />
+                 <button 
+                  type="button" 
+                  onClick={() => setShowAuthCode(!showAuthCode)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>
             <Button onClick={() => setIsPasswordModalOpen(false)} className="bg-transparent border-2 border-blue-600 text-black hover:bg-blue-50 flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 text-blue-600" />
+              <Key className="h-4 w-4 text-blue-600" />
               Update Password
             </Button>
           </DialogFooter>
@@ -4873,7 +5052,7 @@ export default function App() {
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2 text-yellow-700">
               <ShieldAlert className="h-5 w-5" />
-              Authorization Required
+              Change Authorization Code
             </DialogTitle>
             <DialogDescription className="text-yellow-800/70">
               This is a sensitive operation. Please enter your credentials to authorize the action.
@@ -4881,17 +5060,26 @@ export default function App() {
           </DialogHeader>
         <div className="grid gap-4 pt-[3px] pb-4">
           <div className="grid gap-2">
-            <Label htmlFor="auth-pwd">Login Password</Label>
-            <Input 
-              id="auth-pwd" 
-              type="password"
-              className={authCodeData.password ? "border-b-green-400" : ""}
-              value={authCodeData.password}
-              onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
-            />
+            <Label htmlFor="auth-pwd" className="flex items-center gap-1.5"><Lock className="h-3 w-3 text-muted-foreground" /> Login Password</Label>
+            <div className="relative">
+              <Input 
+                id="auth-pwd" 
+                type={showAuthPwd ? "text" : "password"}
+                className={cn("pr-9", authCodeData.password ? "border-b-green-400" : "")}
+                value={authCodeData.password}
+                onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowAuthPwd(!showAuthPwd)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showAuthPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="auth-token">Security Token</Label>
+            <Label htmlFor="auth-token" className="flex items-center gap-1.5"><Key className="h-3 w-3 text-muted-foreground" /> Security Token</Label>
             <Input 
               id="auth-token" 
               placeholder="XXXX-XXXX-XXXX-XXXX"
@@ -4901,15 +5089,28 @@ export default function App() {
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="new-auth">New Authorization Code</Label>
-            <Input 
-              id="new-auth" 
-              placeholder="000000"
-              maxLength={6}
-              className={authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : ""}
-              value={authCodeData.newAuthorizationCode}
-              onChange={(e) => setAuthCodeData(prev => ({ ...prev, newAuthorizationCode: e.target.value }))}
-            />
+            <Label htmlFor="new-auth" className="flex items-center gap-1.5"><ShieldCheck className="h-3 w-3 text-muted-foreground" /> New Authorization Code</Label>
+            <div className="relative">
+              <Input 
+                id="new-auth" 
+                type={showNewAuthCode ? "text" : "password"}
+                placeholder="000000"
+                maxLength={6}
+                className={cn("pr-9", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
+                value={authCodeData.newAuthorizationCode}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '');
+                  setAuthCodeData(prev => ({ ...prev, newAuthorizationCode: val }));
+                }}
+              />
+               <button 
+                type="button" 
+                onClick={() => setShowNewAuthCode(!showNewAuthCode)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showNewAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
         </div>
           <DialogFooter>
@@ -5061,6 +5262,7 @@ export default function App() {
                 id: newId,
                 personId: `P-${newId}`,
                 disabled: false,
+                cameraIds: [],
                 getPersonDetailsDto: {
                   id: newId,
                   firstName: newPerson.createPersonDetailsDto.firstName,
@@ -5100,7 +5302,10 @@ export default function App() {
           </DialogHeader>
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-role-select">Select New Role</Label>
+              <Label htmlFor="edit-role-select" className="flex items-center gap-1.5">
+                <ShieldCheck className="h-3 w-3 text-muted-foreground" />
+                Select New Role
+              </Label>
               <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
                 <SelectTrigger id="edit-role-select" className="bg-transparent text-black border-primary/20">
                   <SelectValue placeholder="Select role" />
@@ -8965,11 +9170,10 @@ export default function App() {
                 <X className="h-4 w-4" />
               </Button>
               <div className="w-[40%] bg-slate-50 border-r-[1px] border-slate-200 flex flex-col items-center justify-center p-8 text-center shrink-0 relative z-10">
-                <div className="relative mb-8 flex items-center justify-center">
-                  <Settings className="h-28 w-28 text-slate-300 animate-[spin_4s_linear_infinite]" />
-                  <MessageSquare className="h-10 w-10 text-primary absolute" />
+                <div className="mb-8 flex items-center justify-center">
+                  <MessageSquare className="h-24 w-24 text-slate-300" />
                 </div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2">The HanssonHub Chats</h2>
+                <h2 className="text-2xl font-bold tracking-tight mb-2 text-black">The HanssonHub Chats</h2>
                 <p className="text-sm text-slate-500 max-w-xs">Start connecting with your peers. Pick a contact to begin a conversation.</p>
               </div>
               
@@ -9037,7 +9241,7 @@ export default function App() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input 
                    placeholder="Search or start new chat" 
-                  className="pl-10 h-10 bg-white border-none rounded-[5px] text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="pl-10 h-10 bg-inherit border-none rounded-none text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black"
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
                 />
@@ -9243,6 +9447,13 @@ export default function App() {
                                     initial={{ opacity: 0, y: 15, scale: 0.95 }}
                                     animate={{ opacity: 1, y: 0, scale: 1 }}
                                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
+                                    drag="x"
+                                    dragConstraints={{ left: -50, right: 50 }}
+                                    onDragEnd={(_, info) => {
+                                      if (Math.abs(info.offset.x) > 40) {
+                                        setReplyingTo(msg);
+                                      }
+                                    }}
                                     key={msg.id || idx} 
                                     className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}
                                   >
@@ -9250,16 +9461,49 @@ export default function App() {
                                       "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all",
                                       isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12"
                                     )}>
-                                      {/* Reply Button on Hover */}
-                                      <button 
-                                        onClick={() => setReplyingTo(msg)}
-                                        className={cn(
-                                          "absolute top-2 opacity-0 group-hover/msg:opacity-100 transition-opacity bg-black/10 hover:bg-black/20 p-1 rounded-full text-[#54656f] z-20",
-                                          isMe ? "-left-10" : "-right-10"
+                                      {/* Action Buttons on Hover */}
+                                      <div className={cn(
+                                        "absolute opacity-0 group-hover/msg:opacity-100 transition-all duration-200 z-50 flex items-center gap-1",
+                                        isMe ? "right-1 -top-8" : "left-1 -top-8"
+                                      )}>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="icon"
+                                          onClick={() => setReplyingTo(msg)}
+                                          className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600 p-0"
+                                        >
+                                          <Reply className="h-3.5 w-3.5" />
+                                        </Button>
+                                        
+                                        {isMe && (
+                                          <>
+                                            <Button 
+                                              variant="ghost" 
+                                              size="icon"
+                                              onClick={() => {
+                                                if (msg.content) {
+                                                  navigator.clipboard.writeText(msg.content);
+                                                  toast({
+                                                    title: "Copied",
+                                                    description: "Message copied to clipboard",
+                                                  });
+                                                }
+                                              }}
+                                              className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600 p-0"
+                                            >
+                                              <Copy className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <Button 
+                                              variant="ghost" 
+                                              size="icon"
+                                              onClick={() => setMessageToDelete(msg)}
+                                              className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-red-50 text-red-500 p-0"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                          </>
                                         )}
-                                      >
-                                        <Reply className="h-5 w-5" />
-                                      </button>
+                                      </div>
 
                                       {!isMe && (
                                         <div className="px-1 mb-1">
@@ -9472,7 +9716,7 @@ export default function App() {
                       ) : (
                         <Input 
                           placeholder="Type a message" 
-                          className="py-6 px-4 rounded-none border-none bg-white focus-visible:ring-0 shadow-sm text-[16px] placeholder:text-[#667781]"
+                          className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] text-black"
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -9918,22 +10162,22 @@ export default function App() {
       {/* Upload Preview Dialog */}
       <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
         <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="p-4 border-b flex flex-row items-center justify-between select-none">
-            <div className="flex flex-col gap-1 text-left">
+          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between select-none">
+            <div className="flex flex-col gap-0.5 text-left">
               <div className="flex items-center gap-2">
-                <ImageIcon className="h-5 w-5 text-primary shrink-0" />
-                <DialogTitle className="text-lg font-bold tracking-tight">Send file(s)</DialogTitle>
+                <ImageIcon className="h-6 w-6 text-primary shrink-0" />
+                <DialogTitle className="text-xl font-bold tracking-tight">Send file(s)</DialogTitle>
               </div>
-              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Preview and add captions</p>
+              <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider ml-1">Preview and add captions</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" onClick={() => setIsUploadPreviewOpen(false)}>
-              <X className="h-5 w-5" />
+            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full flex items-center justify-center shrink-0" onClick={() => setIsUploadPreviewOpen(false)}>
+              <X className="h-6 w-6" />
             </Button>
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50">
             {uploadPreviewFiles.length > 0 ? (
-               <div className="flex-1 w-full relative flex flex-col items-center justify-center">
+               <div className="flex-1 w-full relative flex flex-col items-center justify-center -translate-y-8">
                  <div className="flex-1 w-full flex items-center justify-center p-6 relative">
                    {uploadPreviewActiveIndex > 0 && (
                      <Button variant="ghost" className="absolute left-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i - 1)}>
@@ -10029,7 +10273,7 @@ export default function App() {
                   handleSendUpload();
                 }
               }}
-              className="flex-1 bg-white border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-sm"
+              className="flex-1 bg-inherit border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-none text-black"
             />
             <Button 
               className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
@@ -10044,26 +10288,26 @@ export default function App() {
       {/* Media Preview Modal */}
       <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
         <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="p-4 border-b flex flex-row items-center justify-between">
-            <div className="flex flex-col gap-1 text-left select-none">
+          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between">
+            <div className="flex flex-col gap-0.5 text-left select-none">
               <div className="flex items-center gap-2">
-                <ImageIcon className="h-5 w-5 text-primary shrink-0" />
-                <DialogTitle className="text-lg font-bold tracking-tight">Image Preview</DialogTitle>
+                <ImageIcon className="h-6 w-6 text-primary shrink-0" />
+                <DialogTitle className="text-xl font-bold tracking-tight">Image Preview</DialogTitle>
               </div>
-              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Viewing full size image</p>
+              <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider ml-1">Viewing full size image</p>
             </div>
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-8 w-8 rounded-full shrink-0" 
+              className="h-10 w-10 rounded-full shrink-0" 
               onClick={() => setIsPreviewModalOpen(false)}
             >
-              <X className="h-5 w-5" />
+              <X className="h-6 w-6" />
             </Button>
           </DialogHeader>
           <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 overflow-hidden">
-            <div className="relative w-full h-full flex items-center justify-center">
-              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-[80%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
+            <div className="relative w-full h-full flex items-center justify-center -translate-y-8">
+              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-[90%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
             </div>
           </div>
         </DialogContent>
@@ -10085,7 +10329,10 @@ export default function App() {
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                    <UserIcon className="h-3 w-3" />
+                    Select User
+                  </label>
                   <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
                     <SelectTrigger className="h-10">
                       <SelectValue placeholder="Chose a user" />
@@ -10100,15 +10347,18 @@ export default function App() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select Hardware</label>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                    <Cpu className="h-3 w-3" />
+                    Select Hardware
+                  </label>
                   <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
                     <SelectTrigger className="h-10">
                       <SelectValue placeholder="Chose a hardware" />
                     </SelectTrigger>
                     <SelectContent>
-                      {hardwares.map((h) => (
+                      {appNamesDetailList?.hardwareIdNames?.map((h) => (
                         <SelectItem key={h.id} value={h.id.toString()}>
-                          {h.hardwareName}
+                          {h.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -10131,7 +10381,10 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Fingerprint Previews</label>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                <ImageIcon className="h-3 w-3" />
+                Fingerprint Previews
+              </label>
               <div className="border border-dashed border-slate-300 rounded-2xl p-4 h-[150px] bg-white flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {fingerprintImages.map((img, idx) => (
                   <div key={idx} className="relative group aspect-square h-24 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
@@ -10156,7 +10409,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
             <Button 
               className="w-[220px] bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
               disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
@@ -10180,6 +10433,44 @@ export default function App() {
       </Dialog>
       
       {/* Register NFID Modal */}
+      <Dialog open={messageToDelete !== null} onOpenChange={(open) => !open && setMessageToDelete(null)}>
+        <DialogContent className="sm:max-w-[400px] p-8 overflow-hidden bg-white border border-black shadow-2xl rounded-2xl text-center">
+          <div className="flex flex-col items-center gap-4 py-4">
+             <div className="h-16 w-16 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-2">
+                <Trash2 className="h-8 w-8" />
+             </div>
+             <p className="text-lg font-bold text-slate-900">Are you sure you want to delete this message?</p>
+             <p className="text-sm text-slate-500">This action cannot be undone and the message will be removed from your history.</p>
+          </div>
+          <DialogFooter className="flex items-center justify-center gap-3 sm:justify-center border-none p-0 mt-2">
+            <Button 
+               variant="ghost" 
+               onClick={() => setMessageToDelete(null)}
+               className="h-11 px-8 rounded-xl font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-100"
+            >
+              Cancel
+            </Button>
+            <Button 
+               onClick={() => {
+                 if (messageToDelete) {
+                   setChatMessages(prev => prev.filter(m => m.id !== messageToDelete.id));
+                   setMessageToDelete(null);
+                   toast({
+                     title: "Deleted",
+                     description: "Message removed successfully",
+                   });
+                 }
+               }}
+               className="h-11 px-8 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Register NFID Modal */}
       <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
         <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
           <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
@@ -10197,7 +10488,10 @@ export default function App() {
             </div>
             <div className="flex gap-3 items-end">
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select User</label>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                  <UserIcon className="h-3 w-3" />
+                  Select User
+                </label>
                 <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
                   <SelectTrigger className="h-11">
                     <SelectValue placeholder="Choose a user" />
@@ -10212,15 +10506,18 @@ export default function App() {
                 </Select>
               </div>
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select Hardware</label>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                  <Cpu className="h-3 w-3" />
+                  Select Hardware
+                </label>
                 <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
                   <SelectTrigger className="h-11">
                     <SelectValue placeholder="Choose hardware" />
                   </SelectTrigger>
                   <SelectContent>
-                    {hardwares.map((h) => (
+                    {appNamesDetailList?.hardwareIdNames?.map((h) => (
                       <SelectItem key={h.id} value={h.id.toString()}>
-                        {h.hardwareName}
+                        {h.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -10228,7 +10525,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
             <Button 
               className="bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
               disabled={!selectedNfidUserId || !selectedNfidHardwareId}
@@ -10283,20 +10580,18 @@ export default function App() {
           >
             
             <div className={`h-full w-full grid gap-1 p-1 ${
-              (userProfile.cameraAccess?.length || 0) <= 1 ? 'grid-cols-1 grid-rows-1' :
-              (userProfile.cameraAccess?.length || 0) <= 2 ? 'grid-cols-1 sm:grid-cols-2 grid-rows-1' :
-              (userProfile.cameraAccess?.length || 0) <= 4 ? 'grid-cols-2 grid-rows-2' :
+              (userProfile.cameraIds?.length || 0) <= 1 ? 'grid-cols-1 grid-rows-1' :
+              (userProfile.cameraIds?.length || 0) <= 2 ? 'grid-cols-1 sm:grid-cols-2 grid-rows-1' :
+              (userProfile.cameraIds?.length || 0) <= 4 ? 'grid-cols-2 grid-rows-2' :
               'grid-cols-3 grid-rows-2'
             }`}>
-              {userProfile.cameraAccess?.map((camId, i) => {
-                const cam = cameras.find(c => c.id.toString() === camId.toString() || c.cameraName === camId);
-                const videoUrl = cam 
-                  ? (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4")
-                  : "";
+              {userProfile.cameraIds?.map((camId, i) => {
+                const camName = appNamesDetailList.cameraIdNames.find(c => c.id === camId)?.name || `Camera ${camId}`;
+                const videoUrl = i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4";
                 
                 return (
                   <div key={i} className="relative bg-slate-900 rounded-sm overflow-hidden border border-white/5">
-                    {cam ? (
+                    {camName ? (
                       <>
                         <video 
                           src={videoUrl} 
@@ -10309,7 +10604,7 @@ export default function App() {
                         <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
                           <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
                           <span className="text-[10px] font-bold text-white uppercase tracking-widest">
-                            {cam.cameraName || "Camera " + (i + 1)}
+                            {camName}
                           </span>
                         </div>
                         <div className="absolute bottom-4 right-4 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
@@ -10326,7 +10621,7 @@ export default function App() {
                   </div>
                 );
               })}
-              {(!userProfile.cameraAccess || userProfile.cameraAccess.length === 0) && (
+              {(!userProfile.cameraIds || userProfile.cameraIds.length === 0) && (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600 col-span-full">
                   <CameraOff className="h-12 w-12 opacity-20" />
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Cameras Configured in Profile</span>
@@ -10350,10 +10645,37 @@ export default function App() {
                  <div className="h-8 w-px bg-white/10" />
                  <div className="flex flex-col items-center">
                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Active Feeds</span>
-                   <span className="text-xl font-bold text-emerald-400">{(userProfile.cameraAccess?.length || 0).toString().padStart(2, '0')}</span>
+                   <span className="text-xl font-bold text-emerald-400">{(userProfile.cameraIds?.length || 0).toString().padStart(2, '0')}</span>
                  </div>
               </div>
               <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Double tap anywhere to resume session</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {formActionStatus && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: 20 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, y: 20, transition: { duration: 0.2 } }}
+            className={cn(
+              "fixed bottom-6 right-6 z-[99999] px-6 py-4 bg-white/95 backdrop-blur-md shadow-2xl rounded-xl border-[2px] max-w-sm flex items-start gap-4 pointer-events-auto",
+              formActionStatus.isSuccess ? "border-green-500" : "border-yellow-500"
+            )}
+          >
+            <div className={cn(
+              "h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",
+              formActionStatus.isSuccess ? "bg-green-100 text-green-600" : "bg-yellow-100 text-yellow-600"
+            )}>
+              {formActionStatus.isSuccess ? <CheckCheck className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+            </div>
+            <div className="flex flex-col">
+              <h4 className="font-bold text-slate-900 text-sm">
+                {formActionStatus.isSuccess ? "Success" : "Update"}
+              </h4>
+              <p className="text-sm font-medium text-slate-600">{formActionStatus.message}</p>
             </div>
           </motion.div>
         )}

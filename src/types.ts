@@ -306,6 +306,7 @@ export interface CreatePersonDto {
 
 export interface UpdatePersonDto {
   id: number;
+  cameraIds: number[];
   updatePersonDetailsDto: UpdatePersonDetailsDto;
   updateUserDto: UpdateUserDto;
 }
@@ -314,6 +315,7 @@ export interface GetPersonDto {
   id: number;
   personId: string;
   disabled: boolean;
+  cameraIds: number[];
   getPersonDetailsDto: GetPersonDetailsDto;
   getUserDto: GetUserDto;
 }
@@ -386,6 +388,7 @@ export interface AppNamesDetailList {
   personIdNames: GenericNames[];
   contactCategoryIdNames: GenericIdNames[];
   actionIdNames: GenericIdNames[];
+  hardwareIdNames: GenericIdNames[];
   applianceType: GenericIdNames[];
   gender: GenericIdNames[];
   doorType: GenericIdNames[];

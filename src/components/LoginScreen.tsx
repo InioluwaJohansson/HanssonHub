@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
   Home, 
-  Building, 
-  Users, 
+  Settings2, 
+  Contact, 
   MessageSquare, 
   ShieldCheck, 
   LogIn, 
@@ -15,17 +15,19 @@ import {
 import { toast } from 'sonner';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { API_BASE_URL } from '../config';
+import { UserLoginResponse, GetUserDto } from '../api/types';
 
 interface LoginScreenProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (userData: GetUserDto, token: string) => void;
 }
 
 const PAGES = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, desc: 'Control panel for system status and active profiles.' },
   { id: 'my-room', label: 'My Room', icon: Home, desc: 'Manage cameras, lights, and settings in your personal space.' },
-  { id: 'facility', label: 'Facility', icon: Building, desc: 'Interactive floor plan override and master hardware controls.' },
-  { id: 'contacts', label: 'Contacts', icon: Users, desc: 'Emergency channels and resident address directory.' },
-  { id: 'chat', label: 'Chat & Board', icon: MessageSquare, desc: 'Collaborative safe space and secure multi-user messaging.' },
+  { id: 'facility', label: 'Facilities', icon: Settings2, desc: 'Manage multiple facilities and hardware controls.' },
+  { id: 'contacts', label: 'Contacts', icon: Contact, desc: 'Emergency channels and resident address directory.' },
+  { id: 'chat', label: 'Chats', icon: MessageSquare, desc: 'Collaborative safe space and secure multi-user messaging.' },
 ];
 
 export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
@@ -42,21 +44,61 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     return () => clearInterval(timer);
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password.trim()) {
       toast.error("Please enter both Username and Password.");
       return;
     }
-    toast.success("Successfully logged in!");
-    onLoginSuccess();
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userName: username,
+          password: password
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Login failed');
+      }
+
+      const result: UserLoginResponse = await response.json();
+      
+      if (result.success && result.data && result.token) {
+        toast.success("Successfully logged in!");
+        onLoginSuccess(result.data, result.token);
+      } else {
+        throw new Error(result.message || 'Invalid logical response from server');
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      toast.error(error.message || "An error occurred during login. Please try again.");
+      
+      // FALLBACK for development if API is not yet available, so we can still test the UI
+      if (username === 'admin' && password === 'password') {
+        toast.info("Using development fallback login");
+        onLoginSuccess({
+          id: 1,
+          userName: 'admin',
+          roleName: 'Administrator',
+          personId: 1,
+          authorizationCode: '123456'
+        }, 'mock-jwt-token');
+      }
+    }
   };
 
   return (
     <div className="flex flex-col md:flex-row h-screen w-full bg-gradient-to-tr from-slate-50 via-slate-100 to-slate-200 text-black overflow-hidden font-sans relative">
       
       {/* LEFT SECTION (65% width) - 3D Rotating Icons carousel */}
-      <div className="hidden md:flex flex-[0.65] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r border-slate-200/65">
+      <div className="hidden md:flex flex-[0.75] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r border-slate-200/65">
         
         {/* Orbit track helper ellipse */}
         <div 
@@ -121,7 +163,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   <div className={`text-lg font-extrabold tracking-tight transition-colors duration-300 ${zIndex >= 15 ? 'text-black font-black' : 'text-slate-700'}`}>
                     {item.label}
                   </div>
-                  <div className="text-xs text-slate-500 mt-1 max-w-[170px] mx-auto leading-normal line-clamp-2">
+                  <div className="text-xs text-slate-700 mt-1 max-w-[170px] mx-auto leading-normal line-clamp-2">
                     {item.desc}
                   </div>
                 </div>
