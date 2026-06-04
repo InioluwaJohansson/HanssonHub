@@ -18,6 +18,8 @@ import { Label } from './ui/label';
 import { API_BASE_URL } from '../config';
 import { UserLoginResponse, GetUserDto } from '../api/types';
 
+import api from '../api/client';
+
 interface LoginScreenProps {
   onLoginSuccess: (userData: GetUserDto, token: string) => void;
 }
@@ -52,45 +54,27 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
+      const url = `/User/Login?userName=${username}&password=${password}`;
+
+      const response = await api.get(url, {
         headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userName: username,
-          password: password
-        })
+          'accept': '*/*',
+        }
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Login failed');
-      }
-
-      const result: UserLoginResponse = await response.json();
+      const result = response.data;
+      console.log(response.data);
       
-      if (result.success && result.data && result.token) {
+      if (result.status) {
         toast.success("Successfully logged in!");
         onLoginSuccess(result.data, result.token);
       } else {
         throw new Error(result.message || 'Invalid logical response from server');
       }
-    } catch (error: any) {
+    } 
+    catch (error: any) {
       console.error('Login error:', error);
       toast.error(error.message || "An error occurred during login. Please try again.");
-      
-      // FALLBACK for development if API is not yet available, so we can still test the UI
-      if (username === 'admin' && password === 'password') {
-        toast.info("Using development fallback login");
-        onLoginSuccess({
-          id: 1,
-          userName: 'admin',
-          roleName: 'Administrator',
-          personId: 1,
-          authorizationCode: '123456'
-        }, 'mock-jwt-token');
-      }
     }
   };
 

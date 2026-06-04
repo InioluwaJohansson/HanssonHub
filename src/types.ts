@@ -272,8 +272,6 @@ export interface UpdatePersonDetailsDto {
   lastName: string;
   gender: Gender;
   imageUrl: File | string | null;
-  getContactDetailsDtos: GetContactDetailsDto[];
-  updateAddressDtos: UpdateAddressDto[];
 }
 
 export interface CreateUserDto {
@@ -294,7 +292,6 @@ export interface GetUserDto {
 export interface UpdateUserDto {
   id: number;
   userName: string;
-  password: string;
   role: Role;
 }
 
@@ -360,7 +357,16 @@ export interface ContactCategoriesResponseModel extends BaseResponse {
   data: GetContactCategoryDto[];
 }
 
-// Maintaining compatibility with the rest of the app by mapping types
+export interface GetTokenDto {
+  tokenCode: string;
+  expiryTime: string;
+  status: boolean;
+  message: string;
+}
+
+export interface GetTokenDtoResponse extends BaseResponse {
+  data: GetTokenDto;
+}
 export type Contact = GetContactDto;
 export type ContactCategory = GetContactCategoryDto;
 
@@ -886,6 +892,24 @@ export interface TypingDto {
   personId: number;
   name: string;
   isTyping: boolean;
+}
+
+export interface CameraNameUrl {
+  cameraName: string;
+  url: string;
+}
+
+export interface DashBoardResponseModel {
+  totalContacts: number;
+  rooms: GetRoomDto[];
+  actions: GetActionDto[];
+  cameraNamesUrls: CameraNameUrl[];
+  logs: GetLogDto[];
+  status: boolean;
+}
+
+export interface DashboardResponseModelWrapper extends BaseResponse {
+  data: DashBoardResponseModel;
 }
 
 export interface ReadReceiptDto {
