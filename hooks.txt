@@ -1,0 +1,197 @@
+268-);
+269-
+270-const TokenCountdown = ({ expiryTime }: { expiryTime: string }) => {
+271-  const [timeLeft, setTimeLeft] = React.useState<string>("");
+272-
+273:  React.useEffect(() => {
+274-    const calculateTime = () => {
+275-      const target = new Date(expiryTime).getTime();
+276-      const now = new Date().getTime();
+277-      const distance = target - now;
+278-      
+--
+416-  const [isViewLogOpen, setIsViewLogOpen] = React.useState<boolean>(false);
+417-  const loaderRef = React.useRef<HTMLDivElement>(null);
+418-  const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
+419-  const [globalFetching, setGlobalFetching] = React.useState(0);
+420-
+421:  React.useEffect(() => {
+422-    const handleStart = () => setGlobalFetching(prev => prev + 1);
+423-    const handleEnd = () => setGlobalFetching(prev => Math.max(0, prev - 1));
+424-
+425-    window.addEventListener('api-fetch-start', handleStart);
+426-    window.addEventListener('api-fetch-end', handleEnd);
+--
+435-  const fetchedViewsRef = React.useRef<Record<string, boolean>>({});
+436-  const [userDto, setUserDto] = React.useState<GetUserDto | null>(null);
+437-  const [userProfile, setUserProfile] = React.useState<UserProfile | null>(null);
+438-
+439-  // Load user from local storage on mount
+440:  React.useEffect(() => {
+441-    const token = localStorage.getItem('token');
+442-    const id = localStorage.getItem('userId');
+443-    const userName = localStorage.getItem('userName');
+444-    const roleName = localStorage.getItem('roleName');
+445-    const personIdStr = localStorage.getItem('personId');
+--
+508-    };
+509-    setLogs(prev => [newLog, ...prev]);
+510-  }, [userProfile]);
+511-
+512-  // Infinite scroll dynamic loader context
+513:  React.useEffect(() => {
+514-    if (activeView !== 'logs') return;
+515-    if (visibleLogsCount >= logs.length) return;
+516-
+517-    const observer = new IntersectionObserver((entries) => {
+518-      if (entries[0].isIntersecting && !isPagingLoading) {
+--
+629-    port: 80,
+630-    applianceType: 1
+631-  });
+632-
+633-  // Pre-select room/section when opening Add Device dialog
+634:  React.useEffect(() => {
+635-    if (isAddDeviceOpen) {
+636-      if (activeView.startsWith('room-')) {
+637-        const roomId = activeView.replace('room-', '');
+638-        const room = (rooms || []).find(r => r.id === roomId);
+639-        setNewDevice(prev => ({ ...prev, room: roomId, section: room?.section || '' }));
+--
+711-
+712-  const [dashboardData, setDashboardData] = React.useState<any>(null);
+713-  const [dashboardRotation, setDashboardRotation] = React.useState(0);
+714-
+715-  // Auto-rotate the dashboard carousel
+716:  React.useEffect(() => {
+717-    if (activeView !== 'dashboard') return;
+718-    const interval = setInterval(() => {
+719-      setDashboardRotation(prev => prev + 36);
+720-    }, 10000);
+721-    return () => clearInterval(interval);
+722-  }, [activeView]);
+723-
+724:  React.useEffect(() => {
+725-    if (!isLoggedIn) {
+726-      return;
+727-    }
+728-
+729-    // 1. Dashboard Page
+--
+1256-    if (inactivityTimerRef.current) {
+1257-      resetInactivityTimer();
+1258-    }
+1259-  }, [resetInactivityTimer]);
+1260-
+1261:  React.useEffect(() => {
+1262-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+1263-    
+1264-    events.forEach(event => {
+1265-      window.addEventListener(event, handleActivity, { passive: true });
+1266-    });
+--
+1305-  // Chat State
+1306-  const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
+1307-  const [isPreviewModalOpen, setIsPreviewModalOpen] = React.useState(false);
+1308-  const [previewMediaUrl, setPreviewMediaUrl] = React.useState("");
+1309-  const isChatModalOpenRef = React.useRef(isChatModalOpen);
+1310:  React.useEffect(() => {
+1311-    isChatModalOpenRef.current = isChatModalOpen;
+1312-  }, [isChatModalOpen]);
+1313-  const [chatPopups, setChatPopups] = React.useState<MessageDto[]>([]);
+1314-  const [formActionStatus, setFormActionStatus] = React.useState<{ message: string, isSuccess: boolean } | null>(null);
+1315-
+1316:  React.useEffect(() => {
+1317-    const handleClick = (e: MouseEvent) => {
+1318-      const target = e.target as HTMLElement;
+1319-      const btn = target.closest('button');
+1320-      if (!btn) return;
+1321-      
+--
+1391-  const [isGroupMode, setIsGroupMode] = React.useState(false);
+1392-  const [selectedParticipants, setSelectedParticipants] = React.useState<number[]>([]);
+1393-  const [newGroupName, setNewGroupName] = React.useState("");
+1394-  const [newGroupDescription, setNewGroupDescription] = React.useState("");
+1395-
+1396:  React.useEffect(() => {
+1397-    if (isRecording) {
+1398-      recordingTimerRef.current = setInterval(() => {
+1399-        setRecordingTime(prev => prev + 1);
+1400-      }, 1000);
+1401-    } else {
+--
+1403-      setRecordingTime(0);
+1404-    }
+1405-    return () => clearInterval(recordingTimerRef.current);
+1406-  }, [isRecording]);
+1407-
+1408:  React.useEffect(() => {
+1409-    let interval: any;
+1410-    if (playingAudioId) {
+1411-      interval = setInterval(() => {
+1412-        setPlayingProgress(prev => {
+1413-          const currentMsg = (chatMessages || []).find(m => m.id === playingAudioId);
+--
+1423-      setPlayingProgress(0);
+1424-    }
+1425-    return () => clearInterval(interval);
+1426-  }, [playingAudioId, chatMessages]);
+1427-
+1428:    React.useEffect(() => {
+1429-    if (!isLoggedIn) return;
+1430-
+1431-    let refs = {
+1432-      isChatModalOpen: isChatModalOpenRef.current,
+1433-      userProfileId: userProfile?.id,
+--
+1639-      document.exitFullscreen();
+1640-      setIsFullscreen(false);
+1641-    }
+1642-  };
+1643-
+1644:  React.useEffect(() => {
+1645-    const handleFullscreenChange = () => {
+1646-      setIsFullscreen(!!document.fullscreenElement);
+1647-    };
+1648-    document.addEventListener('fullscreenchange', handleFullscreenChange);
+1649-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+1650-  }, []);
+1651-
+1652-  // Playback Sync Logic
+1653:  React.useEffect(() => {
+1654-    const video = videoRef.current;
+1655-    if (!video || !isCameraModalOpen) return;
+1656-
+1657-    const handleTimeUpdate = () => {
+1658-      const progress = (video.currentTime / video.duration) * 100;
+--
+1673-      videoRef.current.currentTime = newTime;
+1674-      setCameraPlaybackOffset(value[0]);
+1675-    }
+1676-  };
+1677-
+1678:  React.useEffect(() => {
+1679-    const timer = setInterval(() => {
+1680-      setModalCurrentTime(new Date());
+1681-    }, 1000);
+1682-    return () => clearInterval(timer);
+1683-  }, []);
+1684-
+1685:  React.useEffect(() => {
+1686-    if (chatEndRef.current) {
+1687-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+1688-    }
+1689-  }, [chatMessages, isChatModalOpen]);
+1690-
+--
+2305-        toast.error(`Failed to add section: ${err.message}`);
+2306-      }
+2307-    });
+2308-  };
+2309-
+2310:  React.useEffect(() => {
+2311-    let timer: any;
+2312-
+2313-    const verifyAuth = async () => {
+2314-      // The user mentioned 1308 as an example, and length 6 in previous code.
+2315-      // We'll trigger it when it looks like a complete code (e.g. 4 or 6 chars)

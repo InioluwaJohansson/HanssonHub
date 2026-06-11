@@ -1,0 +1,204 @@
+347:      const mappedNewDevices = (fetchedData || []).map((item: any) => {
+672:    applianceIdNames: appliances.map(a => ({ id: a.id, name: a.applianceName })),
+673:    cameraIdNames: cameras.map(c => ({ id: c.id, name: c.cameraName })),
+674:    lightIdNames: lights.map(l => ({ id: l.id, name: l.lightName })),
+675:    windowIdNames: windows.map(w => ({ id: w.id, name: w.windowName })),
+676:    doorIdNames: doors.map(d => ({ id: d.id, name: d.doorName })),
+677:    externalIdNames: externals.map(e => ({ id: e.id, name: e.externalName })),
+678:    personIdNames: allUsers.map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
+679:    contactCategoryIdNames: contactCategories.map(c => ({ id: c.id, name: c.name })),
+680:    actionIdNames: actions.map(a => ({ id: a.id, name: a.actionName })),
+714:    roomIds: rooms.map(r => ({ id: r.id, name: r.name })),
+715:    sectionIds: sections.map(s => ({ id: s.id, name: s.name })),
+788:            setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+963:              setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+1021:              setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+1342:          text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 
+1459:    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionName: (data.actionName ?? data.ActionName), actionDescription: (data.description ?? data.Description) } : a)));
+1460:    hs.on("ActionActivationChanged", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionActive: (data.isActive ?? data.IsActive) } : a)));
+1464:        setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? { ...a, isActive: (data.isActive ?? data.IsActive) } : a));
+1467:        setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? { ...c, isActive: (data.isActive ?? data.IsActive) } : c));
+1470:        setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? { ...l, isActive: (data.isActive ?? data.IsActive), brightnessLevel: (data.brightnessLevel ?? data.BrightnessLevel) || l.brightnessLevel } : l));
+1473:        setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? { ...d, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : d));
+1476:        setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? { ...w, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : w));
+1480:    hs.on("ActionStepAdded", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
+1481:    hs.on("ActionStepUpdated", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
+1482:    hs.on("ActionStepDeleted", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, getActionStepDtos: a.getActionStepDtos.filter(s => s.id !== (data.actionStepId ?? data.ActionStepId)) } : a)));
+1486:    hs.on("ApplianceUpdated", (data) => setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? data : a)));
+1491:    hs.on("CameraUpdated", (data) => setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
+1503:    hs.on("ExternalsUpdated", (data) => setExternals(prev => prev.map(e => e.id === (data.id ?? data.Id) ? data : e)));
+1508:    hs.on("LightUpdated", (data) => setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? data : l)));
+1516:    hs.on("RoomUpdated", (data) => setRooms(prev => prev.map(r => r.id === (data.id ?? data.Id) ? data : r)));
+1521:    hs.on("DoorUpdated", (data) => setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? data : d)));
+1525:    hs.on("WindowUpdated", (data) => setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? data : w)));
+1529:    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => h.id === (data.id ?? data.Id) ? data : h)));
+1533:    hs.on("SectionUpdated", (data) => setSections(prev => prev.map(s => s.id === (data.id ?? data.Id) ? data : s)));
+1543:    hs.on("ContactCategoryUpdated", (data) => setContactCategories(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
+1551:         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? data : u));
+1554:         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? { ...u, disabled: data.disabled } : u));
+1721:    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
+1744:    const uploadPromises = uploadPreviewFiles.map(file => {
+1785:      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
+1849:      ...selectedParticipants.map(id => {
+1895:      ...selectedParticipants.map(id => {
+1907:    setChats(prev => prev.map(chat => 
+1943:      setDevices(prev => prev.map(d => {
+2028:        setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
+2054:          setContacts(prev => prev.map(c => c.getContactCategoryDto.id === id ? { ...c, getContactCategoryDto: otherCat } : c));
+2106:          setContacts(prev => prev.map(c => c.id === editingContactId ? {
+2112:            contactDetails: newContact.contactDetails.map((d, i) => ({
+2118:            address: newContact.address.map((a, i) => ({
+2153:            contactDetails: newContact.contactDetails.map(d => ({
+2159:            address: newContact.address.map(a => ({
+2182:              contactDetails: (res.data.contactDetails || []).map((d: any, idx: number) => ({
+2189:              address: (res.data.address || []).map((a: any, idx: number) => ({
+2213:              contactDetails: newContact.contactDetails.map((d, i) => ({
+2220:              address: newContact.address.map((a, i) => ({
+2257:        ? contact.contactDetails.map(d => ({ ...d })) 
+2260:        ? contact.address.map(a => ({ ...a })) 
+2395:      setDevices(prev => prev.map(d => {
+2415:    setDevices(prev => prev.map(d => 
+2421:    setDevices(prev => prev.map(d => 
+2580:          setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...editingDevice } as Device : d));
+2582:            setCameras(prev => prev.map(c => c.id.toString() === editingDevice.id!.toString() ? {
+2590:            setAppliances(prev => prev.map(a => a.id.toString() === editingDevice.id!.toString() ? {
+2601:            setWindows(prev => prev.map(w => w.id.toString() === editingDevice.id!.toString() ? {
+2609:            setLights(prev => prev.map(l => l.id.toString() === editingDevice.id!.toString() ? {
+2646:          setRooms((prev: any) => prev.map((r: any) => r.id === editingRoom.id ? { ...r, ...editingRoom } as Room : r));
+2675:    setDevices(prev => prev.map(device => {
+3095:                {DASHBOARD_FACILITIES.map((item, idx) => {
+3192:                (dashboardData?.cameraNamesUrls || externalCameras || []).map((cam: any) => {
+3225:                  actions.slice(0, 4).map(action => (
+3255:                  logs.slice(0, 3).map(log => (
+3308:            {facilityCategories.map(cat => {
+3513:              {displayedLogs.length > 0 ? displayedLogs.map(log => {
+3708:                  {contactCategories.map(cat => {
+3763:                    contacts.slice(0, 4).map(contact => (
+3809:                      {contactCategories.map(cat => (
+3822:                  filteredContacts.map(contact => (
+3847:                          {contact.contactDetails.map((d, idx) => (
+3859:                          {contact.address.map((a, idx) => (
+4000:                              body: JSON.stringify(newAddresses.map(a => ({
+4050:                    {(userProfile.getPersonDetailsDto.getAddressDtos || []).map((addr, idx) => (
+4206:                              body: JSON.stringify(newContacts.map(c => ({
+4252:                    {(userProfile.getPersonDetailsDto.getContactDetailsDtos || []).map((contact, idx) => (
+4321:                    {(appNamesDetailList?.cameraIdNames || []).map(camera => (
+4514:                .map(person => {
+4608:              {filteredUserRooms.map(room => {
+4777:                    {doors.map(device => (
+4799:                    {windows.map(device => (
+4821:                    {appliances.map(device => (
+4843:                    {roomExternals.map(ext => (
+4873:                    {lights.map(device => (
+4897:                {cameras.map(device => (
+4971:            {rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
+5071:              filteredActions.map(action => (
+5094:                          setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: !a.actionActive } : a));
+5218:              filteredHardwares.map(hw => {
+5378:              filteredExternals.map(ext => (
+5398:                            setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
+5428:                        ext.actionIds.map(aid => {
+5507:              sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
+5542:                          {sectionRooms.map(room => (
+5563:                          {sectionDevices.filter(d => !d.room).map(device => (
+5615:              rooms.map(room => {
+5833:            filteredDevices.map(device => (
+6037:                    {(appNamesDetailList?.applianceType || []).map(t => (
+6161:                  {sections.map(section => (
+6181:                  {rooms.filter(r => !newDevice.section || r.section === newDevice.section).map(room => (
+6249:                  {allUsers.map(u => (
+6281:                  {sections.map(section => (
+6398:                    setSections((prev: any) => prev.map((s: any) => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden } : s));
+6598:                      setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { 
+6626:                      setAllUsers(prev => prev.map(u => u.getUserDto.id === pendingUserAction.userId ? {
+6802:                  {(appNamesDetailList?.role || []).map(r => (
+6823:                  setAllUsers(prev => prev.map(u => u.getUserDto.id === updateUserRoleData.id ? {
+6888:                        setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
+6965:                    {(viewingPerson?.getPersonDetailsDto?.getContactDetailsDtos || []).map((c, i) => (
+6983:                    {(viewingPerson?.getPersonDetailsDto?.getAddressDtos || []).map((a, i) => (
+7034:                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
+7094:                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
+7207:                    {(appNamesDetailList?.contactCategoryIdNames || []).map(cat => (
+7230:                {newContact.contactDetails.map((detail, idx) => (
+7307:                {newContact.address.map((addr, idx) => (
+7534:                  {[0, 1, 2, 3, 4, 5].map((index) => (
+7575:                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+7755:                      {appNamesDetailList.applianceType.map(t => (
+7808:                    {(rooms || []).map(r => (
+7827:                    {sections.map(s => (
+8030:                    {sections.map(s => (
+8072:                    {(allUsers || []).map(u => (
+8183:                      {(viewingContact?.contactDetails || []).map((d, i) => (
+8201:                      {(viewingContact?.address || []).map((a, i) => (
+8336:                        {selectedHardware.applianceIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8347:                        {selectedHardware.cameraIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8358:                        {selectedHardware.lightIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8369:                        {selectedHardware.doorIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8380:                        {selectedHardware.windowIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8391:                        {selectedHardware.externalIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+8518:                  {(appliances || []).map(dev => {
+8545:                  {(cameras || []).map(dev => {
+8572:                  {(lights || []).map(dev => {
+8599:                  {(windows || []).map(dev => {
+8626:                  {(doors || []).map(dev => {
+8653:                  {(externals || []).map(ext => {
+8691:                  lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
+8692:                  applianceIds: (hardwareForm.applianceIdNames || []).map(x => x.id),
+8693:                  cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
+8694:                  windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
+8695:                  doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
+8696:                  externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
+8718:                setHardwares(prev => prev.map(item => item.id === updateDto.id ? {
+8784:                    {(sections || []).map(section => (
+8804:                    {(rooms || []).map(room => (
+8817:                {(actions || []).map((s) => {
+8852:                    actionIds: (externalForm.actionIds || []).map(Number)
+9003:                      selectedExternal.actionIds.map(aid => {
+9074:                    {(sections || []).map(section => (
+9094:                    {(rooms || []).map(room => (
+9107:                {(actions || []).map((s) => {
+9145:                    actionIds: (externalForm.actionIds || []).map(Number)
+9151:                  setExternals(prev => prev.map(item => item.id === externalForm.id ? {
+9450:                              {recordingsList.map((recording, idx) => {
+9501:                                            setCameras(prev => prev.map(c => {
+10244:                {(selectedAction?.getActionStepDtos || []).map((step, idx) => (
+10324:                                setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+10505:                      setActions(prev => prev.map(a => a.id === selectedAction.id ? {
+10553:                    {(appNamesDetailList?.facilityType || []).map(ft => (
+10572:                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+10573:                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+10574:                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+10575:                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+10576:                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+10577:                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+10670:                        id: (res && res.data && res.data[0] && res.data[0].id) ? res.data[0].id : Math.max(0, ...(selectedAction?.getActionStepDtos || []).map(s => s.id)) + 1,
+10681:                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+10723:                    {(appNamesDetailList?.facilityType || []).map(ft => (
+10742:                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+10743:                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+10744:                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+10745:                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+10746:                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+10747:                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+10849:                      const updatedSteps = (selectedAction?.getActionStepDtos || []).map(s => s.id === updatedStep.id ? updatedStep : s);
+10851:                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+10892:                    {allUsers.filter(u => u.id !== userProfile.id).map(user => (
+10962:                {chats.map((chat) => {
+11073:                              setSelectedParticipants(chat.participants.map(p => p.personId).filter(id => id !== userProfile.id));
+11152:                              {currentMessages.map((msg, idx) => {
+11252:                                              {msg.attachments.map((att, idx) => (
+11274:                                            {msg.attachments.map((att, idx) => (
+11352:                                {['😀', '😂', '😍', '👍', '🙏', '🔥', '✨', '💯', '🏠', '🔑', '🚨', '🛠️'].map(emoji => (
+11404:                               {Array.from({length: 16}).map((_, i) => (
+11545:                      {allUsers.filter(u => u.id !== userProfile.id).slice(0, 4).map(user => (
+11659:              {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+11810:                {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+11926:                   {uploadPreviewFiles.map((file, idx) => {
+12050:                      {allUsers.map((u) => (
+12068:                      {appNamesDetailList?.hardwareIdNames?.map((h) => (
+12098:                {fingerprintImages.map((img, idx) => (
+12128:                  images: fingerprintImages.map(img => img.split(',')[1]) // Send base64 data (bytes)
+12209:                    {allUsers.map((u) => (
+12227:                    {appNamesDetailList?.hardwareIdNames?.map((h) => (
+12256:          {chatPopups.map((popup) => {
+12297:              {userProfile.cameraIds?.map((camId, i) => {

@@ -1,0 +1,88 @@
+83:import { apiFetch } from './api/client';
+733:        apiFetch('/Dashboard/GetAppNamesIdList', { method: 'POST' })
+759:      apiFetch(`/Person/GetPersonById?id=${storedPersonId}`, { method: 'POST', body: '' })
+775:      apiFetch('/External/GetAllExternals', { method: 'POST' })
+779:      apiFetch('/Room/GetAllRooms', { method: 'POST' })
+789:      apiFetch('/Section/GetAllSections', { method: 'POST' })
+793:      apiFetch('/Appliance/GetAllAppliances', { method: 'POST' })
+805:      apiFetch('/Light/GetAllLights', { method: 'POST' })
+817:      apiFetch('/Camera/GetAllCameras', { method: 'POST' })
+829:      apiFetch('/Door/GetAllDoors', { method: 'POST' })
+841:      apiFetch('/Window/GetAllWindows', { method: 'POST' })
+853:      apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+862:        apiFetch('/Person/GetAllPersons', { method: 'POST' })
+872:        apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+882:        apiFetch('/Camera/GetAllCameras', { method: 'POST' })
+900:        apiFetch('/Window/GetAllWindows', { method: 'POST' })
+918:        apiFetch('/Door/GetAllDoors', { method: 'POST' })
+936:        apiFetch('/Light/GetAllLights', { method: 'POST' })
+954:        apiFetch('/Room/GetAllRooms', { method: 'POST' })
+970:        apiFetch('/Section/GetAllSections', { method: 'POST' })
+980:        apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+984:        apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+994:        apiFetch('/Appliance/GetAllAppliances', { method: 'POST' })
+1012:        apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' })
+1027:      apiFetch(`/Person/GetPersonById?id=${storedPersonId}`, { method: 'POST', body: '' })
+1048:        apiFetch('/External/GetAllExternals', { method: 'POST', body: '' })
+1078:        apiFetch(`/Log/GetAllLogsByDate?startDate=${startStr}&endDate=${endStr}&page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
+1091:        apiFetch(`/Log/GetAllLogs?page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
+1109:        apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+1927:            await apiFetch(`/Door/LockDoor?id=${door.id}`, { method: 'PUT' });
+1929:            await apiFetch(`/Door/UnlockDoor?id=${door.id}`, { method: 'PUT' });
+1970:      await apiFetch('/Person/UpdatePerson', {
+1985:        const response: any = await apiFetch('/ContactCategory/CreateContactCategory', {
+2018:        await apiFetch('/ContactCategory/UpdateContactCategory', {
+2042:        await apiFetch(`/ContactCategory/DeleteContactCategory?contactCategoryId=${id}`, {
+2081:            await apiFetch(`/Contact/AddContactDetails?contactId=${editingContactId}`, { method: 'PUT', body: formData });
+2097:            await apiFetch(`/Contact/AddContactAddress?contactId=${editingContactId}`, { method: 'PUT', body: formData });
+2164:          const res: any = await apiFetch('/Contact/CreateContact', {
+2265:          await apiFetch(`/Contact/DeleteContact?contactId=${contactToDelete.id}`, { method: 'PUT' });
+2285:        const response: any = await apiFetch(`/Section/CreateSection?${urlParams.toString()}`, {
+2320:          const response: any = await apiFetch(`/User/VerifyAuthCode?authCode=${authCode}`, {
+2380:            await apiFetch(`/Door/UnlockDoor?id=${d.id}`, { method: 'PUT' });
+2382:            await apiFetch(`/Door/LockDoor?id=${d.id}`, { method: 'PUT' });
+2427:          await apiFetch(`/Camera/DeleteCamera?cameraId=${id}`, { method: 'PUT' });
+2429:          await apiFetch(`/Appliance/DeleteAppliance?applianceId=${id}`, { method: 'PUT' });
+2431:          await apiFetch(`/Window/DeleteWindow?windowId=${id}`, { method: 'PUT' });
+2433:          await apiFetch(`/Light/DeleteLight?lightId=${id}`, { method: 'PUT' });
+2498:            await apiFetch('/Camera/UpdateCamera', {
+2510:            await apiFetch('/Appliance/UpdateAppliance', {
+2523:            await apiFetch('/Window/UpdateWindow', {
+2539:            await apiFetch('/Door/UpdateDoor', {
+2556:            await apiFetch('/Light/UpdateLight', {
+2631:          await apiFetch('/Room/UpdateRoom', {
+2657:        await apiFetch(`/Room/DeleteRoom?roomId=${id}`, { method: 'PUT' });
+2711:          const res: any = await apiFetch('/Camera/CreateCamera', {
+2728:          const res: any = await apiFetch('/Appliance/CreateAppliance', {
+2749:          const res: any = await apiFetch('/Door/CreateDoor', {
+2770:        const res: any = await apiFetch('/Window/CreateWindow', {
+2786:        const res: any = await apiFetch('/Light/CreateLight', {
+2836:        const response: any = await apiFetch('/Room/CreateRoom', {
+3994:                            await apiFetch('/Person/AddPersonAddress', {
+4054:                              apiFetch(`/Person/DeletePersonContactAddress?personProfileAddressId=${addr.id}`, { method: 'PUT' }).catch(console.error);
+4200:                            await apiFetch('/Person/AddPersonDetails', {
+4256:                              apiFetch(`/Person/DeletePersonContactDetails?personProfileDetailId=${contact.id}`, { method: 'PUT' }).catch(console.error);
+4475:                      const res: any = await apiFetch('/User/GenerateToken', { method: 'POST' });
+6393:                    await apiFetch(`/Section/UpdateSection?${urlParams.toString()}`, { method: 'PUT' });
+6480:                await apiFetch('/User/ChangePassword', {
+6589:                      await apiFetch('/Person/DeletePerson', { method: 'PUT', body: JSON.stringify(authPayload) });
+6593:                      await apiFetch('/Person/DisablePerson', { method: 'PUT', body: JSON.stringify(authPayload) });
+6614:                      await apiFetch('/User/UpdateUserRole', {
+6638:                    await apiFetch('/User/ChangeAuthorizationCode', {
+6755:                const response: any = await apiFetch('/Person/CreatePerson', {
+6811:                  await apiFetch('/User/UpdateUserRole', {
+7237:                              await apiFetch(`/Contact/DeleteContactDetails?contactId=${editingContactId}&contactDetailId=${detailId}`, { method: 'PUT' });
+7314:                              await apiFetch(`/Contact/DeleteContactAddress?contactId=${editingContactId}&contactAddressId=${addrId}`, { method: 'PUT' });
+8409:                  const res: any = await apiFetch('/Hardware/CreateHardware', {
+8672:                  await apiFetch('/Hardware/UpdateHardware', {
+8679:                    await apiFetch('/Hardware/UpdateHardware', {
+8826:                  const res: any = await apiFetch('/External/CreateExternal', {
+8897:                    await apiFetch(`/External/DeleteExternal?externalId=${selectedExternal.id}`, { method: 'PUT' });
+9119:                  await apiFetch('/External/UpdateExternal', {
+9910:                      await apiFetch(`/Section/DeleteSection?sectionId=${viewingSection.id}`, { method: 'PUT' });
+10152:                    await apiFetch(`/Action/DeleteAction?actionId=${selectedAction.id}`, { method: 'PUT' });
+10293:                                await apiFetch(`/Action/DeleteActionStep?actionId=${selectedAction.id}&actionStepId=${step.id}`, { method: 'PUT', body: '' });
+10396:                    const res: any = await apiFetch(`/Action/CreateAction?ActionName=${encodeURIComponent(actionForm.actionName)}&Description=${encodeURIComponent(actionForm.description || '')}`, { method: 'POST', body: '' });
+10476:                      await apiFetch(`/Action/UpdateAction?Id=${selectedAction.id}&ActionName=${encodeURIComponent(actionForm.actionName)}&Description=${encodeURIComponent(actionForm.description || '')}`, { method: 'PUT', body: '' });
+10636:                      const res: any = await apiFetch(`/Action/CreateActionStep`, { 
+10807:                      await apiFetch(`/Action/UpdateActionStep`, { 

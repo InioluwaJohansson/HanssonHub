@@ -213,10 +213,12 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import PullToRefresh from 'react-simple-pull-to-refresh';
 import { cn } from '@/lib/utils';
 import { LoginScreen } from './components/LoginScreen';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
+import { initSignalR } from './lib/signalR';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -347,7 +349,7 @@ export default function App() {
         if (type === 'appliance') {
           return {
             id: item.id.toString(),
-            name: item.applianceName,
+            name: item.applianceName || item.name || "Unknown Appliance",
             type: 'appliance',
             status: item.isActive ? 'on' : 'off',
             room: item.roomId ? item.roomId.toString() : '',
@@ -358,7 +360,7 @@ export default function App() {
         if (type === 'light') {
           return {
             id: item.id.toString(),
-            name: item.lightName,
+            name: item.lightName || item.name || "Unknown Light",
             type: 'light',
             status: item.isActive ? 'on' : 'off',
             value: item.brightnessLevel || 0,
@@ -369,7 +371,7 @@ export default function App() {
         if (type === 'camera') {
           return {
             id: item.id.toString(),
-            name: item.cameraName,
+            name: item.cameraName || item.name || "Unknown Camera",
             type: 'camera',
             status: item.isActive ? 'active' : 'inactive',
             room: item.roomId ? item.roomId.toString() : '',
@@ -384,7 +386,7 @@ export default function App() {
           
           return {
             id: item.id.toString(),
-            name: item.doorName,
+            name: item.doorName || item.name || "Unknown Door",
             type: 'door',
             status: doorStatus,
             room: item.roomId ? item.roomId.toString() : '',
@@ -395,7 +397,7 @@ export default function App() {
         if (type === 'window') {
           return {
             id: item.id.toString(),
-            name: item.windowName,
+            name: item.windowName || item.name || "Unknown Window",
             type: 'window',
             status: item.isLocked ? 'locked' : item.isOpen ? 'open' : 'closed',
             room: item.roomId ? item.roomId.toString() : '',
@@ -435,23 +437,12 @@ export default function App() {
   const [userDto, setUserDto] = React.useState<GetUserDto | null>(null);
   const [userProfile, setUserProfile] = React.useState<UserProfile | null>(null);
 
-  // Load user from local storage on mount
+  // Auto-login removed as requested to ensure no requests run before explicit login success
   React.useEffect(() => {
+    // We only clear out bad session state here, requiring explicit login
     const token = localStorage.getItem('token');
-    const id = localStorage.getItem('userId');
-    const userName = localStorage.getItem('userName');
-    const roleName = localStorage.getItem('roleName');
-    const personIdStr = localStorage.getItem('personId');
-
-    if (token && id && userName && roleName) {
-      setIsLoggedIn(true);
-      setUserDto({
-        id: parseInt(id),
-        userName,
-        roleName,
-        personId: personIdStr ? parseInt(personIdStr) : 1,
-        authorizationCode: ''
-      });
+    if (!token || token === "undefined" || token === "null") {
+       localStorage.clear();
     }
   }, []);
 
@@ -482,6 +473,23 @@ export default function App() {
       }
     }});
   };
+
+  React.useEffect(() => {
+    const handleAuthExpired = () => {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('userName');
+      localStorage.removeItem('roleName');
+      localStorage.removeItem('personId');
+      fetchedViewsRef.current = {};
+      setIsLoggedIn(false);
+      setUserDto(null);
+      setUserProfile(null);
+      toast.error("Session expired. Please log in again.");
+    };
+    window.addEventListener('auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('auth-expired', handleAuthExpired);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -634,7 +642,7 @@ export default function App() {
     if (isAddDeviceOpen) {
       if (activeView.startsWith('room-')) {
         const roomId = activeView.replace('room-', '');
-        const room = rooms.find(r => r.id === roomId);
+        const room = (rooms || []).find(r => r.id.toString() === roomId.toString());
         setNewDevice(prev => ({ ...prev, room: roomId, section: room?.section || '' }));
       } else if (activeView === 'user-room') {
         setNewDevice(prev => ({ ...prev, room: 'bedroom', section: 'indoor' }));
@@ -662,15 +670,15 @@ export default function App() {
   });
 
   const [appNamesDetailList, setAppNamesDetailList] = React.useState<any>({
-    applianceIdNames: appliances.map(a => ({ id: a.id, name: a.applianceName })),
-    cameraIdNames: cameras.map(c => ({ id: c.id, name: c.cameraName })),
-    lightIdNames: lights.map(l => ({ id: l.id, name: l.lightName })),
-    windowIdNames: windows.map(w => ({ id: w.id, name: w.windowName })),
-    doorIdNames: doors.map(d => ({ id: d.id, name: d.doorName })),
-    externalIdNames: externals.map(e => ({ id: e.id, name: e.externalName })),
-    personIdNames: allUsers.map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
-    contactCategoryIdNames: contactCategories.map(c => ({ id: c.id, name: c.name })),
-    actionIdNames: actions.map(a => ({ id: a.id, name: a.actionName })),
+    applianceIdNames: (appliances || []).map(a => ({ id: a.id, name: a.applianceName })),
+    cameraIdNames: (cameras || []).map(c => ({ id: c.id, name: c.cameraName })),
+    lightIdNames: (lights || []).map(l => ({ id: l.id, name: l.lightName })),
+    windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
+    doorIdNames: (doors || []).map(d => ({ id: d.id, name: d.doorName })),
+    externalIdNames: (externals || []).map(e => ({ id: e.id, name: e.externalName })),
+    personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
+    contactCategoryIdNames: (contactCategories || []).map(c => ({ id: c.id, name: c.name })),
+    actionIdNames: (actions || []).map(a => ({ id: a.id, name: a.actionName })),
     applianceType: [
       { id: 1, name: 'TV' },
       { id: 2, name: 'Fridge' },
@@ -704,8 +712,8 @@ export default function App() {
       { id: 6, name: 'Relative' },
       { id: 7, name: 'Visitor' }
     ],
-    roomIds: rooms.map(r => ({ id: r.id, name: r.name })),
-    sectionIds: sections.map(s => ({ id: s.id, name: s.name })),
+    roomIds: (rooms || []).map(r => ({ id: r.id, name: r.name })),
+    sectionIds: (sections || []).map(s => ({ id: s.id, name: s.name })),
   });
 
   const [dashboardData, setDashboardData] = React.useState<any>(null);
@@ -731,12 +739,12 @@ export default function App() {
         fetchedViewsRef.current['dashboard'] = true;
         apiFetch('/Dashboard/GetAppNamesIdList', { method: 'POST' })
           .then((data: any) => {
-            if (data && data.data) {
+            if (data && (data.data ?? data.Data)) {
                setAppNamesDetailList((prev: any) => {
                  const next = { ...prev };
-                 Object.keys(data.data).forEach(key => {
-                   if (data.data[key] !== null && data.data[key] !== undefined) {
-                     next[key] = data.data[key];
+                 Object.keys((data.data ?? data.Data)).forEach(key => {
+                   if ((data.data ?? data.Data)[key] !== null && (data.data ?? data.Data)[key] !== undefined) {
+                     next[key] = (data.data ?? data.Data)[key];
                    }
                  });
                  return next;
@@ -763,7 +771,7 @@ export default function App() {
               return {
                 ...p,
                 ...res.data,
-                id: res.data.id || parseInt(storedPersonId),
+                id: (res.data.id ?? res.data.Id) || parseInt(storedPersonId),
                 personId: res.data.personId || parseInt(storedPersonId)
               };
             });
@@ -1031,7 +1039,7 @@ export default function App() {
               return {
                 ...p,
                 ...res.data,
-                id: res.data.id || parseInt(storedPersonId),
+                id: (res.data.id ?? res.data.Id) || parseInt(storedPersonId),
                 personId: res.data.personId || parseInt(storedPersonId)
               };
             });
@@ -1226,6 +1234,7 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
   const [authCode, setAuthCode] = React.useState('');
   const [authError, setAuthError] = React.useState(false);
+  const [authSuccess, setAuthSuccess] = React.useState(false);
   const [onAuthSuccess, setOnAuthSuccess] = React.useState<(() => void) | null>(null);
 
   // Camera Modal
@@ -1409,7 +1418,7 @@ export default function App() {
     if (playingAudioId) {
       interval = setInterval(() => {
         setPlayingProgress(prev => {
-          const currentMsg = chatMessages.find(m => m.id === playingAudioId);
+          const currentMsg = (chatMessages || []).find(m => m.id === playingAudioId);
           const duration = currentMsg?.duration || 10; // Fallback
           if (prev >= duration) {
             setPlayingAudioId(null);
@@ -1424,35 +1433,206 @@ export default function App() {
     return () => clearInterval(interval);
   }, [playingAudioId, chatMessages]);
 
-  React.useEffect(() => {
-    socketRef.current = io();
+    React.useEffect(() => {
+    if (!isLoggedIn) return;
 
-    socketRef.current.on("chat:history", (history: any[]) => {
-      setChatMessages(history);
+    let refs = {
+      isChatModalOpen: isChatModalOpenRef.current,
+      userProfileId: userProfile?.id,
+    };
+    
+    const { homeSecurityConnection, chatConnection } = initSignalR();
+
+    if (homeSecurityConnection!.state === "Disconnected") {
+      homeSecurityConnection!.start().catch(err => console.error("SignalR Connection Error: ", err));
+    }
+    if (chatConnection!.state === "Disconnected") {
+      chatConnection!.start().catch(err => console.error("Chat SignalR Connection Error: ", err));
+    }
+
+    const hsWrapper = homeSecurityConnection!;
+    const hs = {
+      on: (event, callback) => hsWrapper.on(event, (data) => { console.log('SignalR Event:', event, data); callback(data); }),
+      off: (event) => hsWrapper.off(event)
+    };
+    
+    // Action Events
+    hs.on("ActionCreated", (data) => setActions(prev => [...prev, { id: (data.actionId ?? data.ActionId), actionName: (data.actionName ?? data.ActionName), actionDescription: (data.description ?? data.Description), actionActive: false, actionId: '', getActionStepDtos: [] }]));
+    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionName: (data.actionName ?? data.ActionName), actionDescription: (data.description ?? data.Description) } : a)));
+    hs.on("ActionActivationChanged", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionActive: (data.isActive ?? data.IsActive) } : a)));
+    hs.on("ActionDeleted", (data) => setActions(prev => prev.filter(a => a.id !== (data.actionId ?? data.ActionId))));
+    
+    hs.on("ApplianceTriggered", (data) => {
+        setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? { ...a, isActive: (data.isActive ?? data.IsActive) } : a));
+    });
+    hs.on("CameraTriggered", (data) => {
+        setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? { ...c, isActive: (data.isActive ?? data.IsActive) } : c));
+    });
+    hs.on("LightTriggered", (data) => {
+        setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? { ...l, isActive: (data.isActive ?? data.IsActive), brightnessLevel: (data.brightnessLevel ?? data.BrightnessLevel) || l.brightnessLevel } : l));
+    });
+    hs.on("DoorTriggered", (data) => {
+        setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? { ...d, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : d));
+    });
+    hs.on("WindowTriggered", (data) => {
+        setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? { ...w, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : w));
+    });
+    
+    hs.on("ActionTriggered", (data) => console.log("ActionTriggered", data));
+    hs.on("ActionStepAdded", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
+    hs.on("ActionStepUpdated", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
+    hs.on("ActionStepDeleted", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, getActionStepDtos: a.getActionStepDtos.filter(s => s.id !== (data.actionStepId ?? data.ActionStepId)) } : a)));
+
+    // Appliance Events
+    hs.on("ApplianceCreated", (data) => setAppliances(prev => [...prev, data]));
+    hs.on("ApplianceUpdated", (data) => setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? data : a)));
+    hs.on("ApplianceDeleted", (data) => setAppliances(prev => prev.filter(a => a.id !== (data.id ?? data.Id))));
+
+    // Camera Events
+    hs.on("CameraCreated", (data) => setCameras(prev => [...prev, data]));
+    hs.on("CameraUpdated", (data) => setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
+    hs.on("CameraDeleted", (data) => setCameras(prev => prev.filter(c => c.id !== (data.id ?? data.Id))));
+
+    // FingerPrint Event
+    hs.on("fingerprint_received", (data) => {
+        console.log("Fingerprint received", data);
+        toast.info(data.message || "Fingerprint data received");
+        setFingerprintImages(prev => [...prev, data.fingerPrintEncoding]);
     });
 
-    socketRef.current.on("chat:message", (msg: any) => {
+    // External Events
+    hs.on("ExternalsCreated", (data) => setExternals(prev => [...prev, data]));
+    hs.on("ExternalsUpdated", (data) => setExternals(prev => prev.map(e => e.id === (data.id ?? data.Id) ? data : e)));
+    hs.on("ExternalsDeleted", (data) => setExternals(prev => prev.filter(e => e.id === (data.id ?? data.Id)))); // Fix? the data only has Id for deleted usually.. filter if logic doesn't match
+
+    // Light Events
+    hs.on("LightCreated", (data) => setLights(prev => [...prev, data]));
+    hs.on("LightUpdated", (data) => setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? data : l)));
+    hs.on("LightDeleted", (data) => setLights(prev => prev.filter(l => l.id !== (data.id ?? data.Id)))); // wait if payload is just { id } or { light: { id }}
+
+    // Logs Event
+    hs.on("LogCreated", (data) => setLogs(prev => [data, ...prev]));
+
+    // Room
+    hs.on("RoomCreated", (data) => setRooms(prev => [...prev, data]));
+    hs.on("RoomUpdated", (data) => setRooms(prev => prev.map(r => r.id === (data.id ?? data.Id) ? data : r)));
+    hs.on("RoomDeleted", (id) => setRooms(prev => prev.filter(r => r.id !== id)));
+
+    // Door
+    hs.on("DoorCreated", (data) => setDoors(prev => [...prev, data]));
+    hs.on("DoorUpdated", (data) => setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? data : d)));
+
+    // Window
+    hs.on("WindowCreated", (data) => setWindows(prev => [...prev, data]));
+    hs.on("WindowUpdated", (data) => setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? data : w)));
+
+    // Hardware
+    hs.on("HardwareCreated", (data) => setHardwares(prev => [...prev, data]));
+    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => h.id === (data.id ?? data.Id) ? data : h)));
+
+    // Section
+    hs.on("SectionCreated", (data) => setSections(prev => [...prev, data]));
+    hs.on("SectionUpdated", (data) => setSections(prev => prev.map(s => s.id === (data.id ?? data.Id) ? data : s)));
+    hs.on("SectionDeleted", (data) => setSections(prev => prev.filter(s => s.id !== (data.id ?? data.Id)))); // payload is { id } it seems
+
+    // AppNamesDetails
+    hs.on("GetAppNamesDetails", (data) => {
+         setAppNamesDetailList(data);
+    });
+
+    // ContactCategory
+    hs.on("ContactCategoryCreated", (data) => setContactCategories(prev => [...prev, data]));
+    hs.on("ContactCategoryUpdated", (data) => setContactCategories(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
+    hs.on("ContactCategoryDeleted", (data) => setContactCategories(prev => prev.filter(c => c.id !== (data.id ?? data.Id))));
+
+    // Person
+    hs.on("PersonCreated", (data) => {
+         setAllUsers(prev => [...prev, data]);
+    });
+    hs.on("PersonUpdated", (data) => {
+         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? data : u));
+    });
+    hs.on("PersonStatusChanged", (data) => {
+         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? { ...u, disabled: data.disabled } : u));
+    });
+
+
+    // Chat Events via chatConnection
+    const csWrapper = chatConnection!;
+    const cs = {
+      on: (event, callback) => csWrapper.on(event, (data) => { console.log('SignalR Chat Event:', event, data); callback(data); }),
+      off: (event) => csWrapper.off(event)
+    };
+    cs.on("chat:history", (history) => setChatMessages(history));
+    cs.on("chat:message", (msg) => {
       setChatMessages(prev => {
-        if (prev.some(m => m.id === msg.id)) return prev;
+        if (prev.some(m => m.id === (msg.id ?? msg.Id))) return prev;
         
-        if (!isChatModalOpenRef.current && msg.senderId !== userProfile.id) {
+        if (!refs.isChatModalOpen && (msg.senderId ?? msg.SenderId) !== refs.userProfileId) {
           setChatPopups(p => {
-             if (p.some(p => p.id === msg.id)) return p;
+             if (p.some(m => m.id === (msg.id ?? msg.Id))) return p;
              return [...p, msg];
           });
           setTimeout(() => {
-            setChatPopups(p => p.filter(x => x.id !== msg.id));
+            setChatPopups(p => p.filter(x => x.id !== (msg.id ?? msg.Id)));
           }, 5000);
         }
-        
         return [...prev, msg];
       });
     });
 
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
+       hs.off("ActionCreated");
+       hs.off("ActionUpdated");
+       hs.off("ActionActivationChanged");
+       hs.off("ActionDeleted");
+       hs.off("ApplianceTriggered");
+       hs.off("CameraTriggered");
+       hs.off("LightTriggered");
+       hs.off("DoorTriggered");
+       hs.off("WindowTriggered");
+       hs.off("ActionTriggered");
+       hs.off("ActionStepAdded");
+       hs.off("ActionStepUpdated");
+       hs.off("ActionStepDeleted");
+       hs.off("ApplianceCreated");
+       hs.off("ApplianceUpdated");
+       hs.off("ApplianceDeleted");
+       hs.off("CameraCreated");
+       hs.off("CameraUpdated");
+       hs.off("CameraDeleted");
+       hs.off("fingerprint_received");
+       hs.off("ExternalsCreated");
+       hs.off("ExternalsUpdated");
+       hs.off("ExternalsDeleted");
+       hs.off("LightCreated");
+       hs.off("LightUpdated");
+       hs.off("LightDeleted");
+       hs.off("LogCreated");
+       hs.off("RoomCreated");
+       hs.off("RoomUpdated");
+       hs.off("RoomDeleted");
+       hs.off("DoorCreated");
+       hs.off("DoorUpdated");
+       hs.off("WindowCreated");
+       hs.off("WindowUpdated");
+       hs.off("HardwareCreated");
+       hs.off("HardwareUpdated");
+       hs.off("SectionCreated");
+       hs.off("SectionUpdated");
+       hs.off("SectionDeleted");
+       hs.off("GetAppNamesDetails");
+       hs.off("ContactCategoryCreated");
+       hs.off("ContactCategoryUpdated");
+       hs.off("ContactCategoryDeleted");
+       hs.off("PersonCreated");
+       hs.off("PersonUpdated");
+       hs.off("PersonStatusChanged");
+
+       cs.off("chat:history");
+       cs.off("chat:message");
     };
-  }, []);
+  }, [isLoggedIn]);
 
   // Camera Fullscreen Logic
   const toggleCameraFullscreen = () => {
@@ -1563,7 +1743,7 @@ export default function App() {
     
     setIsUploadPreviewOpen(false);
     
-    const uploadPromises = uploadPreviewFiles.map(file => {
+    const uploadPromises = (uploadPreviewFiles || []).map(file => {
       return new Promise<MessageAttachmentDto>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -1615,7 +1795,7 @@ export default function App() {
 
   const startDirectChat = (person: GetPersonDto) => {
     // Check if chat already exists
-    const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === person.id));
+    const existingChat = (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === person.id));
     if (existingChat) {
       setActiveChatId(existingChat.id);
     } else {
@@ -1669,7 +1849,7 @@ export default function App() {
         isOnline: true
       },
       ...selectedParticipants.map(id => {
-        const p = allUsers.find(u => u.id === id);
+        const p = (allUsers || []).find(u => u.id === id);
         return {
           personId: id,
           fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
@@ -1715,7 +1895,7 @@ export default function App() {
         isOnline: true
       },
       ...selectedParticipants.map(id => {
-        const p = allUsers.find(u => u.id === id);
+        const p = (allUsers || []).find(u => u.id === id);
         return {
           personId: id,
           fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
@@ -1741,6 +1921,27 @@ export default function App() {
     ));
     setIsEditGroupOpen(false);
     setEditingGroupId(null);
+  };
+
+  const handleRefresh = async () => {
+    try {
+        const p1 = apiFetch('/Room/GetAllRooms', { method: 'POST' }).then((res: any) => { if (res && res.data) setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' }))); });
+        const p2 = apiFetch('/Section/GetAllSections', { method: 'POST' }).then((res: any) => { if (res && res.data) setSections(res.data); });
+        const p3 = apiFetch('/Appliance/GetAllAppliances', { method: 'POST' }).then((res: any) => { if (res && res.data) { setAppliances(res.data); syncDevicesFromFetchedType('appliance', res.data); } });
+        const p4 = apiFetch('/Light/GetAllLights', { method: 'POST' }).then((res: any) => { if (res && res.data) { setLights(res.data); syncDevicesFromFetchedType('light', res.data); } });
+        const p5 = apiFetch('/Camera/GetAllCameras', { method: 'POST' }).then((res: any) => { if (res && res.data) { setCameras(res.data); syncDevicesFromFetchedType('camera', res.data); } });
+        const p6 = apiFetch('/Door/GetAllDoors', { method: 'POST' }).then((res: any) => { if (res && res.data) { setDoors(res.data); syncDevicesFromFetchedType('door', res.data); } });
+        const p7 = apiFetch('/Window/GetAllWindows', { method: 'POST' }).then((res: any) => { if (res && res.data) { setWindows(res.data); syncDevicesFromFetchedType('window', res.data); } });
+        const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) setExternals(res.data); });
+        const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => { if (res && res.data) setHardwares(res.data); });
+        const p10 = apiFetch('/Person/GetAllPersons', { method: 'POST' }).then((res: any) => { if (res && res.data) setAllUsers(res.data); });
+        const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' }).then((res: any) => { if (res && res.data) setContactCategories(res.data); });
+        const p12 = apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setContacts(res.data); });
+        await Promise.all([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12]);
+        toast.success("All data refreshed");
+    } catch(err) {
+      console.error(err);
+    }
   };
 
   const toggleRoomLock = (roomId: string) => {
@@ -1770,7 +1971,7 @@ export default function App() {
       }));
       
       // Add log
-      addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${rooms.find(r => r.id === roomId)?.name || 'the room'}`);
+      addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${(rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room'}`);
       toast.success(`Room ${nextState ? 'locked' : 'unlocked'} successfully`);
     });
   };
@@ -1871,7 +2072,7 @@ export default function App() {
           method: 'PUT'
         });
         setContactCategories(prev => prev.filter(cat => cat.id !== id));
-        const otherCat = contactCategories.find(c => c.name.toLowerCase() === 'other');
+        const otherCat = (contactCategories || []).find(c => (c.name || '').toLowerCase() === 'other');
         if (otherCat) {
           setContacts(prev => prev.map(c => c.getContactCategoryDto.id === id ? { ...c, getContactCategoryDto: otherCat } : c));
         }
@@ -1886,7 +2087,7 @@ export default function App() {
    const handleAddContact = () => {
     if (!newContact.firstName || !newContact.lastName) return;
     
-    const selectedCategory = contactCategories.find(c => c.id === newContact.contactCategory) || contactCategories[0] || {
+    const selectedCategory = (contactCategories || []).find(c => c.id === newContact.contactCategory) || contactCategories[0] || {
       id: 0,
       name: 'Uncategorized',
       description: '',
@@ -1996,21 +2197,21 @@ export default function App() {
 
           if (res && res.data) {
             const serverContact: ContactType = {
-              id: res.data.id || Math.floor(Math.random() * 10000),
+              id: (res.data.id ?? res.data.Id) || Math.floor(Math.random() * 10000),
               firstName: res.data.firstName || newContact.firstName,
               lastName: res.data.lastName || newContact.lastName,
               getContactCategoryDto: selectedCategory,
               imageUrl: res.data.imageUrl || newContact.imageUrl || '',
               contactDetails: (res.data.contactDetails || []).map((d: any, idx: number) => ({
                 id: d.id || idx + 1,
-                contactId: res.data.id || 0,
+                contactId: (res.data.id ?? res.data.Id) || 0,
                 phoneNumber: d.phoneNumber || '',
                 email: d.email || '',
                 personDetailsId: d.personDetailsId || 0
               })),
               address: (res.data.address || []).map((a: any, idx: number) => ({
                 id: a.id || idx + 1,
-                contactId: res.data.id || 0,
+                contactId: (res.data.id ?? res.data.Id) || 0,
                 personId: userProfile?.id || 1,
                 numberLine: a.numberLine || '',
                 street: a.street || '',
@@ -2117,7 +2318,7 @@ export default function App() {
           setSections((prev: any) => [...prev, response.data]);
         } else {
           setSections((prev: any) => [...prev, {
-            id: newSectionName.toLowerCase().replace(/\s+/g, '-'),
+            id: (newSectionName || '').toLowerCase().replace(/\s+/g, '-'),
             name: newSectionName,
             type: newSectionType,
             isHidden: newSectionIsHidden
@@ -2149,12 +2350,16 @@ export default function App() {
             method: 'POST'
           });
           
-          if (response.success || response === true) {
-            onAuthSuccess?.();
-            setIsAuthModalOpen(false);
-            setAuthCode('');
-            setAuthError(false);
-            setOnAuthSuccess(null);
+          if (response.success || response === true || response.data === true) {
+            setAuthSuccess(true);
+            setTimeout(() => {
+              onAuthSuccess?.();
+              setIsAuthModalOpen(false);
+              setAuthCode('');
+              setAuthError(false);
+              setAuthSuccess(false);
+              setOnAuthSuccess(null);
+            }, 800);
           } else {
             setAuthError(true);
             toast.error(response.message || "Invalid Authorization Code");
@@ -2177,11 +2382,9 @@ export default function App() {
     };
 
     if (authCode.length === 6) {
-      timer = setTimeout(() => {
-        verifyAuth();
-      }, 1000);
-    } else {
       verifyAuth();
+    } else if (authCode.length === 4) {
+      // do not auto-verify on 4 anymore since we have 6 inputs
     }
 
     return () => {
@@ -2287,7 +2490,7 @@ export default function App() {
     if (device) {
       let finalDevice = { ...device };
       if (device.type === 'appliance') {
-        const appDto = appliances.find(a => a.id.toString() === device.id.toString() || a.applianceName === device.name);
+        const appDto = (appliances || []).find(a => a.id.toString() === device.id.toString() || a.applianceName === device.name);
         if (appDto) {
           const typeId = appNamesDetailList.applianceType.find(t => t.name === appDto.applianceType)?.id || 1;
           finalDevice.applianceType = typeId;
@@ -2327,8 +2530,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(editingDevice.id) || 0,
-                roomId: editingDevice.room ? parseInt(editingDevice.room) : 0,
-                sectionId: editingDevice.section ? parseInt(editingDevice.section) : 0,
+                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
+                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 cameraName: editingDevice.name,
                 isActive: true
@@ -2339,8 +2542,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(editingDevice.id) || 0,
-                roomId: editingDevice.room ? parseInt(editingDevice.room) : 0,
-                sectionId: editingDevice.section ? parseInt(editingDevice.section) : 0,
+                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
+                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 applianceName: editingDevice.name,
                 applianceType: editingDevice.applianceType || 1,
@@ -2352,8 +2555,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(editingDevice.id) || 0,
-                roomId: editingDevice.room ? parseInt(editingDevice.room) : 0,
-                sectionId: editingDevice.section ? parseInt(editingDevice.section) : 0,
+                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
+                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 windowName: editingDevice.name,
                 isOpen: editingDevice.status === 'open' || editingDevice.status === 'open-locked',
@@ -2368,8 +2571,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(editingDevice.id) || 0,
-                roomId: editingDevice.room ? parseInt(editingDevice.room) : 0,
-                sectionId: editingDevice.section ? parseInt(editingDevice.section) : 0,
+                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
+                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 doorName: editingDevice.name,
                 doorType: editingDevice.doorType === 'garage' ? 3 : editingDevice.doorType === 'exterior' ? 2 : 1,
@@ -2385,8 +2588,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(editingDevice.id) || 0,
-                roomId: editingDevice.room ? parseInt(editingDevice.room) : 0,
-                sectionId: editingDevice.section ? parseInt(editingDevice.section) : 0,
+                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
+                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 lightName: editingDevice.name,
                 brightnessLevel: editingDevice.value || 0,
@@ -2416,9 +2619,9 @@ export default function App() {
               applianceName: editingDevice.name || a.applianceName,
               applianceType: appNamesDetailList?.applianceType?.find((t: any) => t.id === editingDevice.applianceType)?.name || a.applianceType,
               roomId: editingDevice.room ? parseInt(editingDevice.room) : a.roomId,
-              roomName: rooms.find(r => r.id === editingDevice.room)?.name,
+              roomName: (rooms || []).find(r => r.id === editingDevice.room)?.name,
               sectionId: editingDevice.section ? parseInt(editingDevice.section) : a.sectionId,
-              sectionName: sections.find(s => s.id === editingDevice.section)?.name
+              sectionName: (sections || []).find(s => s.id === editingDevice.section)?.name
             } : a));
           }
           if (editingDevice.type === 'window') {
@@ -2463,7 +2666,7 @@ export default function App() {
               roomName: editingRoom.name,
               icon: editingRoom.icon || 'Sofa',
               personId: userProfile?.id || 0,
-              sectionId: editingRoom.section ? parseInt(editingRoom.section as string) : 0,
+              sectionId: editingRoom.section  && editingRoom.section  !== 'none' ? parseInt(editingRoom.section as string) : null,
               isHidden: editingRoom.isHidden || false
             })
           });
@@ -2497,7 +2700,7 @@ export default function App() {
 
   const triggerScene = (scene: Scene) => {
     setDevices(prev => prev.map(device => {
-      const action = scene.actions.find(a => a.deviceId === device.id);
+      const action = (scene.actions || []).find(a => a.deviceId === device.id);
       if (action) {
         return {
           ...device,
@@ -2526,8 +2729,8 @@ export default function App() {
       try {
         if (inferredType === 'camera') {
           const payload = {
-            roomId: newDevice.room ? parseInt(newDevice.room) : 0,
-            sectionId: newDevice.section ? parseInt(newDevice.section) : 0,
+            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
             isHidden: true,
             cameraName: newDevice.name,
             ipAddress: newDevice.ipAddress || '0.0.0.0',
@@ -2543,12 +2746,12 @@ export default function App() {
           if (res && res.data) {
             setCameras(prev => [...prev, res.data]);
           }
-          toast.success('Camera added successfully');
+          toast.success('Camera added successfully'); setIsAddDeviceOpen(false);
         } else if (inferredType === 'appliance') {
           const appType = newDevice.applianceType || 1;
           const payload = {
-            roomId: newDevice.room ? parseInt(newDevice.room) : 0,
-            sectionId: newDevice.section ? parseInt(newDevice.section) : 0,
+            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
             isHidden: true,
             applianceName: newDevice.name,
             applianceType: appType
@@ -2560,11 +2763,11 @@ export default function App() {
           if (res && res.data) {
             setAppliances(prev => [...prev, res.data]);
           }
-          toast.success('Appliance added successfully');
+          toast.success('Appliance added successfully'); setIsAddDeviceOpen(false);
         } else if (inferredType === 'door') {
           const payload = {
-            roomId: newDevice.room ? parseInt(newDevice.room) : 0,
-            sectionId: newDevice.section ? parseInt(newDevice.section) : 0,
+            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
             isHidden: true,
             doorName: newDevice.name,
             doorType: 1,
@@ -2581,11 +2784,11 @@ export default function App() {
           if (res && res.data) {
             setDoors(prev => [...prev, res.data]);
           }
-          toast.success('Door added successfully');
+          toast.success('Door added successfully'); setIsAddDeviceOpen(false);
         } else if (inferredType === 'window') {
         const payload = {
-          roomId: newDevice.room ? parseInt(newDevice.room) : 0,
-          sectionId: newDevice.section ? parseInt(newDevice.section) : 0,
+          roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+          sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
           isHidden: true,
           windowName: newDevice.name,
           windowId: Math.random().toString(36).substring(2, 9),
@@ -2602,11 +2805,11 @@ export default function App() {
         if (res && res.data) {
           setWindows(prev => [...prev, res.data]);
         }
-        toast.success('Window added successfully');
+        toast.success('Window added successfully'); setIsAddDeviceOpen(false);
       } else if (inferredType === 'light') {
         const payload = {
-          roomId: newDevice.room ? parseInt(newDevice.room) : 0,
-          sectionId: newDevice.section ? parseInt(newDevice.section) : 0,
+          roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+          sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
           isHidden: true,
           lightName: newDevice.name,
           brightnessLevel: 0
@@ -2629,7 +2832,7 @@ export default function App() {
             powerUsage: 0
           } as Device]);
         }
-        toast.success('Light added successfully');
+        toast.success('Light added successfully'); setIsAddDeviceOpen(false);
       } else {
         // Fallback for other generic types mock locally
         const numericId = Math.floor(Math.random() * 9000) + 1000;
@@ -2667,7 +2870,7 @@ export default function App() {
             roomName: newRoom.name,
             icon: newRoom.icon || 'Sofa',
             personId: userProfile?.id || 0,
-            sectionId: newRoom.section ? parseInt(newRoom.section) : 0,
+            sectionId: newRoom.section  && newRoom.section  !== 'none' ? parseInt(newRoom.section) : null,
             isHidden: newRoom.isHidden || false
           })
         });
@@ -2730,19 +2933,19 @@ export default function App() {
     }
 
     if (activeView.startsWith('facility-') && facilitySearchQuery) {
-      filtered = filtered.filter(d => d.name.toLowerCase().includes(facilitySearchQuery.toLowerCase()));
+      filtered = filtered.filter(d => (d?.name || '').toLowerCase().includes(facilitySearchQuery.toLowerCase()));
     }
 
     // Sorting
     if (activeView.startsWith('facility-')) {
       filtered = [...filtered].sort((a, b) => {
         if (facilitySortBy === 'room') {
-          const roomA = rooms.find(r => r.id === a.room)?.name || 'No Room';
-          const roomB = rooms.find(r => r.id === b.room)?.name || 'No Room';
+          const roomA = (rooms || []).find(r => r.id === a.room)?.name || 'No Room';
+          const roomB = (rooms || []).find(r => r.id === b.room)?.name || 'No Room';
           return roomA.localeCompare(roomB);
         } else {
-          const sectionA = sections.find(s => s.id === a.section)?.name || 'No Section';
-          const sectionB = sections.find(s => s.id === b.section)?.name || 'No Section';
+          const sectionA = (sections || []).find(s => s.id === a.section)?.name || 'No Section';
+          const sectionB = (sections || []).find(s => s.id === b.section)?.name || 'No Section';
           return sectionA.localeCompare(sectionB);
         }
       });
@@ -2758,7 +2961,7 @@ export default function App() {
   const getTitleInfo = () => {
     const isRoom = activeView.startsWith('room-');
     const roomId = isRoom ? activeView.replace('room-', '') : null;
-    const room = isRoom ? rooms.find(r => r.id === roomId) : null;
+    const room = isRoom ? (rooms || []).find(r => r.id.toString() === roomId.toString()) : null;
     const facilityType = activeView.replace('facility-', '');
     
     let Icon = LayoutDashboard;
@@ -2775,7 +2978,7 @@ export default function App() {
       if (!selectedUserRoomId) {
         title = `${userProfile.getPersonDetailsDto.firstName}'s Room(s)`;
       } else {
-        const r = rooms.find(room => room.id === selectedUserRoomId);
+        const r = (rooms || []).find(room => room.id === selectedUserRoomId);
         title = r ? `${userProfile.getPersonDetailsDto.firstName}'s ${r.name}` : `${userProfile.getPersonDetailsDto.firstName}'s Room(s)`;
       }
     } else if (activeView === 'facilities' || activeView === 'facility-overview') {
@@ -3016,11 +3219,11 @@ export default function App() {
                 (dashboardData?.cameraNamesUrls || externalCameras || []).map((cam: any) => {
                   const deviceId = cam.id || cam.cameraName;
                   const name = cam.cameraName || cam.name;
-                  const feedUrl = cam.url || (cameras.find(c => c.id.toString() === cam.id?.toString() || c.cameraName === cam.name)?.liveStreamUrl) || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+                  const feedUrl = cam.url || ((cameras || []).find(c => c.id.toString() === cam.id?.toString() || c.cameraName === cam.name)?.liveStreamUrl) || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
                   
                   return (
                     <div key={deviceId} className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md">
-                      <video src={feedUrl} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
+                      <video src={feedUrl || undefined} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
                       <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white flex justify-between items-end">
                         <span className="font-semibold text-lg tracking-tight">{name}</span>
                         <span className="text-[10px] bg-red-500 text-white px-2.5 py-1 rounded-full font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
@@ -3079,7 +3282,7 @@ export default function App() {
                   logs.slice(0, 3).map(log => (
                     <div key={log.id} className="p-4 flex items-center gap-3">
                       <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
-                        <img src={log.getPersonDto?.getPersonDetailsDto?.imageUrl} alt={`${log.getPersonDto?.getPersonDetailsDto?.firstName} avatar`} className="h-full w-full object-cover" />
+                        <img src={log.getPersonDto?.getPersonDetailsDto?.imageUrl || undefined} alt={`${log.getPersonDto?.getPersonDetailsDto?.firstName} avatar`} className="h-full w-full object-cover" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate font-medium"><span className="font-semibold">{log.getPersonDto?.getPersonDetailsDto?.firstName}</span>: {log.logDetails}</p>
@@ -3334,7 +3537,7 @@ export default function App() {
 
           <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
             <div className="divide-y text-left">
-              {displayedLogs.length > 0 ? displayedLogs.map(log => {
+              {displayedLogs.length > 0 ? (displayedLogs || []).map(log => {
                 const details = log.getPersonDto?.getPersonDetailsDto;
                 const userFullName = details ? `${details.firstName} ${details.lastName}` : 'System';
                 const avatar = details?.imageUrl || 'https://picsum.photos/seed/system/100/100';
@@ -3350,7 +3553,9 @@ export default function App() {
                   >
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="h-10 w-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border border-primary/10">
-                        <img src={avatar} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                        {avatar ? (
+                          <img src={avatar} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                        ) : null}
                       </div>
                       <div className="min-w-0 flex-1 text-left">
                         <p className="text-sm font-medium leading-none text-foreground flex items-center gap-2 flex-wrap text-left">
@@ -3529,7 +3734,7 @@ export default function App() {
               <Card className="p-6">
                 <h3 className="text-lg font-bold mb-4">Categories</h3>
                 <div className="space-y-2">
-                  {contactCategories.map(cat => {
+                  {(contactCategories || []).map(cat => {
                     const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
                     return (
                       <div key={cat.id} className="group relative">
@@ -3592,7 +3797,7 @@ export default function App() {
                       >
                         <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
                           {contact.imageUrl ? (
-                            <img src={contact.imageUrl} alt={contact.firstName} className="h-full w-full object-cover" />
+                            <img src={contact.imageUrl || undefined} alt={contact.firstName} className="h-full w-full object-cover" />
                           ) : (
                             `${contact.firstName[0]}${contact.lastName[0]}`
                           )}
@@ -3630,7 +3835,7 @@ export default function App() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      {contactCategories.map(cat => (
+                      {(contactCategories || []).map(cat => (
                         <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -3643,7 +3848,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {filteredContacts && filteredContacts.length > 0 ? (
-                  filteredContacts.map(contact => (
+                  (filteredContacts || []).map(contact => (
                     <Card 
                       key={contact.id} 
                       className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
@@ -3654,7 +3859,7 @@ export default function App() {
                           <div className="flex items-center gap-3">
                             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary text-lg font-bold overflow-hidden">
                               {contact.imageUrl ? (
-                                <img src={contact.imageUrl} alt={contact.firstName} className="h-full w-full object-cover" />
+                                <img src={contact.imageUrl || undefined} alt={contact.firstName} className="h-full w-full object-cover" />
                               ) : (
                                 `${contact.firstName[0]}${contact.lastName[0]}`
                               )}
@@ -3821,7 +4026,7 @@ export default function App() {
                           try {
                             await apiFetch('/Person/AddPersonAddress', {
                               method: 'PUT',
-                              body: JSON.stringify(newAddresses.map(a => ({
+                              body: JSON.stringify((newAddresses || []).map(a => ({
                                 id: 0,
                                 numberLine: a.numberLine || "",
                                 street: a.street || "",
@@ -4027,7 +4232,7 @@ export default function App() {
                           try {
                             await apiFetch('/Person/AddPersonDetails', {
                               method: 'PUT',
-                              body: JSON.stringify(newContacts.map(c => ({
+                              body: JSON.stringify((newContacts || []).map(c => ({
                                 id: 0,
                                 contactId: userProfile.id || 0,
                                 personDetailsId: userProfile.getPersonDetailsDto.id || 0,
@@ -4204,7 +4409,7 @@ export default function App() {
               <div className="bg-muted/30 border-l p-8 flex flex-col items-center text-center space-y-6 order-1 md:order-2">
                 <div className="relative group">
                   <div className="h-40 w-40 rounded-3xl overflow-hidden border-8 border-background shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
-                    <img src={userProfile.getPersonDetailsDto.imageUrl} alt={`${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`} className="h-full w-full object-cover" />
+                    <img src={userProfile.getPersonDetailsDto.imageUrl || undefined} alt={`${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`} className="h-full w-full object-cover" />
                   </div>
                   <button 
                     className="absolute -bottom-2 -right-2 rounded-2xl bg-primary p-3 text-primary-foreground shadow-xl hover:scale-110 transition-transform"
@@ -4327,11 +4532,12 @@ export default function App() {
               allUsers
                 .filter(person => {
                   const query = userSearchQuery.toLowerCase();
-                  const details = person.getPersonDetailsDto;
+                  const details = person?.getPersonDetailsDto;
+                  const user = person?.getUserDto;
                   return (
-                    details.firstName.toLowerCase().includes(query) ||
-                    details.lastName.toLowerCase().includes(query) ||
-                    person.role?.toLowerCase().includes(query)
+                    (details?.firstName || '').toLowerCase().includes(query) ||
+                    (details?.lastName || '').toLowerCase().includes(query) ||
+                    (user?.roleName || '').toLowerCase().includes(query)
                   );
                 })
                 .map(person => {
@@ -4349,7 +4555,7 @@ export default function App() {
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
                         <img 
-                          src={details.imageUrl} 
+                          src={details?.imageUrl || undefined} 
                           alt={`${details.firstName} ${details.lastName}`} 
                           className="h-full w-full object-cover" 
                           referrerPolicy="no-referrer"
@@ -4388,7 +4594,7 @@ export default function App() {
     if (activeView === 'user-room') {
       if (!selectedUserRoomId) {
         const filteredUserRooms = rooms.filter(room => 
-          room.name.toLowerCase().includes(myRoomsSearchQuery.toLowerCase())
+          (room?.name || '').toLowerCase().includes(myRoomsSearchQuery.toLowerCase())
         );
 
         return (
@@ -4428,7 +4634,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredUserRooms.map(room => {
+              {(filteredUserRooms || []).map(room => {
                 const RoomIcon = iconMap[room.icon || ''] || Sofa;
                 const roomDevices = devices.filter(d => d.room === room.id);
                 const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
@@ -4473,8 +4679,8 @@ export default function App() {
       }
 
       const userRoomId = selectedUserRoomId || rooms[0]?.id || 'bedroom'; // Assuming fallback to the first room
-      const currentRoom = rooms.find(r => r.id === userRoomId);
-      const roomDevices = devices.filter(d => d.room === userRoomId);
+      const currentRoom = (rooms || []).find(r => r.id.toString() === userRoomId.toString());
+      const roomDevices = devices.filter(d => d.room?.toString() === userRoomId?.toString());
       
       const securityPriority: Record<string, number> = {
         'door': 1,
@@ -4597,7 +4803,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {doors.map(device => (
+                    {(doors || []).map(device => (
                       <DeviceCard
                         key={device.id}
                         device={device}
@@ -4619,7 +4825,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {windows.map(device => (
+                    {(windows || []).map(device => (
                       <DeviceCard
                         key={device.id}
                         device={device}
@@ -4641,7 +4847,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {appliances.map(device => (
+                    {(appliances || []).map(device => (
                       <DeviceCard
                         key={device.id}
                         device={device}
@@ -4663,7 +4869,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {roomExternals.map(ext => (
+                    {(roomExternals || []).map(ext => (
                       <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                         <div className="flex items-start justify-between">
                           <div className="space-y-1">
@@ -4693,7 +4899,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 gap-4">
-                    {lights.map(device => (
+                    {(lights || []).map(device => (
                       <DeviceCard
                         key={device.id}
                         device={device}
@@ -4717,7 +4923,7 @@ export default function App() {
               </div>
               <Separator />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {cameras.map(device => (
+                {(cameras || []).map(device => (
                   <DeviceCard
                     key={device.id}
                     device={device}
@@ -4791,7 +4997,7 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {rooms.filter(r => r.name.toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
+            {rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
               const Icon = iconMap[room.icon] || Sofa;
               const roomDevices = devices.filter(d => d.room === room.id);
               const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
@@ -4831,7 +5037,7 @@ export default function App() {
     if (activeView === 'facility-actions') {
       const filteredActions = actions.filter(action => 
         !facilitySearchQuery || 
-        action.actionName.toLowerCase().includes(facilitySearchQuery.toLowerCase()) ||
+        (action?.actionName || '').toLowerCase().includes(facilitySearchQuery.toLowerCase()) ||
         action.actionDescription?.toLowerCase().includes(facilitySearchQuery.toLowerCase())
       );
 
@@ -4891,7 +5097,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filteredActions && filteredActions.length > 0 ? (
-              filteredActions.map(action => (
+              (filteredActions || []).map(action => (
                 <Card 
                   key={action.id} 
                   className="p-6 flex flex-col gap-4 hover:shadow-md transition-all border-l-4 border-l-primary cursor-pointer group relative overflow-hidden"
@@ -4956,7 +5162,7 @@ export default function App() {
 
     if (activeView === 'facility-hardware') {
       const filteredHardwares = hardwares.filter(hw => 
-        !facilitySearchQuery || hw.hardwareName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+        !facilitySearchQuery || (hw?.hardwareName || '').toLowerCase().includes(facilitySearchQuery.toLowerCase())
       );
 
       return (
@@ -5038,7 +5244,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredHardwares && filteredHardwares.length > 0 ? (
-              filteredHardwares.map(hw => {
+              (filteredHardwares || []).map(hw => {
                 const deviceCount = (hw.applianceIdNames?.length || 0) + 
                                    (hw.cameraIdNames?.length || 0) + 
                                    (hw.lightIdNames?.length || 0) + 
@@ -5100,19 +5306,19 @@ export default function App() {
         // Search by name
         if (facilitySearchQuery) {
           result = result.filter(ext => 
-            ext.externalName.toLowerCase().includes(facilitySearchQuery.toLowerCase())
+            (ext?.externalName || '').toLowerCase().includes(facilitySearchQuery.toLowerCase())
           );
         }
 
         // Sort by room or section
         result.sort((a, b) => {
           if (facilitySortBy === 'room') {
-            const roomA = rooms.find(r => r.id === a.room)?.name || 'No Room';
-            const roomB = rooms.find(r => r.id === b.room)?.name || 'No Room';
+            const roomA = (rooms || []).find(r => r.id === a.room)?.name || 'No Room';
+            const roomB = (rooms || []).find(r => r.id === b.room)?.name || 'No Room';
             return roomA.localeCompare(roomB);
           } else {
-            const sectionA = sections.find(s => s.id === a.section)?.name || 'No Section';
-            const sectionB = sections.find(s => s.id === b.section)?.name || 'No Section';
+            const sectionA = (sections || []).find(s => s.id === a.section)?.name || 'No Section';
+            const sectionB = (sections || []).find(s => s.id === b.section)?.name || 'No Section';
             return sectionA.localeCompare(sectionB);
           }
         });
@@ -5198,7 +5404,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredExternals && filteredExternals.length > 0 ? (
-              filteredExternals.map(ext => (
+              (filteredExternals || []).map(ext => (
                 <Card key={ext.id} className="p-6 flex flex-col gap-4 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
@@ -5232,13 +5438,13 @@ export default function App() {
                       {ext.section && (
                         <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
                           <Layers className="h-3 w-3" />
-                          {sections.find(s => s.id === ext.section)?.name || ext.section}
+                          {(sections || []).find(s => s.id === ext.section)?.name || ext.section}
                         </Badge>
                       )}
                       {ext.room && (
                         <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
                           <Sofa className="h-3 w-3" />
-                          {rooms.find(r => r.id === ext.room)?.name || ext.room}
+                          {(rooms || []).find(r => r.id === ext.room)?.name || ext.room}
                         </Badge>
                       )}
                     </div>
@@ -5249,7 +5455,7 @@ export default function App() {
                     <div className="flex gap-1.5 flex-wrap mt-1">
                       {ext.actionIds && ext.actionIds.length > 0 ? (
                         ext.actionIds.map(aid => {
-                          const sceneName = scenes.find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
+                          const sceneName = (scenes || []).find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
                           return (
                             <Badge key={aid} variant="outline" className="font-mono text-[10px]">{sceneName}</Badge>
                           );
@@ -5326,8 +5532,8 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-8">
-            {sections.filter(s => s.name.toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
-              sections.filter(s => s.name.toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
+            {sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
+              sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
                 const sectionRooms = rooms.filter(r => r.section === section.id);
                 const sectionDevices = devices.filter(d => d.section === section.id);
                 
@@ -5435,7 +5641,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {rooms && rooms.length > 0 ? (
-              rooms.map(room => {
+              (rooms || []).map(room => {
                 const Icon = iconMap[room.icon] || Sofa;
                 const roomDevices = devices.filter(d => d.room === room.id);
                 const activeInRoom = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
@@ -5494,7 +5700,7 @@ export default function App() {
     // Facility or Room Specific View
     const isRoom = activeView.startsWith('room-');
     const roomId = isRoom ? activeView.replace('room-', '') : '';
-    const room = isRoom ? rooms.find(r => r.id === roomId) : null;
+    const room = isRoom ? (rooms || []).find(r => r.id.toString() === roomId.toString()) : null;
     
     const facilityType = activeView.replace('facility-', '');
     const singularTypeMap: Record<string, string> = {
@@ -5653,7 +5859,7 @@ export default function App() {
             : "lg:grid-cols-3 xl:grid-cols-4"
         )}>
           {filteredDevices && filteredDevices.length > 0 ? (
-            filteredDevices.map(device => (
+            (filteredDevices || []).map(device => (
               <DeviceCard 
                 key={device.id} 
                 device={device} 
@@ -5776,9 +5982,13 @@ export default function App() {
 
         <ScrollArea className="flex-1 min-h-0">
           <div className="p-8 pb-12">
-            <AnimatePresence mode="wait">
-              {renderView()}
-            </AnimatePresence>
+            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+              <div className="min-h-full">
+                <AnimatePresence mode="wait">
+                  {renderView()}
+                </AnimatePresence>
+              </div>
+            </PullToRefresh>
           </div>
         </ScrollArea>
       </main>
@@ -5981,7 +6191,7 @@ export default function App() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
-                  {sections.map(section => (
+                  {(sections || []).map(section => (
                     <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -6069,12 +6279,12 @@ export default function App() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Person Assigned</SelectItem>
-                  {allUsers.map(u => (
+                  {(allUsers || []).map(u => (
                     <SelectItem key={u.id} value={u.id.toString()}>
                       <div className="flex items-center gap-2">
                         <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
                           <img 
-                            src={u.getPersonDetailsDto.imageUrl} 
+                            src={u.getPersonDetailsDto.imageUrl || undefined} 
                             alt={u.getPersonDetailsDto.firstName} 
                             className="h-full w-full object-cover"
                             referrerPolicy="no-referrer"
@@ -6101,7 +6311,7 @@ export default function App() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
-                  {sections.map(section => (
+                  {(sections || []).map(section => (
                     <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -6577,33 +6787,23 @@ export default function App() {
           </ScrollArea>
           <DialogFooter>
             
-            <Button onClick={() => {
-              const newId = Math.floor(Math.random() * 1000);
-              const added: GetPersonDto = {
-                id: newId,
-                personId: `P-${newId}`,
-                disabled: false,
-                cameraIds: [],
-                getPersonDetailsDto: {
-                  id: newId,
-                  firstName: newPerson.createPersonDetailsDto.firstName,
-                  lastName: newPerson.createPersonDetailsDto.lastName,
-                  gender: newPerson.createPersonDetailsDto.gender,
-                  imageUrl: `https://picsum.photos/seed/${newId}/200/200`,
-                  disabled: false,
-                  getAddressDtos: [],
-                  getContactDetailsDtos: []
-                },
-                getUserDto: {
-                  id: newId,
-                  userName: newPerson.createUserDto.userName,
-                  roleName: Role[newPerson.createUserDto.role],
-                  role: newPerson.createUserDto.role,
-                  personId: newId
+            <Button onClick={async () => {
+              try {
+                const response: any = await apiFetch('/Person/CreatePerson', {
+                  method: 'POST',
+                  body: JSON.stringify(newPerson)
+                });
+                if (response && response.data) {
+                  setAllUsers(prev => [...prev, response.data]);
+                  setIsAddPersonOpen(false);
+                  toast.success("Member created successfully");
+                } else {
+                    toast.error("Failed to create member");
                 }
-              };
-              setAllUsers(prev => [...prev, added]);
-              setIsAddPersonOpen(false);
+              } catch (err: any) {
+                console.error("Failed to create user", err);
+                toast.error(err.message || "Failed to create user");
+              }
             }} className="bg-primary text-primary-foreground">
               Create Member
             </Button>
@@ -7004,7 +7204,7 @@ export default function App() {
                     onClick={() => document.getElementById('contact-avatar-upload')?.click()}
                   >
                     {newContact.imageUrl ? (
-                      <img src={newContact.imageUrl} alt="Avatar" className="h-full w-full object-cover" />
+                      <img src={newContact.imageUrl || undefined} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <ImagePlus className="h-8 w-8" />
@@ -7348,7 +7548,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className={`sm:max-w-[520px] border-2 transition-colors duration-300 ${authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50"}`}>
+        <DialogContent className={cn("sm:max-w-[520px] border-2 transition-colors duration-300", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/10" : authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50")}>
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
             {/* Left Column (Current Contents) */}
             <div className="sm:col-span-7 space-y-4">
@@ -7363,17 +7563,41 @@ export default function App() {
               </div>
               
               <div className="flex flex-col gap-3">
-                <Input 
-                  type="password"
-                  maxLength={6}
-                  className="text-center text-2xl tracking-[0.5em] font-mono h-14 w-full"
-                  placeholder="••••••"
-                  value={authCode}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '');
-                    if (val.length <= 6) { setAuthCode(val); setAuthError(false); }
-                  }}
-                />
+                <div className="flex gap-2 justify-center w-full">
+                  {[0, 1, 2, 3, 4, 5].map((index) => (
+                    <input
+                      key={index}
+                      id={`auth-code-input-${index}`}
+                      type="password"
+                      maxLength={1}
+                      className={cn(
+                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-white",
+                        authSuccess ? "border-green-500 text-green-600 bg-green-50" : (authCode[index] ? "border-primary" : "border-slate-200 focus:border-primary")
+                      )}
+                      value={authCode[index] || ''}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Backspace' && !authCode[index]) {
+                          const prev = document.getElementById(`auth-code-input-${index - 1}`);
+                          if (prev) prev.focus();
+                        }
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        if (val) {
+                          const newCode = authCode.substring(0, index) + val + authCode.substring(index + 1);
+                          const limitedCode = newCode.substring(0, 6);
+                          setAuthCode(limitedCode);
+                          setAuthError(false);
+                          const next = document.getElementById(`auth-code-input-${index + 1}`);
+                          if (next) next.focus();
+                        } else {
+                          const newCode = authCode.substring(0, index) + authCode.substring(index + 1);
+                          setAuthCode(newCode);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
                 <p className="text-xs text-muted-foreground">This is a sensitive operation.</p>
               </div>
             </div>
@@ -7561,7 +7785,7 @@ export default function App() {
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      {appNamesDetailList.applianceType.map(t => (
+                      {(appNamesDetailList.applianceType || []).map(t => (
                         <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -7633,7 +7857,7 @@ export default function App() {
                     <SelectValue placeholder="Select section" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sections.map(s => (
+                    {(sections || []).map(s => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -7697,7 +7921,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {viewingRoom && (() => {
-            const currentRoomDto = rooms.find((r: any) => r.id === viewingRoom.id) as any;
+            const currentRoomDto = (rooms || []).find((r: any) => r.id.toString() === viewingRoom.id.toString()) as any;
             return (
               <div className="pt-[3px] pb-4 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
@@ -7707,13 +7931,13 @@ export default function App() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium">{sections.find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
+                    <div className="font-medium">{(sections || []).find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
                   </div>
                   {currentRoomDto && (
                     <>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{currentRoomDto.createdByName || 'System'}</div>
+                        <div className="font-medium">{currentRoomDto.createdByName || currentRoomDto.createdBy || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -7721,7 +7945,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                        <div className="font-medium">{currentRoomDto.peronName || 'System'}</div>
+                        <div className="font-medium">{currentRoomDto.personName || currentRoomDto.peronName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
@@ -7836,7 +8060,7 @@ export default function App() {
                     <SelectValue placeholder="Select section" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sections.map(s => (
+                    {(sections || []).map(s => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -7883,7 +8107,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
                             <img 
-                              src={u.getPersonDetailsDto.imageUrl} 
+                              src={u.getPersonDetailsDto.imageUrl || undefined} 
                               alt={u.getPersonDetailsDto.firstName} 
                               className="h-full w-full object-cover"
                               referrerPolicy="no-referrer"
@@ -7973,7 +8197,7 @@ export default function App() {
               <div className="flex items-center gap-4">
                 <div className="h-20 w-20 rounded-full overflow-hidden bg-muted flex items-center justify-center text-3xl font-bold border-4 border-primary/10">
                   {viewingContact.imageUrl ? (
-                    <img src={viewingContact.imageUrl} alt={viewingContact.firstName} className="h-full w-full object-cover" />
+                    <img src={viewingContact.imageUrl || undefined} alt={viewingContact.firstName} className="h-full w-full object-cover" />
                   ) : (
                     viewingContact.firstName.charAt(0)
                   )}
@@ -8142,7 +8366,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0})</span>
                     {selectedHardware.applianceIdNames && selectedHardware.applianceIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.applianceIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.applianceIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No appliances assigned to this controller.</p>
@@ -8153,7 +8377,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0})</span>
                     {selectedHardware.cameraIdNames && selectedHardware.cameraIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.cameraIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.cameraIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No cameras assigned to this controller.</p>
@@ -8164,7 +8388,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0})</span>
                     {selectedHardware.lightIdNames && selectedHardware.lightIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.lightIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.lightIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No lights assigned to this controller.</p>
@@ -8175,7 +8399,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0})</span>
                     {selectedHardware.doorIdNames && selectedHardware.doorIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.doorIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.doorIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No door systems assigned.</p>
@@ -8186,7 +8410,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0})</span>
                     {selectedHardware.windowIdNames && selectedHardware.windowIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.windowIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.windowIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No automation windows assigned.</p>
@@ -8197,7 +8421,7 @@ export default function App() {
                     <span className="text-xs font-semibold text-muted-foreground block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0})</span>
                     {selectedHardware.externalIdNames && selectedHardware.externalIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedHardware.externalIdNames.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                        {(selectedHardware.externalIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">No external units assigned.</p>
@@ -8654,8 +8878,8 @@ export default function App() {
                 if (!externalForm.externalName) return;
                 try {
                   const payload = {
-                    roomId: externalForm.roomId ? parseInt(externalForm.roomId.toString()) : 0,
-                    sectionId: externalForm.sectionId ? parseInt(externalForm.sectionId.toString()) : 0,
+                    roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
+                    sectionId: (externalForm.sectionId && externalForm.sectionId !== 'none') ? parseInt(externalForm.sectionId.toString()) : null,
                     isHidden: true,
                     externalName: externalForm.externalName,
                     actionIds: (externalForm.actionIds || []).map(Number)
@@ -8783,11 +9007,11 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === selectedExternal.sectionId)?.name || 'N/A'}</div>
+                  <div className="font-medium">{(sections || []).find(s => s.id === selectedExternal.sectionId)?.name || 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                  <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === selectedExternal.roomId)?.name || 'N/A'}</div>
+                  <div className="font-medium">{(rooms || []).find(r => r.id === selectedExternal.roomId)?.name || 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
@@ -8809,8 +9033,8 @@ export default function App() {
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Linked Triggers</span>
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
-                      selectedExternal.actionIds.map(aid => {
-                        const action = actions.find(a => a.id === aid);
+                      (selectedExternal.actionIds || []).map(aid => {
+                        const action = (actions || []).find(a => a.id === aid);
                         return (
                           <Badge key={aid} variant="outline" className="bg-primary/5 text-primary border-primary/10">
                             {action?.actionName || `Action #${aid}`}
@@ -8945,8 +9169,8 @@ export default function App() {
                 try {
                   const payload = {
                     id: Number(externalForm.id),
-                    roomId: externalForm.roomId ? parseInt(externalForm.roomId.toString()) : 0,
-                    sectionId: externalForm.sectionId ? parseInt(externalForm.sectionId.toString()) : 0,
+                    roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
+                    sectionId: (externalForm.sectionId && externalForm.sectionId !== 'none') ? parseInt(externalForm.sectionId.toString()) : null,
                     isHidden: true,
                     externalName: externalForm.externalName,
                     isTriggered: externalForm.isTriggered || false,
@@ -8991,7 +9215,7 @@ export default function App() {
       }}>
         <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] sm:max-w-[92vw] md:max-w-6xl h-[85vh] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background text-foreground">
           {(() => {
-            const currentCameraDto = cameras.find(c => c.id.toString() === selectedCamera?.id.toString() || c.cameraName === selectedCamera?.name);
+            const currentCameraDto = (cameras || []).find(c => c.id.toString() === selectedCamera?.id.toString() || c.cameraName === selectedCamera?.name);
             const liveStreamUrl = currentCameraDto?.liveStreamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
             const isLive = !playingRecordingPath;
             const currentVideoUrl = playingRecordingPath || liveStreamUrl;
@@ -9016,7 +9240,7 @@ export default function App() {
                         </Badge>
                       </h2>
                       <p className="text-xs text-muted-foreground font-mono">
-                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
+                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? (rooms || []).find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
                       </p>
                     </div>
                   </div>
@@ -9082,7 +9306,7 @@ export default function App() {
                         <video
                           ref={videoRef}
                           key={currentVideoUrl}
-                          src={currentVideoUrl}
+                          src={currentVideoUrl || undefined}
                           className={cn(
                             "h-full w-full object-cover select-none bg-black",
                             isFullscreen ? "h-screen w-screen object-contain" : ""
@@ -9164,13 +9388,13 @@ export default function App() {
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
                           <span className="font-semibold text-foreground">
-                            {selectedCamera?.room ? rooms.find(r => r.id === selectedCamera.room)?.name : 'Unassigned Room'}
+                            {selectedCamera?.room ? (rooms || []).find(r => r.id === selectedCamera.room)?.name : 'Unassigned Room'}
                           </span>
                         </div>
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
                           <span className="font-semibold text-foreground">
-                            {selectedCamera?.section ? sections.find(s => s.id === selectedCamera.section)?.name : 'Security'}
+                            {selectedCamera?.section ? (sections || []).find(s => s.id === selectedCamera.section)?.name : 'Security'}
                           </span>
                         </div>
                       </div>
@@ -9192,11 +9416,11 @@ export default function App() {
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                          <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentCameraDto?.sectionId)?.name || 'N/A'}</div>
+                          <div className="font-medium">{(sections || []).find(s => s.id === currentCameraDto?.sectionId)?.name || 'N/A'}</div>
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                          <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentCameraDto?.roomId)?.name || 'N/A'}</div>
+                          <div className="font-medium">{(rooms || []).find(r => r.id === currentCameraDto?.roomId)?.name || 'N/A'}</div>
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
@@ -9256,7 +9480,7 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y font-mono">
-                              {recordingsList.map((recording, idx) => {
+                              {(recordingsList || []).map((recording, idx) => {
                                 const isCurrentlyPlayingThis = playingRecordingPath === recording.filePath;
                                 return (
                                   <tr key={idx} className={cn(
@@ -9385,7 +9609,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedAppliance && (() => {
-            const currentApplianceDto = appliances.find(a => a.id.toString() === selectedAppliance.id.toString() || a.applianceName === selectedAppliance.name) as any;
+            const currentApplianceDto = (appliances || []).find(a => a.id.toString() === selectedAppliance.id.toString() || a.applianceName === selectedAppliance.name) as any;
             return (
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -9398,7 +9622,7 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                  <div className="font-medium">{selectedAppliance.room ? rooms.find(r => r.id === selectedAppliance.room)?.name : 'N/A'}</div>
+                  <div className="font-medium">{selectedAppliance.room ? (rooms || []).find(r => r.id === selectedAppliance.room)?.name : 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Power Usage</span>
@@ -9424,11 +9648,11 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                      <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentApplianceDto.sectionId)?.name || 'N/A'}</div>
+                      <div className="font-medium">{(sections || []).find(s => s.id === currentApplianceDto.sectionId)?.name || 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                      <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentApplianceDto.roomId)?.name || 'N/A'}</div>
+                      <div className="font-medium">{(rooms || []).find(r => r.id === currentApplianceDto.roomId)?.name || 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
@@ -9510,7 +9734,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedDoor && (() => {
-            const currentDoorDto = doors.find(d => d.id.toString() === selectedDoor.id.toString() || d.doorName === selectedDoor.name) as any;
+            const currentDoorDto = (doors || []).find(d => d.id.toString() === selectedDoor.id.toString() || d.doorName === selectedDoor.name) as any;
             return (
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -9530,11 +9754,11 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                  <div className="font-medium">{selectedDoor.room ? rooms.find(r => r.id === selectedDoor.room)?.name : 'N/A'}</div>
+                  <div className="font-medium">{selectedDoor.room ? (rooms || []).find(r => r.id === selectedDoor.room)?.name : 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">{selectedDoor.section ? sections.find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
+                  <div className="font-medium">{selectedDoor.section ? (sections || []).find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
                 </div>
                 {currentDoorDto && (
                   <>
@@ -9556,11 +9780,11 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || appNamesDetailList.roomIds.find(r => r.id === currentDoorDto.roomId)?.name || 'Hub'}</div>
+                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || (rooms || []).find(r => r.id === currentDoorDto.roomId)?.name || 'Hub'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || appNamesDetailList.sectionIds.find(s => s.id === currentDoorDto.sectionId)?.name || 'Area'}</div>
+                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || (sections || []).find(s => s.id === currentDoorDto.sectionId)?.name || 'Area'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Deletion Status</span>
@@ -9638,7 +9862,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedLight && (() => {
-            const currentLightDto = lights.find(l => l.lightName === selectedLight?.name || l.id.toString() === selectedLight?.id.toString());
+            const currentLightDto = (lights || []).find(l => l.lightName === selectedLight?.name || l.id.toString() === selectedLight?.id.toString());
             return (
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -9655,11 +9879,11 @@ export default function App() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                    <div className="font-medium">{selectedLight.room ? rooms.find(r => r.id === selectedLight.room)?.name : 'N/A'}</div>
+                    <div className="font-medium">{selectedLight.room ? (rooms || []).find(r => r.id === selectedLight.room)?.name : 'N/A'}</div>
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium">{selectedLight.section ? sections.find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
+                    <div className="font-medium">{selectedLight.section ? (sections || []).find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
                   </div>
                   {/* BaseDefaultDto Integration */}
                   {currentLightDto && (
@@ -9678,11 +9902,11 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                        <div className="font-medium">{appNamesDetailList.sectionIds.find(s => s.id === currentLightDto.sectionId)?.name || 'N/A'}</div>
+                        <div className="font-medium">{(sections || []).find(s => s.id === currentLightDto.sectionId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                        <div className="font-medium">{appNamesDetailList.roomIds.find(r => r.id === currentLightDto.roomId)?.name || 'N/A'}</div>
+                        <div className="font-medium">{(rooms || []).find(r => r.id === currentLightDto.roomId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
@@ -9773,7 +9997,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {viewingSection && (() => {
-            const currentSectionDto = sections.find(s => s.id.toString() === viewingSection.id.toString() || (s as any).sectionId === viewingSection.id) as any;
+            const currentSectionDto = (sections || []).find(s => s.id.toString() === viewingSection.id.toString() || (s as any).sectionId === viewingSection.id) as any;
             return (
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -9869,7 +10093,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedWindow && (() => {
-            const currentWindowDto = windows.find(w => w.windowName === selectedWindow?.name || w.id.toString() === selectedWindow?.id.toString());
+            const currentWindowDto = (windows || []).find(w => w.windowName === selectedWindow?.name || w.id.toString() === selectedWindow?.id.toString());
             return (
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -9895,11 +10119,11 @@ export default function App() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                    <div className="font-medium text-sm">{selectedWindow.room ? rooms.find(r => r.id === selectedWindow.room)?.name : 'N/A'}</div>
+                    <div className="font-medium text-sm">{selectedWindow.room ? (rooms || []).find(r => r.id === selectedWindow.room)?.name : 'N/A'}</div>
                   </div>
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium text-sm">{selectedWindow.section ? sections.find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
+                    <div className="font-medium text-sm">{selectedWindow.section ? (sections || []).find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
                   </div>
                   {/* BaseDefaultDto Integration */}
                   {currentWindowDto && (
@@ -9918,11 +10142,11 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                        <div className="font-medium text-sm">{appNamesDetailList.sectionIds.find(s => s.id === currentWindowDto.sectionId)?.name || 'N/A'}</div>
+                        <div className="font-medium text-sm">{(sections || []).find(s => s.id === currentWindowDto.sectionId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                        <div className="font-medium text-sm">{appNamesDetailList.roomIds.find(r => r.id === currentWindowDto.roomId)?.name || 'N/A'}</div>
+                        <div className="font-medium text-sm">{(rooms || []).find(r => r.id === currentWindowDto.roomId)?.name || 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
@@ -10061,12 +10285,12 @@ export default function App() {
                           <span className="font-bold text-slate-700 dark:text-slate-200">
                             {(() => {
                               switch (step.facilityType) {
-                                case FacilityType.Appliance: return appliances.find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
-                                case FacilityType.Camera: return cameras.find(x => x.id === step.facilityTypeId)?.cameraName || 'Camera';
-                                case FacilityType.Door: return doors.find(x => x.id === step.facilityTypeId)?.doorName || 'Door';
-                                case FacilityType.External: return externals.find(x => x.id === step.facilityTypeId)?.externalName || 'External';
-                                case FacilityType.Light: return lights.find(x => x.id === step.facilityTypeId)?.lightName || 'Light';
-                                case FacilityType.Window: return windows.find(x => x.id === step.facilityTypeId)?.windowName || 'Window';
+                                case FacilityType.Appliance: return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
+                                case FacilityType.Camera: return (cameras || []).find(x => x.id === step.facilityTypeId)?.cameraName || 'Camera';
+                                case FacilityType.Door: return (doors || []).find(x => x.id === step.facilityTypeId)?.doorName || 'Door';
+                                case FacilityType.External: return (externals || []).find(x => x.id === step.facilityTypeId)?.externalName || 'External';
+                                case FacilityType.Light: return (lights || []).find(x => x.id === step.facilityTypeId)?.lightName || 'Light';
+                                case FacilityType.Window: return (windows || []).find(x => x.id === step.facilityTypeId)?.windowName || 'Window';
                                 default: return 'Device';
                               }
                             })()}
@@ -10705,7 +10929,7 @@ export default function App() {
                         className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 rounded-3xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0 group"
                       >
                         <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white overflow-hidden bg-slate-100 group-hover:scale-105 transition-transform">
-                          <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                         </div>
                         <span className="font-semibold text-lg text-slate-800">{user.getPersonDetailsDto.firstName}</span>
                         <span className="text-xs text-slate-500 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
@@ -10723,7 +10947,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
-                    <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={userProfile.getPersonDetailsDto.imageUrl || undefined} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                   </div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-bold tracking-tight text-[#111b21]">Chats</h2>
@@ -10768,9 +10992,9 @@ export default function App() {
 
             <ScrollArea className="flex-1 bg-white">
               <div className="divide-y divide-slate-50 w-full">
-                {chats.map((chat) => {
+                {(chats || []).map((chat) => {
                     const lastMsg = chat.lastMessage;
-                    const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
+                    const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
                     
                     return (
                       <button 
@@ -10791,7 +11015,7 @@ export default function App() {
                             activeChatId === chat.id ? "bg-primary/10" : "bg-slate-50"
                           )}>
                             {chat.imageUrl ? (
-                              <img src={chat.imageUrl} alt={chat.name} className="h-full w-full object-cover" />
+                              <img src={chat.imageUrl || undefined} alt={chat.name} className="h-full w-full object-cover" />
                             ) : (
                               chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <UserIcon className="h-6 w-6 text-slate-400" />
                             )}
@@ -10836,9 +11060,9 @@ export default function App() {
             {activeChatId ? (
               <>
                 {(() => {
-                  const chat = chats.find(c => c.id === activeChatId);
+                  const chat = (chats || []).find(c => c.id === activeChatId);
                   if (!chat) return null;
-                  const isOnline = chat.isGroup ? chat.participants.some(p => p.isOnline && p.personId !== userProfile.id) : chat.participants.find(p => p.personId !== userProfile.id)?.isOnline;
+                  const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
 
                   return (
                     <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
@@ -10846,7 +11070,7 @@ export default function App() {
                         <div className="relative">
                           <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200">
                             {chat.imageUrl ? (
-                              <img src={chat.imageUrl} alt={chat.name} className="h-full w-full object-cover" />
+                              <img src={chat.imageUrl || undefined} alt={chat.name} className="h-full w-full object-cover" />
                             ) : (
                               chat.isGroup ? <Users className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />
                             )}
@@ -10879,7 +11103,7 @@ export default function App() {
                               setNewGroupImageUrl(chat.imageUrl || "");
                               setNewGroupRoom(chat.roomId?.toString() || "none");
                               setNewGroupSection(chat.sectionId?.toString() || "");
-                              setSelectedParticipants(chat.participants.map(p => p.personId).filter(id => id !== userProfile.id));
+                              setSelectedParticipants((chat.participants || []).map(p => p.personId).filter(id => id !== userProfile.id));
                               setIsEditGroupOpen(true);
                             }}
                             title="Group Settings"
@@ -10958,7 +11182,7 @@ export default function App() {
                               <div className="flex justify-center my-6">
                                 <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">Today</span>
                               </div>
-                              {currentMessages.map((msg, idx) => {
+                              {(currentMessages || []).map((msg, idx) => {
                                 const isMe = msg.senderPersonId === userProfile.id;
                                 return (
                                   <motion.div 
@@ -10972,7 +11196,7 @@ export default function App() {
                                         setReplyingTo(msg);
                                       }
                                     }}
-                                    key={msg.id || idx} 
+                                    key={(msg.id ?? msg.Id) || idx} 
                                     className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}
                                   >
                                     <div className={cn(
@@ -11033,7 +11257,7 @@ export default function App() {
                                         {msg.replyToId && (
                                           <div className="mb-2 p-2 bg-black/5 rounded-lg border-l-4 border-primary text-[13px] bg-white/40">
                                             {(() => {
-                                              const repliedMsg = chatMessages.find(m => m.id === msg.replyToId);
+                                              const repliedMsg = (chatMessages || []).find(m => m.id === msg.replyToId);
                                               return repliedMsg ? (
                                                 <>
                                                   <p className="font-bold text-primary text-[11px] mb-0.5">{repliedMsg.senderName}</p>
@@ -11061,7 +11285,7 @@ export default function App() {
                                               {msg.attachments.map((att, idx) => (
                                                 <img 
                                                   key={idx}
-                                                  src={att.filePath} 
+                                                  src={att.filePath || undefined} 
                                                   alt="uploaded" 
                                                   className={cn(
                                                     "w-full h-auto object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm",
@@ -11358,7 +11582,7 @@ export default function App() {
                           className="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
                         >
                           <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50">
-                            <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                            <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                           </div>
                           <span className="text-[10px] font-bold text-slate-700 group-hover:text-primary transition-colors truncate w-full text-center">
                             {user.getPersonDetailsDto.firstName}
@@ -11416,7 +11640,7 @@ export default function App() {
               <div className="relative group">
                 <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
                   {newGroupImageUrl ? (
-                    <img src={newGroupImageUrl} alt="Group" className="h-full w-full object-cover" />
+                    <img src={newGroupImageUrl || undefined} alt="Group" className="h-full w-full object-cover" />
                   ) : (
                     <ImageIcon className="h-8 w-8 text-slate-300" />
                   )}
@@ -11476,7 +11700,7 @@ export default function App() {
                     )}
                   >
                     <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-100 shrink-0">
-                      <img src={user.getPersonDetailsDto.imageUrl} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                      <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                     </div>
                     <div className="flex-1 text-left">
                       <h4 className="font-bold text-sm text-slate-800">
@@ -11563,7 +11787,7 @@ export default function App() {
                   <div className="relative group">
                     <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
                       {newGroupImageUrl ? (
-                        <img src={newGroupImageUrl} alt="Group" className="h-full w-full object-cover" />
+                        <img src={newGroupImageUrl || undefined} alt="Group" className="h-full w-full object-cover" />
                       ) : (
                         <ImageIcon className="h-8 w-8 text-slate-300" />
                       )}
@@ -11714,7 +11938,7 @@ export default function App() {
                      if (isImage) {
                        const url = URL.createObjectURL(file);
                        return (
-                         <img src={url} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ height: "300px", width: "300px" }} />
+                         <img src={url || undefined} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ height: "300px", width: "300px" }} />
                        );
                      } else {
                        return (
@@ -11732,13 +11956,13 @@ export default function App() {
                  
                  {/* Overlay thumbnail div */}
                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
-                   {uploadPreviewFiles.map((file, idx) => {
+                   {(uploadPreviewFiles || []).map((file, idx) => {
                      const isImage = file.type?.startsWith('image/');
                      const url = isImage ? URL.createObjectURL(file) : '';
                      return (
                        <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'} flex items-center justify-center bg-white`} onClick={() => setUploadPreviewActiveIndex(idx)}>
                          {isImage ? (
-                           <img src={url} className="w-full h-full object-cover" />
+                           <img src={url || undefined} className="w-full h-full object-cover" />
                          ) : (
                            <Paperclip className="h-5 w-5 text-slate-500" />
                          )}
@@ -11825,7 +12049,7 @@ export default function App() {
           </DialogHeader>
           <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 overflow-hidden">
             <div className="relative w-full h-full flex items-center justify-center -translate-y-8">
-              <img src={previewMediaUrl} alt="Preview" className="max-w-full max-h-[90%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
+              <img src={previewMediaUrl || undefined} alt="Preview" className="max-w-full max-h-[90%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
             </div>
           </div>
         </DialogContent>
@@ -11856,7 +12080,7 @@ export default function App() {
                       <SelectValue placeholder="Chose a user" />
                     </SelectTrigger>
                     <SelectContent>
-                      {allUsers.map((u) => (
+                      {(allUsers || []).map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
                         </SelectItem>
@@ -11904,9 +12128,9 @@ export default function App() {
                 Fingerprint Previews
               </label>
               <div className="border border-dashed border-slate-300 rounded-2xl p-4 h-[150px] bg-white flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {fingerprintImages.map((img, idx) => (
+                {(fingerprintImages || []).map((img, idx) => (
                   <div key={idx} className="relative group aspect-square h-24 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
-                    <img src={img} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
+                    <img src={img || undefined} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Button 
                         size="icon" 
@@ -11934,7 +12158,7 @@ export default function App() {
               onClick={() => {
                 const payload = {
                   userId: selectedFingerprintUserId,
-                  images: fingerprintImages.map(img => img.split(',')[1]) // Send base64 data (bytes)
+                  images: (fingerprintImages || []).map(img => img.split(',')[1]) // Send base64 data (bytes)
                 };
                 console.log("Submitting fingerprint data:", payload);
                 // Implementation for actual sending will be added later
@@ -12015,7 +12239,7 @@ export default function App() {
                     <SelectValue placeholder="Choose a user" />
                   </SelectTrigger>
                   <SelectContent>
-                    {allUsers.map((u) => (
+                    {(allUsers || []).map((u) => (
                       <SelectItem key={u.id} value={u.id.toString()}>
                         {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
                       </SelectItem>
@@ -12062,8 +12286,8 @@ export default function App() {
       </Dialog>
       <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none">
         <AnimatePresence>
-          {chatPopups.map((popup) => {
-            const sender = allUsers.find(u => u.id === popup.senderPersonId);
+          {(chatPopups || []).map((popup) => {
+            const sender = (allUsers || []).find(u => u.id === popup.senderPersonId);
             return (
             <motion.div
               key={popup.id}
@@ -12104,7 +12328,7 @@ export default function App() {
               'grid-cols-3 grid-rows-2'
             }`}>
               {userProfile.cameraIds?.map((camId, i) => {
-                const camName = appNamesDetailList.cameraIdNames.find(c => c.id === camId)?.name || `Camera ${camId}`;
+                const camName = (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name || `Camera ${camId}`;
                 const videoUrl = i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4";
                 
                 return (
@@ -12112,7 +12336,7 @@ export default function App() {
                     {camName ? (
                       <>
                         <video 
-                          src={videoUrl} 
+                          src={videoUrl || undefined} 
                           autoPlay 
                           loop 
                           muted 

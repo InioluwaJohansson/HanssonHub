@@ -1,0 +1,45 @@
+
+      apiFetch('/External/GetAllExternals', { method: 'POST' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setExternals(res.data); } else { setExternals([]); } })
+        .catch(() => setExternals([]));
+
+--
+
+      apiFetch('/Section/GetAllSections', { method: 'POST' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setSections(res.data); } else { setSections([]); } })
+        .catch(() => setSections([]));
+
+--
+
+      apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setHardwares(res.data); } else { setHardwares([]); } })
+        .catch(() => setHardwares([]));
+    }
+--
+        fetchedViewsRef.current['all-users'] = true;
+        apiFetch('/Person/GetAllPersons', { method: 'POST' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setAllUsers(res.data); else setAllUsers([]); })
+          .catch(err => { console.error("Failed to load persons", err); setAllUsers([]); });
+      }
+--
+        fetchedViewsRef.current['facility-hardware'] = true;
+        apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); else setHardwares([]); })
+          .catch(err => { console.error("Failed to load hardwares", err); setHardwares([]); });
+      }
+--
+        fetchedViewsRef.current['facility-sections'] = true;
+        apiFetch('/Section/GetAllSections', { method: 'POST' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data); else setSections([]); })
+          .catch(err => { console.error("Failed to load sections", err); setSections([]); });
+      }
+--
+        fetchedViewsRef.current['contacts'] = true;
+        apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
+          .catch(err => { console.error("Failed to load contact categories", err); setContactCategories([]); });
+        
+        apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); else setContacts([]); })
+          .catch(err => { console.error("Failed to load contacts", err); setContacts([]); });
+      }

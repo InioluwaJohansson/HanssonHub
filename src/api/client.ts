@@ -36,9 +36,7 @@ api.interceptors.response.use(
       localStorage.removeItem('userName');
       localStorage.removeItem('roleName');
       // Only reload if we are not on the login page already to avoid loops
-      if (!window.location.pathname.includes('login')) {
-         window.location.reload();
-      }
+      window.dispatchEvent(new CustomEvent('auth-expired'));
     }
     return Promise.reject(error);
   }
@@ -57,7 +55,7 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
   if (token && !isLoginRequest) {
     finalHeaders['Authorization'] = `Bearer ${token}`;
   }
-
+  console.log(body);
   window.dispatchEvent(new CustomEvent('api-fetch-start'));
   try {
     const response = await api.request({

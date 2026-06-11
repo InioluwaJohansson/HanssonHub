@@ -65,7 +65,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       const result = response.data;
       console.log(response.data);
       
-      if (result.status) {
+      if (result.success || result.status || result.token) {
         toast.success("Successfully logged in!");
         onLoginSuccess(result.data, result.token);
       } else {
