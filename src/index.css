@@ -6,6 +6,26 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+[role="dialog"] [data-radix-scroll-area-viewport],
+[role="dialog"] .overflow-y-auto {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+[role="dialog"] [data-radix-scroll-area-viewport]::-webkit-scrollbar,
+[role="dialog"] .overflow-y-auto::-webkit-scrollbar {
+  display: none !important;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -159,4 +179,14 @@
 
 .spotify-bar {
   animation: spotify-bounce 0.8s ease-in-out infinite;
+}
+
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
 }

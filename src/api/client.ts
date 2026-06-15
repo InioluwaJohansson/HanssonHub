@@ -66,7 +66,25 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
       ...config,
     });
     console.log(response.data)
-    return response.data;
+    const data = response.data;
+
+    // Check if it's the "app list" - usually these are GetAll calls or returning arrays
+    // Also ignore if it's explicitly fetching the dashbaord or something similar that returns a list
+    const isAppList = endpoint.toLowerCase().includes('getall') || 
+                     endpoint.toLowerCase().includes('gettoken'); // Avoid throwing on token check errors that might be handled differently
+    
+    if (!isAppList && data && typeof data.status === 'boolean') {
+      if (data.status === false) {
+        throw new Error(data.message || 'Operation failed');
+      }
+      // If data.isSuccess is false (another pattern)
+    } else if (!isAppList && data && typeof data.isSuccess === 'boolean') {
+      if (data.isSuccess === false) {
+        throw new Error(data.message || 'Operation failed');
+      }
+    }
+
+    return data;
   } finally {
     window.dispatchEvent(new CustomEvent('api-fetch-end'));
   }

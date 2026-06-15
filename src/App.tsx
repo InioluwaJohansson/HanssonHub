@@ -25,6 +25,7 @@ import {
 } from './constants';
 import { 
   Device, 
+  DeviceType, 
   Scene, 
   Room, 
   Section, 
@@ -258,6 +259,12 @@ const iconMap: Record<string, any> = {
 
 import { ImageCropperModal } from './components/ImageCropperModal';
 
+const getRawId = (id: string | number | undefined): string => {
+  if (id === undefined || id === null) return '';
+  const s = id.toString();
+  return s.includes('-') ? s.split('-')[1] : s;
+};
+
 const NoItems = ({ icon: Icon = Info, message = "No items found." }: { icon?: any, message?: string }) => (
   <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200 w-full">
     <div className="h-16 w-16 rounded-full bg-white flex items-center justify-center text-slate-400 mb-4 shadow-sm">
@@ -321,6 +328,20 @@ const DASHBOARD_FACILITIES = [
   { id: 'facility-windows', label: 'Windows', icon: WindowIcon, desc: 'Verify environmental safety latches and track open states of physical windows.' },
 ];
 
+const mapSection = (s: any): Section => {
+  if (!s) return s;
+  const idStr = (s.sectionId ?? s.id ?? '').toString();
+  return {
+    ...s,
+    id: idStr,
+    name: s.sectionName || s.name || '',
+    type: s.sectionType || s.type || 'general',
+    isHidden: !!(s.isHidden || s.IsHidden),
+    sectionId: s.sectionId ?? s.id,
+    sectionName: s.sectionName || s.name,
+  } as Section;
+};
+
 export default function App() {
   const [devices, setDevices] = React.useState<Device[]>([]);
   const [scenes, setScenes] = React.useState<Scene[]>([]);
@@ -336,6 +357,8 @@ export default function App() {
   const [roomSearchQuery, setRoomSearchQuery] = React.useState('');
   const [sectionSearchQuery, setSectionSearchQuery] = React.useState('');
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
+  const [refreshState, setRefreshState] = React.useState<'idle'|'loading'|'success'|'error'>('idle');
+  const [refreshProgress, setRefreshProgress] = React.useState(0);
   const [selectedUserRoomId, setSelectedUserRoomId] = React.useState<string | number | null>(null);
   const [myRoomsSearchQuery, setMyRoomsSearchQuery] = React.useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(false);
@@ -346,36 +369,42 @@ export default function App() {
     setDevices(prev => {
       const otherDevices = prev.filter(d => d.type !== type);
       const mappedNewDevices = (fetchedData || []).map((item: any) => {
+        const itemRoomId = item.roomId !== undefined && item.roomId !== null ? item.roomId : (item.RoomId !== undefined && item.RoomId !== null ? item.RoomId : '');
+        const itemSectionId = item.sectionId !== undefined && item.sectionId !== null ? item.sectionId : (item.SectionId !== undefined && item.SectionId !== null ? item.SectionId : '');
+        
+        const roomStr = itemRoomId.toString();
+        const sectionStr = itemSectionId.toString();
+
         if (type === 'appliance') {
           return {
-            id: item.id.toString(),
+            id: `appliance-${item.id}`,
             name: item.applianceName || item.name || "Unknown Appliance",
             type: 'appliance',
             status: item.isActive ? 'on' : 'off',
-            room: item.roomId ? item.roomId.toString() : '',
-            section: item.sectionId ? item.sectionId.toString() : '',
+            room: roomStr,
+            section: sectionStr,
             powerUsage: item.powerActive ? 150 : 0
           } as Device;
         }
         if (type === 'light') {
           return {
-            id: item.id.toString(),
+            id: `light-${item.id}`,
             name: item.lightName || item.name || "Unknown Light",
             type: 'light',
             status: item.isActive ? 'on' : 'off',
             value: item.brightnessLevel || 0,
-            room: item.roomId ? item.roomId.toString() : '',
-            section: item.sectionId ? item.sectionId.toString() : ''
+            room: roomStr,
+            section: sectionStr
           } as Device;
         }
         if (type === 'camera') {
           return {
-            id: item.id.toString(),
+            id: `camera-${item.id}`,
             name: item.cameraName || item.name || "Unknown Camera",
             type: 'camera',
             status: item.isActive ? 'active' : 'inactive',
-            room: item.roomId ? item.roomId.toString() : '',
-            section: item.sectionId ? item.sectionId.toString() : ''
+            room: roomStr,
+            section: sectionStr
           } as Device;
         }
         if (type === 'door') {
@@ -385,23 +414,23 @@ export default function App() {
           else if (item.isLocked) doorStatus = 'locked';
           
           return {
-            id: item.id.toString(),
+            id: `door-${item.id}`,
             name: item.doorName || item.name || "Unknown Door",
             type: 'door',
             status: doorStatus,
-            room: item.roomId ? item.roomId.toString() : '',
-            section: item.sectionId ? item.sectionId.toString() : '',
-            doorType: item.doorType || 'interior'
+            room: roomStr,
+            section: sectionStr,
+            doorType: (appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === item.doorType?.toString())?.name || item.doorType || 'Interior'
           } as Device;
         }
         if (type === 'window') {
           return {
-            id: item.id.toString(),
+            id: `window-${item.id}`,
             name: item.windowName || item.name || "Unknown Window",
             type: 'window',
             status: item.isLocked ? 'locked' : item.isOpen ? 'open' : 'closed',
-            room: item.roomId ? item.roomId.toString() : '',
-            section: item.sectionId ? item.sectionId.toString() : ''
+            room: roomStr,
+            section: sectionStr
           } as Device;
         }
         return item;
@@ -628,7 +657,7 @@ export default function App() {
     type: 'light',
     room: '',
     section: '',
-    doorType: 'interior',
+    doorType: 1,
     ipAddress: '',
     username: '',
     password: '',
@@ -740,17 +769,29 @@ export default function App() {
         apiFetch('/Dashboard/GetAppNamesIdList', { method: 'POST' })
           .then((data: any) => {
             if (data && (data.data ?? data.Data)) {
+               const responseData = data.data ?? data.Data;
                setAppNamesDetailList((prev: any) => {
                  const next = { ...prev };
-                 Object.keys((data.data ?? data.Data)).forEach(key => {
-                   if ((data.data ?? data.Data)[key] !== null && (data.data ?? data.Data)[key] !== undefined) {
-                     next[key] = (data.data ?? data.Data)[key];
+                 Object.keys(responseData).forEach(key => {
+                   if (responseData[key] !== null && responseData[key] !== undefined) {
+                     next[key] = responseData[key];
+                     if (key === 'DoorType') {
+                       next['doorType'] = responseData[key];
+                     }
+                     if (key === 'doorType') {
+                       next['DoorType'] = responseData[key];
+                     }
                    }
                  });
                  return next;
                });
             } else if (data && !data.success) {
-               setAppNamesDetailList((prev: any) => ({ ...prev, ...data }));
+               setAppNamesDetailList((prev: any) => {
+                 const next = { ...prev, ...data };
+                 if (data.DoorType) next.doorType = data.DoorType;
+                 if (data.doorType) next.DoorType = data.doorType;
+                 return next;
+               });
             }
           })
           .catch(err => console.error("Failed to load app list data", err));
@@ -786,7 +827,7 @@ export default function App() {
       apiFetch('/Room/GetAllRooms', { method: 'POST' })
         .then((res: any) => { 
           if (res && res.data && Array.isArray(res.data)) {
-            setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+            setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
           } else {
             setRooms([]);
           }
@@ -794,7 +835,7 @@ export default function App() {
         .catch(() => setRooms([]));
 
       apiFetch('/Section/GetAllSections', { method: 'POST' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setSections(res.data); } else { setSections([]); } })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setSections(res.data.map(mapSection)); } else { setSections([]); } })
         .catch(() => setSections([]));
 
       apiFetch('/Appliance/GetAllAppliances', { method: 'POST' })
@@ -961,7 +1002,7 @@ export default function App() {
         apiFetch('/Room/GetAllRooms', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) {
-              setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+              setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
             } else {
               setRooms([]);
             }
@@ -975,7 +1016,7 @@ export default function App() {
       if (!fetchedViewsRef.current['facility-sections']) {
         fetchedViewsRef.current['facility-sections'] = true;
         apiFetch('/Section/GetAllSections', { method: 'POST' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data); else setSections([]); })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); else setSections([]); })
           .catch(err => { console.error("Failed to load sections", err); setSections([]); });
       }
     }
@@ -1019,7 +1060,7 @@ export default function App() {
         apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) {
-              setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' })));
+              setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
             } else {
               setRooms([]);
             }
@@ -1452,110 +1493,202 @@ export default function App() {
 
     const hsWrapper = homeSecurityConnection!;
     const hs = {
-      on: (event, callback) => hsWrapper.on(event, (data) => { console.log('SignalR Event:', event, data); callback(data); }),
-      off: (event) => hsWrapper.off(event)
+      on: (event: string, callback: (data: any) => void) => hsWrapper.on(event, (data) => { console.log('SignalR Event:', event, data); callback(data); }),
+      off: (event: string) => hsWrapper.off(event)
     };
+
+    const updateSyncDevice = (type: string, id: string | number, data: any, op: 'update' | 'add' | 'delete') => {
+      setDevices(prev => {
+        const targetId = `${type}-${id}`;
+        if (op === 'delete') {
+          return prev.filter(d => d.id !== targetId);
+        }
+        
+        const mapToDevice = (item: any, existingDev?: Device): Device => {
+          let st = 'off';
+          if (type === 'door' || type === 'window') {
+            st = (item.isOpen || item.IsOpen) ? 'open' : (item.isLocked || item.IsLocked ? 'locked' : 'unlocked');
+          } else {
+            st = (item.isActive || item.IsActive) ? (type === 'camera' ? 'active' : 'on') : (type === 'camera' ? 'inactive' : 'off');
+          }
+          
+          const existRoom = existingDev?.room || '';
+          const existSection = existingDev?.section || '';
+          const roomVal = item.roomId?.toString() || item.RoomId?.toString();
+          const sectionVal = item.sectionId?.toString() || item.SectionId?.toString();
+          
+          const nameVal = item.applianceName || item.lightName || item.cameraName || item.doorName || item.windowName || item.name;
+          const existName = existingDev?.name || 'Unknown';
+          
+          return {
+            id: `${type}-${item.id ?? item.Id ?? id}`,
+            name: nameVal || existName,
+            type: type as DeviceType,
+            status: st,
+            room: (roomVal !== undefined && roomVal !== null && roomVal !== '') ? roomVal : existRoom,
+            section: (sectionVal !== undefined && sectionVal !== null && sectionVal !== '') ? sectionVal : existSection,
+            value: type === 'light' ? (item.brightnessLevel !== undefined ? item.brightnessLevel : (item.BrightnessLevel !== undefined ? item.BrightnessLevel : (existingDev?.value ?? 0))) : undefined,
+            applianceType: item.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === item.applianceType)?.id || 1) : (existingDev?.applianceType)
+          };
+        };
+
+        if (op === 'add') {
+          if (prev.some(d => d.id === targetId)) return prev;
+          return [...prev, mapToDevice(data)];
+        }
+
+        // update
+        return prev.map(d => {
+          if (d.id !== targetId) return d;
+          return mapToDevice(data, d);
+        });
+      });
+    };
+
+    // --- Device Listeners ---
+    ['Light', 'Appliance', 'Camera', 'Door', 'Window'].forEach(t => {
+      const type = t.toLowerCase();
+      hs.on(`${t}Created`, (data) => {
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        const dataId = data.id ?? data.Id;
+        if (setter && dataId !== undefined && dataId !== null) {
+          setter(prev => {
+            if (prev.some(x => x.id.toString() === dataId.toString())) return prev;
+            return [...prev, data];
+          });
+        }
+        updateSyncDevice(type, dataId, data, 'add');
+      });
+      hs.on(`${t}Updated`, (data) => {
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        const dataId = data.id ?? data.Id;
+        if (setter && dataId !== undefined && dataId !== null) {
+          setter(prev => prev.map(x => x.id.toString() === dataId.toString() ? { ...x, ...data } : x));
+        }
+        updateSyncDevice(type, dataId, data, 'update');
+      });
+      hs.on(`${t}Deleted`, (data) => {
+        const id = typeof data === 'object' ? (data.id ?? data.Id) : data;
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        if (setter && id !== undefined && id !== null) {
+          setter(prev => prev.filter(x => x.id.toString() !== id.toString()));
+        }
+        updateSyncDevice(type, id, {}, 'delete');
+      });
+      hs.on(`${t}Triggered`, (data) => {
+        toast.info(`${t} triggered`, { description: data.message });
+        updateSyncDevice(type, (data.id ?? data.Id), data, 'update');
+      });
+    });
+
+    // --- System Listeners ---
+    hs.on("LogCreated", (data) => setLogs(prev => [data, ...prev]));
+    hs.on("SystemLogAdded", (data) => setLogs(prev => [data, ...prev]));
     
-    // Action Events
-    hs.on("ActionCreated", (data) => setActions(prev => [...prev, { id: (data.actionId ?? data.ActionId), actionName: (data.actionName ?? data.ActionName), actionDescription: (data.description ?? data.Description), actionActive: false, actionId: '', getActionStepDtos: [] }]));
-    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionName: (data.actionName ?? data.ActionName), actionDescription: (data.description ?? data.Description) } : a)));
-    hs.on("ActionActivationChanged", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, actionActive: (data.isActive ?? data.IsActive) } : a)));
-    hs.on("ActionDeleted", (data) => setActions(prev => prev.filter(a => a.id !== (data.actionId ?? data.ActionId))));
+    hs.on("PersonCreated", (data) => setAllUsers(prev => {
+      const dataId = data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(p => p.id.toString() === dataId.toString())) return prev;
+      return [...prev, data];
+    }));
+    hs.on("PersonUpdated", (data) => setAllUsers(prev => prev.map(p => (p.id !== undefined && p.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && p.id.toString() === (data.id ?? data.Id).toString() ? { ...p, ...data } : p)));
+    hs.on("PersonStatusChanged", (data) => setAllUsers(prev => prev.map(u => (u.id !== undefined && u.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && u.id.toString() === (data.id ?? data.Id).toString() ? { ...u, disabled: data.disabled } : u)));
     
-    hs.on("ApplianceTriggered", (data) => {
-        setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? { ...a, isActive: (data.isActive ?? data.IsActive) } : a));
-    });
-    hs.on("CameraTriggered", (data) => {
-        setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? { ...c, isActive: (data.isActive ?? data.IsActive) } : c));
-    });
-    hs.on("LightTriggered", (data) => {
-        setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? { ...l, isActive: (data.isActive ?? data.IsActive), brightnessLevel: (data.brightnessLevel ?? data.BrightnessLevel) || l.brightnessLevel } : l));
-    });
-    hs.on("DoorTriggered", (data) => {
-        setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? { ...d, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : d));
-    });
-    hs.on("WindowTriggered", (data) => {
-        setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? { ...w, isOpen: (data.isOpen ?? data.IsOpen), isLocked: (data.isLocked ?? data.IsLocked) } : w));
+    hs.on("RoomCreated", (data) => setRooms(prev => {
+      const dataId = data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(r => r.id.toString() === dataId.toString())) return prev;
+      return [...prev, { ...data, id: dataId, name: data.roomName || data.name, section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || '' }];
+    }));
+    hs.on("RoomUpdated", (data) => setRooms(prev => prev.map(r => (r.id !== undefined && r.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && r.id.toString() === (data.id ?? data.Id).toString() ? { 
+      ...r, 
+      ...data, 
+      name: data.roomName || data.name || r.name, 
+      section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || r.section || '' 
+    } : r)));
+    hs.on("RoomDeleted", (id) => setRooms(prev => {
+      const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
+      if (deletedId === undefined || deletedId === null) return prev;
+      return prev.filter(r => r.id.toString() !== deletedId.toString());
+    }));
+    
+    hs.on("SectionCreated", (data) => setSections(prev => {
+      const dataId = data.sectionId ?? data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(s => s.id.toString() === dataId.toString())) return prev;
+      return [...prev, mapSection(data)];
+    }));
+    hs.on("SectionUpdated", (data) => setSections(prev => prev.map(s => s.id.toString() === (data.sectionId ?? data.id ?? data.Id ?? '').toString() ? { ...s, ...mapSection(data) } : s)));
+    hs.on("SectionDeleted", (id) => {
+      const deletedId = typeof id === 'object' ? (id.sectionId ?? id.id ?? id.Id) : id;
+      setSections(prev => prev.filter(s => s.id.toString() !== (deletedId ?? '').toString()));
     });
     
-    hs.on("ActionTriggered", (data) => console.log("ActionTriggered", data));
+    hs.on("ExternalCreated", (data) => setExternals(prev => {
+      const dataId = data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(e => e.id.toString() === dataId.toString())) return prev;
+      return [...prev, data];
+    }));
+    hs.on("ExternalsCreated", (data) => setExternals(prev => {
+      const dataId = data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(e => e.id.toString() === dataId.toString())) return prev;
+      return [...prev, data];
+    }));
+    hs.on("ExternalUpdated", (data) => setExternals(prev => prev.map(e => (e.id !== undefined && e.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && e.id.toString() === (data.id ?? data.Id).toString() ? { ...e, ...data } : e)));
+    hs.on("ExternalsUpdated", (data) => setExternals(prev => prev.map(e => (e.id !== undefined && e.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && e.id.toString() === (data.id ?? data.Id).toString() ? { ...e, ...data } : e)));
+    hs.on("ExternalDeleted", (id) => {
+      const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
+      if (deletedId === undefined || deletedId === null) return;
+      setExternals(prev => prev.filter(e => e.id.toString() !== deletedId.toString()));
+    });
+    
+    hs.on("HardwareCreated", (data) => setHardwares(prev => {
+      const dataId = data.id ?? data.Id;
+      if (dataId !== undefined && dataId !== null && prev.some(h => h.id.toString() === dataId.toString())) return prev;
+      return [...prev, data];
+    }));
+    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => (h.id !== undefined && h.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && h.id.toString() === (data.id ?? data.Id).toString() ? { ...h, ...data } : h)));
+    
+    hs.on("ActionCreated", (data) => setActions(prev => {
+      const dataId = data.actionId ?? data.ActionId ?? data.id;
+      if (dataId !== undefined && dataId !== null && prev.some(a => a.id.toString() === dataId.toString())) return prev;
+      return [...prev, { ...data, id: dataId, actionName: (data.actionName ?? data.ActionName ?? data.name), actionDescription: (data.description ?? data.Description), actionActive: false, actionId: '', getActionStepDtos: [] }];
+    }));
+    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => (a.id !== undefined && a.id !== null && (data.actionId ?? data.ActionId ?? data.id) !== undefined && (data.actionId ?? data.ActionId ?? data.id) !== null) && a.id.toString() === (data.actionId ?? data.ActionId ?? data.id).toString() ? { ...a, ...data } : a)));
+    hs.on("ActionActivationChanged", (data) => setActions(prev => prev.map(a => (a.id !== undefined && a.id !== null && (data.actionId ?? data.ActionId ?? data.id) !== undefined && (data.actionId ?? data.ActionId ?? data.id) !== null) && a.id.toString() === (data.actionId ?? data.ActionId ?? data.id).toString() ? { ...a, actionActive: (data.isActive ?? data.IsActive) } : a)));
+    hs.on("ActionDeleted", (id) => {
+      const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
+      if (deletedId === undefined || deletedId === null) return;
+      setActions(prev => prev.filter(a => a.id.toString() !== deletedId.toString()));
+    });
+    
     hs.on("ActionStepAdded", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
     hs.on("ActionStepUpdated", (data) => { if((data.data ?? data.Data)) setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? (data.data ?? data.Data) : a)); });
     hs.on("ActionStepDeleted", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, getActionStepDtos: a.getActionStepDtos.filter(s => s.id !== (data.actionStepId ?? data.ActionStepId)) } : a)));
 
-    // Appliance Events
-    hs.on("ApplianceCreated", (data) => setAppliances(prev => [...prev, data]));
-    hs.on("ApplianceUpdated", (data) => setAppliances(prev => prev.map(a => a.id === (data.id ?? data.Id) ? data : a)));
-    hs.on("ApplianceDeleted", (data) => setAppliances(prev => prev.filter(a => a.id !== (data.id ?? data.Id))));
+    hs.on("GetAppNamesDetails", (data) => {
+      setAppNamesDetailList(prev => {
+        const next = { ...prev, ...data };
+        if (data && data.DoorType && !data.doorType) {
+          next.doorType = data.DoorType;
+        }
+        return next;
+      });
+    });
 
-    // Camera Events
-    hs.on("CameraCreated", (data) => setCameras(prev => [...prev, data]));
-    hs.on("CameraUpdated", (data) => setCameras(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
-    hs.on("CameraDeleted", (data) => setCameras(prev => prev.filter(c => c.id !== (data.id ?? data.Id))));
+    hs.on("ContactCategoryCreated", (data) => setContactCategories(prev => {
+      const dataId = data.id ?? data.Id;
+      if (prev.some(c => c.id === dataId)) return prev;
+      return [...prev, data];
+    }));
+    hs.on("ContactCategoryUpdated", (data) => setContactCategories(prev => prev.map(c => c.id === (data.id ?? data.Id) ? { ...c, ...data } : c)));
+    hs.on("ContactCategoryDeleted", (id) => {
+      const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
+      setContactCategories(prev => prev.filter(c => c.id !== deletedId));
+    });
 
-    // FingerPrint Event
     hs.on("fingerprint_received", (data) => {
         console.log("Fingerprint received", data);
         toast.info(data.message || "Fingerprint data received");
         setFingerprintImages(prev => [...prev, data.fingerPrintEncoding]);
     });
-
-    // External Events
-    hs.on("ExternalsCreated", (data) => setExternals(prev => [...prev, data]));
-    hs.on("ExternalsUpdated", (data) => setExternals(prev => prev.map(e => e.id === (data.id ?? data.Id) ? data : e)));
-    hs.on("ExternalsDeleted", (data) => setExternals(prev => prev.filter(e => e.id === (data.id ?? data.Id)))); // Fix? the data only has Id for deleted usually.. filter if logic doesn't match
-
-    // Light Events
-    hs.on("LightCreated", (data) => setLights(prev => [...prev, data]));
-    hs.on("LightUpdated", (data) => setLights(prev => prev.map(l => l.id === (data.id ?? data.Id) ? data : l)));
-    hs.on("LightDeleted", (data) => setLights(prev => prev.filter(l => l.id !== (data.id ?? data.Id)))); // wait if payload is just { id } or { light: { id }}
-
-    // Logs Event
-    hs.on("LogCreated", (data) => setLogs(prev => [data, ...prev]));
-
-    // Room
-    hs.on("RoomCreated", (data) => setRooms(prev => [...prev, data]));
-    hs.on("RoomUpdated", (data) => setRooms(prev => prev.map(r => r.id === (data.id ?? data.Id) ? data : r)));
-    hs.on("RoomDeleted", (id) => setRooms(prev => prev.filter(r => r.id !== id)));
-
-    // Door
-    hs.on("DoorCreated", (data) => setDoors(prev => [...prev, data]));
-    hs.on("DoorUpdated", (data) => setDoors(prev => prev.map(d => d.id === (data.id ?? data.Id) ? data : d)));
-
-    // Window
-    hs.on("WindowCreated", (data) => setWindows(prev => [...prev, data]));
-    hs.on("WindowUpdated", (data) => setWindows(prev => prev.map(w => w.id === (data.id ?? data.Id) ? data : w)));
-
-    // Hardware
-    hs.on("HardwareCreated", (data) => setHardwares(prev => [...prev, data]));
-    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => h.id === (data.id ?? data.Id) ? data : h)));
-
-    // Section
-    hs.on("SectionCreated", (data) => setSections(prev => [...prev, data]));
-    hs.on("SectionUpdated", (data) => setSections(prev => prev.map(s => s.id === (data.id ?? data.Id) ? data : s)));
-    hs.on("SectionDeleted", (data) => setSections(prev => prev.filter(s => s.id !== (data.id ?? data.Id)))); // payload is { id } it seems
-
-    // AppNamesDetails
-    hs.on("GetAppNamesDetails", (data) => {
-         setAppNamesDetailList(data);
-    });
-
-    // ContactCategory
-    hs.on("ContactCategoryCreated", (data) => setContactCategories(prev => [...prev, data]));
-    hs.on("ContactCategoryUpdated", (data) => setContactCategories(prev => prev.map(c => c.id === (data.id ?? data.Id) ? data : c)));
-    hs.on("ContactCategoryDeleted", (data) => setContactCategories(prev => prev.filter(c => c.id !== (data.id ?? data.Id))));
-
-    // Person
-    hs.on("PersonCreated", (data) => {
-         setAllUsers(prev => [...prev, data]);
-    });
-    hs.on("PersonUpdated", (data) => {
-         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? data : u));
-    });
-    hs.on("PersonStatusChanged", (data) => {
-         setAllUsers(prev => prev.map(u => u.id === (data.id ?? data.Id) ? { ...u, disabled: data.disabled } : u));
-    });
-
 
     // Chat Events via chatConnection
     const csWrapper = chatConnection!;
@@ -1925,8 +2058,10 @@ export default function App() {
 
   const handleRefresh = async () => {
     try {
-        const p1 = apiFetch('/Room/GetAllRooms', { method: 'POST' }).then((res: any) => { if (res && res.data) setRooms(res.data.map((r: any) => ({ ...r, name: r.roomName || r.name, section: r.sectionName || r.section || '', icon: r.icon || 'Sofa' }))); });
-        const p2 = apiFetch('/Section/GetAllSections', { method: 'POST' }).then((res: any) => { if (res && res.data) setSections(res.data); });
+        setRefreshState('loading');
+        setRefreshProgress(70);
+        const p1 = apiFetch('/Room/GetAllRooms', { method: 'POST' }).then((res: any) => { if (res && res.data) setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' }))); });
+        const p2 = apiFetch('/Section/GetAllSections', { method: 'POST' }).then((res: any) => { if (res && res.data) setSections(res.data.map(mapSection)); });
         const p3 = apiFetch('/Appliance/GetAllAppliances', { method: 'POST' }).then((res: any) => { if (res && res.data) { setAppliances(res.data); syncDevicesFromFetchedType('appliance', res.data); } });
         const p4 = apiFetch('/Light/GetAllLights', { method: 'POST' }).then((res: any) => { if (res && res.data) { setLights(res.data); syncDevicesFromFetchedType('light', res.data); } });
         const p5 = apiFetch('/Camera/GetAllCameras', { method: 'POST' }).then((res: any) => { if (res && res.data) { setCameras(res.data); syncDevicesFromFetchedType('camera', res.data); } });
@@ -1938,9 +2073,14 @@ export default function App() {
         const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' }).then((res: any) => { if (res && res.data) setContactCategories(res.data); });
         const p12 = apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setContacts(res.data); });
         await Promise.all([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12]);
-        toast.success("All data refreshed");
+        setRefreshProgress(100);
+        setRefreshState('success');
+        setTimeout(() => setRefreshState('idle'), 1000);
     } catch(err) {
       console.error(err);
+      setRefreshProgress(100);
+      setRefreshState('error');
+      setTimeout(() => setRefreshState('idle'), 1500);
     }
   };
 
@@ -1952,10 +2092,11 @@ export default function App() {
       const doorsInRoom = devices.filter(d => d.room === roomId && d.type === 'door');
       for (const door of doorsInRoom) {
         try {
+          const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
           if (nextState) {
-            await apiFetch(`/Door/LockDoor?id=${door.id}`, { method: 'PUT' });
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
           } else {
-            await apiFetch(`/Door/UnlockDoor?id=${door.id}`, { method: 'PUT' });
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
           }
         } catch (e) {
            console.error("Failed to toggle door in room lock", e);
@@ -1978,7 +2119,7 @@ export default function App() {
 
   const handleUpdateProfile = async () => {
     if (!userProfile) return;
-    // Construct UpdatePersonDto
+    
     const updateData = {
       id: userProfile.id,
       cameraIds: userProfile.cameraIds || [],
@@ -1986,7 +2127,7 @@ export default function App() {
         firstName: userProfile.getPersonDetailsDto.firstName,
         lastName: userProfile.getPersonDetailsDto.lastName,
         gender: userProfile.getPersonDetailsDto.gender,
-        imageUrl: userProfile.getPersonDetailsDto.imageUrl
+        imageUrl: userProfile.getPersonDetailsDto.imageUrl || null
       },
       updateUserDto: {
         id: userProfile.getUserDto.id,
@@ -2000,6 +2141,7 @@ export default function App() {
         method: 'PUT',
         body: JSON.stringify(updateData)
       });
+      
       addLogEntry('Profile Sync', 'Updated profile identity');
       toast.success('Profile updated successfully');
     } catch (err: any) {
@@ -2039,7 +2181,7 @@ export default function App() {
     requestAuth(async () => {
       try {
         const payload = {
-          id: editingCategory.id,
+          id: Number(editingCategory.id),
           name: newCategoryName,
           description: newCategoryDescription,
           icon: newCategoryIcon
@@ -2307,15 +2449,16 @@ export default function App() {
     requestAuth(async () => {
       if (!newSectionName.trim()) return;
       try {
-        const urlParams = new URLSearchParams({
-          SectionName: newSectionName,
-          IsHidden: newSectionIsHidden ? 'true' : 'false'
-        });
-        const response: any = await apiFetch(`/Section/CreateSection?${urlParams.toString()}`, {
-          method: 'POST'
+        const payload = {
+          sectionName: newSectionName,
+          isHidden: newSectionIsHidden ? true : false
+        };
+        const response: any = await apiFetch('/Section/CreateSection', {
+          method: 'POST',
+          body: JSON.stringify(payload)
         });
         if (response && response.data) {
-          setSections((prev: any) => [...prev, response.data]);
+          setSections((prev: any) => [...prev, mapSection(response.data)]);
         } else {
           setSections((prev: any) => [...prev, {
             id: (newSectionName || '').toLowerCase().replace(/\s+/g, '-'),
@@ -2400,23 +2543,69 @@ export default function App() {
   };
 
   
-  const handleToggle = (id: string) => {
-    requestAuth(async () => {
+    const handleToggle = async (id: string) => {
       let d = devices.find(x => x.id === id);
       if (!d) return;
 
-      if (d.type === 'door') {
-        try {
+      const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+
+      try {
+        if (d.type === 'door') {
           if (d.status === 'locked') {
-            await apiFetch(`/Door/UnlockDoor?id=${d.id}`, { method: 'PUT' });
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
           } else {
-            await apiFetch(`/Door/LockDoor?id=${d.id}`, { method: 'PUT' });
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
           }
-          toast.success(`Door ${d.status === 'locked' ? 'unlocked' : 'locked'} successfully`);
-        } catch (err: any) {
-          toast.error(`Error toggling door: ${err.message}`);
-          return; // cancel local toggle
+        } else if (d.type === 'light') {
+          const nextActive = d.status === 'off';
+          const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
+          await apiFetch('/Light/UpdateLight', { 
+            method: 'PUT', 
+            body: { 
+              id: parseInt(rawId), 
+              isActive: nextActive, 
+              lightName: lightDto?.lightName || d.name,
+              brightnessLevel: d.value ?? lightDto?.brightnessLevel ?? 100,
+              roomId: (lightDto?.roomId && lightDto.roomId !== 'none') ? parseInt(lightDto.roomId.toString()) : null,
+              sectionId: (lightDto?.sectionId && lightDto.sectionId !== 'none') ? parseInt(lightDto.sectionId.toString()) : null
+            } 
+          });
+        } else if (d.type === 'appliance') {
+          const nextActive = (d.status === 'off' || d.status === 'inactive');
+          const appDto = (appliances || []).find(a => a.id.toString() === rawId.toString());
+          await apiFetch('/Appliance/UpdateAppliance', { 
+            method: 'PUT', 
+            body: { 
+              id: parseInt(rawId), 
+              isActive: nextActive, 
+              applianceName: appDto?.applianceName || d.name,
+              applianceType: appDto?.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1) : 1,
+              roomId: (appDto?.roomId && appDto.roomId !== 'none') ? parseInt(appDto.roomId.toString()) : null,
+              sectionId: (appDto?.sectionId && appDto.sectionId !== 'none') ? parseInt(appDto.sectionId.toString()) : null
+            } 
+          });
+        } else if (d.type === 'camera') {
+          const nextActive = d.status === 'inactive';
+          const camDto = (cameras || []).find(c => c.id.toString() === rawId.toString());
+          await apiFetch('/Camera/UpdateCamera', { 
+            method: 'PUT', 
+            body: { 
+              id: parseInt(rawId), 
+              isActive: nextActive, 
+              cameraName: camDto?.cameraName || d.name,
+              ipAddress: (camDto as any)?.ipAddress || "127.0.0.1",
+              username: (camDto as any)?.username || "admin",
+              streamPath: (camDto as any)?.streamPath || "/",
+              port: (camDto as any)?.port || 80
+            } 
+          });
         }
+        
+        toast.success(`Device toggled successfully`);
+      } catch (err: any) {
+        console.error("Failed to toggle device remotely", err);
+        toast.error(`Remote toggle failed: ${err.message}`);
+        return; // Don't update local state if remote fails
       }
 
       setDevices(prev => prev.map(d => {
@@ -2435,7 +2624,60 @@ export default function App() {
         
         return { ...d, status: newStatus as any };
       }));
-    });
+  };
+
+  const handleDoorAction = async (id: string, action: 'lock'|'unlock'|'open'|'close') => {
+    let d = devices.find(x => x.id === id);
+    if (!d) return;
+
+    const rawId = getRawId(d.id);
+
+    try {
+      if (d.type === 'door') {
+        if (action === 'lock') {
+          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'unlock') {
+          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open') {
+          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'close') {
+          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+        }
+      } else if (d.type === 'window') {
+        if (action === 'lock') {
+          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'unlock') {
+          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open') {
+          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'close') {
+          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+        }
+      }
+      toast.success(`${d.type} toggled successfully`);
+    } catch (err: any) {
+      console.error(`Failed to toggle ${d.type} remotely`, err);
+      toast.error(`Remote toggle failed: ${err.message}`);
+      return; 
+    }
+
+    setDevices(prev => prev.map(dev => {
+      if (dev.id !== id) return dev;
+      let newStatus = dev.status;
+      const isLocked = dev.status === 'locked' || dev.status === 'open-locked';
+      const isOpen = dev.status === 'open' || dev.status === 'open-locked';
+
+      if (action === 'lock') {
+        newStatus = 'locked';
+      } else if (action === 'unlock') {
+        newStatus = isOpen ? 'open' : 'unlocked';
+      } else if (action === 'open') {
+        newStatus = isLocked ? 'open-locked' : 'open';
+      } else if (action === 'close') {
+        newStatus = isLocked ? 'locked' : 'unlocked';
+      }
+      return { ...dev, status: newStatus as any };
+    }));
   };
 
   const handleStatusChange = (id: string, status: string) => {
@@ -2450,18 +2692,55 @@ export default function App() {
     ));
   };
 
+  const valueChangeTimers = React.useRef<{ [id: string]: ReturnType<typeof setTimeout> }>({});
+
+  const handleValueChangeEnd = (id: string, value: number) => {
+    if (valueChangeTimers.current[id]) {
+      clearTimeout(valueChangeTimers.current[id]);
+    }
+    valueChangeTimers.current[id] = setTimeout(async () => {
+      // Get the latest device from state, since closure might have stale state
+      setDevices(currentDevices => {
+        const d = currentDevices.find(x => x.id === id);
+        if (!d || d.type !== 'light') return currentDevices;
+        const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+        const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
+        const currentIsActive = d.status === 'on';
+        
+        apiFetch('/Light/UpdateLight', {
+          method: 'PUT',
+          body: JSON.stringify({
+            id: parseInt(rawId),
+            isActive: currentIsActive,
+            lightName: lightDto?.lightName || d.name,
+            brightnessLevel: d.value ?? value,
+            roomId: (lightDto?.roomId && lightDto.roomId !== 'none') ? parseInt(lightDto.roomId.toString()) : null,
+            sectionId: (lightDto?.sectionId && lightDto.sectionId !== 'none') ? parseInt(lightDto.sectionId.toString()) : null
+          })
+        }).then(() => {
+          toast.success('Brightness updated remotely');
+        }).catch((err: any) => {
+          toast.error(`Remote slider update failed: ${err.message}`);
+        });
+
+        return currentDevices;
+      });
+    }, 2000);
+  };
+
   const handleDeleteDevice = (id: string, type?: string) => {
+    const rawId = getRawId(id);
     requestAuth(async () => {
       let isSuccess = true;
       try {
         if (type === 'camera') {
-          await apiFetch(`/Camera/DeleteCamera?cameraId=${id}`, { method: 'PUT' });
+          await apiFetch(`/Camera/DeleteCamera?cameraId=${rawId}`, { method: 'PUT' });
         } else if (type === 'appliance') {
-          await apiFetch(`/Appliance/DeleteAppliance?applianceId=${id}`, { method: 'PUT' });
+          await apiFetch(`/Appliance/DeleteAppliance?applianceId=${rawId}`, { method: 'PUT' });
         } else if (type === 'window') {
-          await apiFetch(`/Window/DeleteWindow?windowId=${id}`, { method: 'PUT' });
+          await apiFetch(`/Window/DeleteWindow?windowId=${rawId}`, { method: 'PUT' });
         } else if (type === 'light') {
-          await apiFetch(`/Light/DeleteLight?lightId=${id}`, { method: 'PUT' });
+          await apiFetch(`/Light/DeleteLight?lightId=${rawId}`, { method: 'PUT' });
         }
       } catch (err: any) {
         console.error("Failed to delete device remotely", err);
@@ -2472,29 +2751,35 @@ export default function App() {
       if (isSuccess) {
         setDevices(prev => prev.filter(d => d.id !== id));
         if (type === 'camera') {
-          setCameras(prev => prev.filter(c => c.id.toString() !== id.toString()));
+          setCameras(prev => prev.filter(c => c.id.toString() !== rawId));
         } else if (type === 'appliance') {
-          setAppliances(prev => prev.filter(a => a.id.toString() !== id.toString()));
+          setAppliances(prev => prev.filter(a => a.id.toString() !== rawId));
         } else if (type === 'window') {
-          setWindows(prev => prev.filter(w => w.id.toString() !== id.toString()));
+          setWindows(prev => prev.filter(w => w.id.toString() !== rawId));
         } else if (type === 'light') {
-          setLights(prev => prev.filter(l => l.id.toString() !== id.toString()));
+          setLights(prev => prev.filter(l => l.id.toString() !== rawId));
         }
         toast.success("Device deleted successfully");
       }
     });
   };
 
-  const handleEditDevice = (id: string) => {
-    const device = devices.find(d => d.id === id);
+  const handleEditDevice = (id: string, type?: string) => {
+    const device = devices.find(d => d.id === id && (type ? d.type === type : true));
     if (device) {
       let finalDevice = { ...device };
+      const rawId = getRawId(device.id);
       if (device.type === 'appliance') {
-        const appDto = (appliances || []).find(a => a.id.toString() === device.id.toString() || a.applianceName === device.name);
+        const appDto = (appliances || []).find(a => a.id.toString() === rawId || a.applianceName === device.name);
         if (appDto) {
-          const typeId = appNamesDetailList.applianceType.find(t => t.name === appDto.applianceType)?.id || 1;
+          const typeId = (appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1;
           finalDevice.applianceType = typeId;
         }
+      }
+      if (device.type === 'door') {
+        // Reverse map device.doorType (the string name) back to the ID for the select dropdown
+        const doorTypeItem = (appNamesDetailList?.doorType || []).find((t: any) => t.name === device.doorType);
+        finalDevice.doorType = doorTypeItem ? doorTypeItem.id : 1;
       }
       setEditingDevice(finalDevice);
       setIsEditDeviceOpen(true);
@@ -2524,12 +2809,13 @@ export default function App() {
     requestAuth(async () => {
       if (editingDevice && editingDevice.id) {
         let isSuccess = true;
+        const rawId = getRawId(editingDevice.id);
         try {
           if (editingDevice.type === 'camera') {
             await apiFetch('/Camera/UpdateCamera', {
               method: 'PUT',
               body: JSON.stringify({
-                id: Number(editingDevice.id) || 0,
+                id: Number(rawId) || 0,
                 roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
                 sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
@@ -2541,12 +2827,12 @@ export default function App() {
             await apiFetch('/Appliance/UpdateAppliance', {
               method: 'PUT',
               body: JSON.stringify({
-                id: Number(editingDevice.id) || 0,
+                id: Number(rawId) || 0,
                 roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
                 sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 applianceName: editingDevice.name,
-                applianceType: editingDevice.applianceType || 1,
+                applianceType: parseInt(editingDevice.applianceType?.toString() || '1'),
                 isActive: true
               })
             });
@@ -2554,7 +2840,7 @@ export default function App() {
             await apiFetch('/Window/UpdateWindow', {
               method: 'PUT',
               body: JSON.stringify({
-                id: Number(editingDevice.id) || 0,
+                id: Number(rawId) || 0,
                 roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
                 sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
@@ -2570,12 +2856,12 @@ export default function App() {
             await apiFetch('/Door/UpdateDoor', {
               method: 'PUT',
               body: JSON.stringify({
-                id: Number(editingDevice.id) || 0,
+                id: Number(rawId) || 0,
                 roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
                 sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
                 doorName: editingDevice.name,
-                doorType: editingDevice.doorType === 'garage' ? 3 : editingDevice.doorType === 'exterior' ? 2 : 1,
+                doorType: parseInt(editingDevice.doorType?.toString() || '1'),
                 isLocked: editingDevice.status === 'locked' || editingDevice.status === 'open-locked',
                 isOpen: editingDevice.status === 'open' || editingDevice.status === 'open-locked',
                 openedBy: 0,
@@ -2587,7 +2873,7 @@ export default function App() {
             await apiFetch('/Light/UpdateLight', {
               method: 'PUT',
               body: JSON.stringify({
-                id: Number(editingDevice.id) || 0,
+                id: Number(rawId) || 0,
                 roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
                 sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
                 isHidden: false,
@@ -2604,42 +2890,50 @@ export default function App() {
         }
 
         if (isSuccess) {
-          setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...editingDevice } as Device : d));
+          const finalRoom = editingDevice.room === 'none' ? '' : (editingDevice.room || '');
+          const finalSection = editingDevice.section === 'none' ? '' : (editingDevice.section || '');
+          const processedEditingDevice = {
+            ...editingDevice,
+            room: finalRoom,
+            section: finalSection
+          };
+          setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...processedEditingDevice } as Device : d));
+          
           if (editingDevice.type === 'camera') {
-            setCameras(prev => prev.map(c => c.id.toString() === editingDevice.id!.toString() ? {
+            setCameras(prev => prev.map(c => c.id.toString() === rawId ? {
               ...c,
               cameraName: editingDevice.name || c.cameraName,
-              roomId: editingDevice.room ? parseInt(editingDevice.room) : c.roomId,
-              sectionId: editingDevice.section ? parseInt(editingDevice.section) : c.sectionId
+              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
+              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
             } : c));
           }
           if (editingDevice.type === 'appliance') {
-            setAppliances(prev => prev.map(a => a.id.toString() === editingDevice.id!.toString() ? {
+            setAppliances(prev => prev.map(a => a.id.toString() === rawId ? {
               ...a,
               applianceName: editingDevice.name || a.applianceName,
-              applianceType: appNamesDetailList?.applianceType?.find((t: any) => t.id === editingDevice.applianceType)?.name || a.applianceType,
-              roomId: editingDevice.room ? parseInt(editingDevice.room) : a.roomId,
-              roomName: (rooms || []).find(r => r.id === editingDevice.room)?.name,
-              sectionId: editingDevice.section ? parseInt(editingDevice.section) : a.sectionId,
-              sectionName: (sections || []).find(s => s.id === editingDevice.section)?.name
+              applianceType: appNamesDetailList?.applianceType?.find((t: any) => t.id.toString() === editingDevice.applianceType?.toString())?.name || a.applianceType,
+              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
+              roomName: (editingDevice.room && editingDevice.room !== 'none') ? (rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name : undefined,
+              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null,
+              sectionName: (editingDevice.section && editingDevice.section !== 'none') ? (sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name : undefined
             } : a));
           }
           if (editingDevice.type === 'window') {
-            setWindows(prev => prev.map(w => w.id.toString() === editingDevice.id!.toString() ? {
+            setWindows(prev => prev.map(w => w.id.toString() === rawId ? {
               ...w,
               windowName: editingDevice.name || w.windowName,
-              roomId: editingDevice.room ? parseInt(editingDevice.room) : w.roomId,
-              sectionId: editingDevice.section ? parseInt(editingDevice.section) : w.sectionId
+              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
+              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
             } : w));
           }
           if (editingDevice.type === 'light') {
-            setLights(prev => prev.map(l => l.id.toString() === editingDevice.id!.toString() ? {
+            setLights(prev => prev.map(l => l.id.toString() === rawId ? {
               ...l,
               lightName: editingDevice.name || l.lightName,
               brightnessLevel: editingDevice.value || l.brightnessLevel,
               isActive: editingDevice.status === 'on',
-              roomId: editingDevice.room ? parseInt(editingDevice.room) : l.roomId,
-              sectionId: editingDevice.section ? parseInt(editingDevice.section) : l.sectionId
+              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
+              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
             } : l));
           }
           setIsEditDeviceOpen(false);
@@ -2821,16 +3115,22 @@ export default function App() {
         if (res && res.data) {
           setLights(prev => [...prev, res.data]);
           const l = res.data;
-          setDevices(prev => [...prev, {
-            id: l.id.toString(),
-            name: l.lightName,
-            type: 'light',
-            status: l.isActive ? 'on' : 'off',
-            value: l.brightnessLevel || 0,
-            room: l.roomId ? l.roomId.toString() : '',
-            section: l.sectionId ? l.sectionId.toString() : '',
-            powerUsage: 0
-          } as Device]);
+          const rId = (l.roomId ?? l.RoomId ?? '').toString();
+          const sId = (l.sectionId ?? l.SectionId ?? '').toString();
+          setDevices(prev => {
+            const devId = `light-${l.id}`;
+            if (prev.some(d => d.id === devId)) return prev;
+            return [...prev, {
+              id: devId,
+              name: l.lightName || l.name,
+              type: 'light',
+              status: (l.isActive || l.IsActive) ? 'on' : 'off',
+              value: l.brightnessLevel || 0,
+              room: rId,
+              section: sId,
+              powerUsage: 0
+            } as Device];
+          });
         }
         toast.success('Light added successfully'); setIsAddDeviceOpen(false);
       } else {
@@ -2852,7 +3152,7 @@ export default function App() {
       }
       
       setIsAddDeviceOpen(false);
-      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 'interior', applianceType: 1 });
+      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 1, applianceType: 1 });
     } catch (err: any) {
       toast.error(err.message || 'Error occurred while creating the device');
     }
@@ -2880,7 +3180,7 @@ export default function App() {
           setRooms((prev: any) => [...prev, {
             ...room,
             name: room.roomName || room.name,
-            section: room.sectionName || room.section || '',
+            section: room.sectionId?.toString() || room.sectionName || room.section || '',
             icon: room.icon || 'Sofa'
           }]);
           setIsAddRoomOpen(false);
@@ -2919,7 +3219,7 @@ export default function App() {
     
     if (activeView.startsWith('room-')) {
       const roomId = activeView.replace('room-', '');
-      filtered = filtered.filter(d => d.room === roomId);
+      filtered = filtered.filter(d => d.room?.toString() === roomId.toString());
     } else if (activeView === 'facility-doors') {
       filtered = filtered.filter(d => d.type === 'door');
     } else if (activeView === 'facility-lights') {
@@ -2940,12 +3240,12 @@ export default function App() {
     if (activeView.startsWith('facility-')) {
       filtered = [...filtered].sort((a, b) => {
         if (facilitySortBy === 'room') {
-          const roomA = (rooms || []).find(r => r.id === a.room)?.name || 'No Room';
-          const roomB = (rooms || []).find(r => r.id === b.room)?.name || 'No Room';
+          const roomA = (rooms || []).find(r => r.id.toString() === a.room?.toString())?.name || 'No Room';
+          const roomB = (rooms || []).find(r => r.id.toString() === b.room?.toString())?.name || 'No Room';
           return roomA.localeCompare(roomB);
         } else {
-          const sectionA = (sections || []).find(s => s.id === a.section)?.name || 'No Section';
-          const sectionB = (sections || []).find(s => s.id === b.section)?.name || 'No Section';
+          const sectionA = (sections || []).find(s => s.id.toString() === a.section?.toString())?.name || 'No Section';
+          const sectionB = (sections || []).find(s => s.id.toString() === b.section?.toString())?.name || 'No Section';
           return sectionA.localeCompare(sectionB);
         }
       });
@@ -4636,8 +4936,8 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {(filteredUserRooms || []).map(room => {
                 const RoomIcon = iconMap[room.icon || ''] || Sofa;
-                const roomDevices = devices.filter(d => d.room === room.id);
-                const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
+                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
 
                 return (
                   <Card 
@@ -4809,7 +5109,9 @@ export default function App() {
                         device={device}
                         onToggle={handleToggle}
                         onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                       />
                     ))}
                   </div>
@@ -4831,7 +5133,9 @@ export default function App() {
                         device={device}
                         onToggle={handleToggle}
                         onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                       />
                     ))}
                   </div>
@@ -4853,7 +5157,9 @@ export default function App() {
                         device={device}
                         onToggle={handleToggle}
                         onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                       />
                     ))}
                   </div>
@@ -4905,7 +5211,9 @@ export default function App() {
                         device={device}
                         onToggle={handleToggle}
                         onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                       />
                     ))}
                   </div>
@@ -4929,7 +5237,9 @@ export default function App() {
                     device={device}
                     onToggle={handleToggle}
                     onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                     onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                     onClick={handleDeviceClick}
                   />
                 ))}
@@ -4999,8 +5309,8 @@ export default function App() {
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
               const Icon = iconMap[room.icon] || Sofa;
-              const roomDevices = devices.filter(d => d.room === room.id);
-              const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active').length;
+              const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+              const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
               
               return (
                 <Card 
@@ -5313,12 +5623,12 @@ export default function App() {
         // Sort by room or section
         result.sort((a, b) => {
           if (facilitySortBy === 'room') {
-            const roomA = (rooms || []).find(r => r.id === a.room)?.name || 'No Room';
-            const roomB = (rooms || []).find(r => r.id === b.room)?.name || 'No Room';
+            const roomA = (rooms || []).find(r => r.id.toString() === a.room?.toString())?.name || 'No Room';
+            const roomB = (rooms || []).find(r => r.id.toString() === b.room?.toString())?.name || 'No Room';
             return roomA.localeCompare(roomB);
           } else {
-            const sectionA = (sections || []).find(s => s.id === a.section)?.name || 'No Section';
-            const sectionB = (sections || []).find(s => s.id === b.section)?.name || 'No Section';
+            const sectionA = (sections || []).find(s => s.id.toString() === a.section?.toString())?.name || 'No Section';
+            const sectionB = (sections || []).find(s => s.id.toString() === b.section?.toString())?.name || 'No Section';
             return sectionA.localeCompare(sectionB);
           }
         });
@@ -5405,7 +5715,7 @@ export default function App() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredExternals && filteredExternals.length > 0 ? (
               (filteredExternals || []).map(ext => (
-                <Card key={ext.id} className="p-6 flex flex-col gap-4 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
+                <Card key={ext.id} className="p-6 flex flex-col gap-4 border transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <h3 className="font-bold text-lg">{ext.externalName}</h3>
@@ -5423,9 +5733,24 @@ export default function App() {
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <Switch 
                           checked={ext.isActive} 
-                          onCheckedChange={(checked) => {
-                            setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
-                            addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
+                          onCheckedChange={async (checked) => {
+                            try {
+                              const dto = {
+                                  id: Number(ext.id),
+                                  externalName: ext.externalName,
+                                  isActive: checked,
+                                  isTriggered: ext.isTriggered,
+                                  actionIds: ext.actionIds || [],
+                                  roomId: ext.roomId,
+                                  sectionId: ext.sectionId
+                              };
+                              await apiFetch('/External/UpdateExternal', { method: 'PUT', body: JSON.stringify(dto) });
+                              setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
+                              addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
+                              toast.success(`External device updated successfully`);
+                            } catch(err: any) {
+                              toast.error(`Failed to update external: ${err.message}`);
+                            }
                           }}
                           onClick={(e) => e.stopPropagation()}
                         />
@@ -5534,8 +5859,8 @@ export default function App() {
           <div className="grid grid-cols-1 gap-8">
             {sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
               sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
-                const sectionRooms = rooms.filter(r => r.section === section.id);
-                const sectionDevices = devices.filter(d => d.section === section.id);
+                const sectionRooms = rooms.filter(r => r.section?.toString() === section.id?.toString());
+                const sectionDevices = devices.filter(d => d.section?.toString() === section.id?.toString());
                 
                 return (
                   <div key={section.id} className="space-y-4 group relative">
@@ -5569,9 +5894,7 @@ export default function App() {
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Rooms</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           {sectionRooms.map(room => (
-                            <Card 
-                              key={room.id} 
-                              className="cursor-pointer hover:bg-accent transition-colors group relative"
+                            <Card key={room.id} className="border cursor-pointer hover:bg-accent transition-colors group relative"
                               onClick={() => setActiveView(`room-${room.id}`)}
                             >
                               <CardContent className="flex items-center gap-3 p-3">
@@ -5589,17 +5912,19 @@ export default function App() {
                       <div className="space-y-3">
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Direct Devices</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {sectionDevices.filter(d => !d.room).map(device => (
+                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none').map(device => (
                             <DeviceCard 
                               key={device.id} 
                               device={device} 
                               onToggle={handleToggle}
                               onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                               onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                               onClick={handleDeviceClick}
                             />
                           ))}
-                          {sectionDevices.filter(d => !d.room).length === 0 && (
+                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none').length === 0 && (
                             <p className="text-xs text-muted-foreground italic">No direct devices in this section.</p>
                           )}
                         </div>
@@ -5643,13 +5968,11 @@ export default function App() {
             {rooms && rooms.length > 0 ? (
               (rooms || []).map(room => {
                 const Icon = iconMap[room.icon] || Sofa;
-                const roomDevices = devices.filter(d => d.room === room.id);
+                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
                 const activeInRoom = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
                 
                 return (
-                  <Card 
-                    key={room.id} 
-                    className="cursor-pointer overflow-hidden transition-all hover:shadow-md group relative"
+                  <Card key={room.id} className="border cursor-pointer overflow-hidden transition-all hover:shadow-md group relative"
                     onClick={() => setActiveView(`room-${room.id}`)}
                   >
                     <Button 
@@ -5865,7 +6188,9 @@ export default function App() {
                 device={device} 
                 onToggle={handleToggle}
                 onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
                 onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
                 onDelete={handleDeleteDevice}
                 onEdit={handleEditDevice}
                 onClick={handleDeviceClick}
@@ -5904,7 +6229,7 @@ export default function App() {
   if (!isLoggedIn) {
     return (
       <>
-        <Toaster position="top-center" richColors />
+        <Toaster position="bottom-right" richColors />
         <LoginScreen onLoginSuccess={handleLoginSuccess} />
       </>
     );
@@ -5922,15 +6247,16 @@ export default function App() {
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
       {globalFetching > 0 && (
-        <div className="fixed top-6 right-6 z-[9999] bg-white/90 backdrop-blur-md border border-slate-200/50 shadow-lg rounded-full px-5 py-3 flex items-center justify-center pointer-events-none transition-all duration-300">
-          <div className="flex space-x-2 items-center">
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-            <div className="w-3 h-3 bg-primary rounded-full animate-bounce"></div>
-          </div>
+        <div className="fixed bottom-24 right-6 z-[9999] bg-white/95 backdrop-blur-md shadow-xl rounded-full px-5 py-2.5 flex items-center justify-center gap-3 transition-all duration-300 animate-in fade-in zoom-in-95">
+           <span className="text-sm font-semibold text-slate-800">Sending request</span>
+           <div className="flex space-x-1.5 items-center mt-1">
+             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
+           </div>
         </div>
       )}
-      <Toaster position="top-center" richColors />
+      <Toaster position="bottom-right" richColors />
       <Sidebar 
         activeView={activeView} 
         onViewChange={setActiveView} 
@@ -5940,7 +6266,8 @@ export default function App() {
         isCollapsed={isSidebarCollapsed}
       />
       
-      <main className="flex flex-1 flex-col min-h-0 overflow-hidden">
+      <main className="flex flex-1 flex-col min-h-0 overflow-hidden relative">
+
         {/* Header */}
         <header className="flex h-16 items-center justify-between border-b px-8 bg-card/30 backdrop-blur-md z-10 shrink-0">
           <div className="flex items-center gap-4">
@@ -5979,18 +6306,23 @@ export default function App() {
             </button>
           </div>
         </header>
-
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-8 pb-12">
-            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+        <div className="flex-1 min-h-0 overflow-y-auto relative">
+        <div 
+          className={cn(
+            "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
+            refreshState === 'idle' ? "opacity-0 w-0" : "opacity-100",
+            refreshState === 'loading' ? "bg-black w-[70%]" : 
+            (refreshState === 'success' ? "bg-green-500 w-full" : 
+            (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
+          )}
+        /><div className="p-8 pb-12 min-h-full">
+            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
               <div className="min-h-full">
                 <AnimatePresence mode="wait">
                   {renderView()}
                 </AnimatePresence>
               </div>
-            </PullToRefresh>
-          </div>
-        </ScrollArea>
+            </PullToRefresh></div></div>
       </main>
 
       {/* Add Device Dialog */}
@@ -6153,25 +6485,18 @@ export default function App() {
                   Door Type
                 </Label>
                 <Select 
-                  value={newDevice.doorType} 
-                  onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: v }))}
+                  value={newDevice.doorType?.toString() || '1'} 
+                  onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: parseInt(v) }))}
                 >
                   <SelectTrigger id="door-type">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="interior">
-                      <div className="flex items-center gap-2">
-                        <HomeIcon className="h-4 w-4" />
-                        <span>Interior</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="exterior">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="h-4 w-4" />
-                        <span>Exterior</span>
-                      </div>
-                    </SelectItem>
+                    {(appNamesDetailList?.doorType || []).map((dt: any) => (
+                      <SelectItem key={dt.id} value={dt.id.toString()}>
+                        {dt.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -6182,9 +6507,7 @@ export default function App() {
                 <Layers className="h-3 w-3 text-muted-foreground" />
                 Section Name (Optional)
               </Label>
-              <Select 
-                value={newDevice.section} 
-                onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
+              <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
               >
                 <SelectTrigger id="section">
                   <SelectValue placeholder="Select section" />
@@ -6192,7 +6515,7 @@ export default function App() {
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
                   {(sections || []).map(section => (
-                    <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
+                    <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -6202,9 +6525,7 @@ export default function App() {
                 <Sofa className="h-3 w-3 text-muted-foreground" />
                 Room Name (Optional)
               </Label>
-              <Select 
-                value={newDevice.room} 
-                onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v === 'none' ? undefined : v }))}
+              <Select value={newDevice.room || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v === 'none' ? undefined : v }))}
               >
                 <SelectTrigger id="room">
                   <SelectValue placeholder="Select room" />
@@ -6212,7 +6533,7 @@ export default function App() {
                 <SelectContent>
                   <SelectItem value="none">No Room</SelectItem>
                   {rooms.filter(r => !newDevice.section || r.section === newDevice.section).map(room => (
-                    <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
+                    <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -6302,9 +6623,7 @@ export default function App() {
                 <Layers className="h-3 w-3 text-muted-foreground" />
                 Section Name (Optional)
               </Label>
-              <Select 
-                value={newRoom.section} 
-                onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
+              <Select value={newRoom.section || 'none'} onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
               >
                 <SelectTrigger id="room-section">
                   <SelectValue placeholder="Select section" />
@@ -6312,7 +6631,7 @@ export default function App() {
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
                   {(sections || []).map(section => (
-                    <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
+                    <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -6422,13 +6741,13 @@ export default function App() {
               if (editingSection?.id && editingSection.name) {
                 requestAuth(async () => {
                   try {
-                    const urlParams = new URLSearchParams({
-                      Id: editingSection.id.toString(),
-                      SectionName: editingSection.name || '',
-                      IsHidden: editingSection.isHidden ? 'true' : 'false'
-                    });
-                    await apiFetch(`/Section/UpdateSection?${urlParams.toString()}`, { method: 'PUT' });
-                    setSections((prev: any) => prev.map((s: any) => s.id === editingSection.id ? { ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden } : s));
+                    const payload = {
+                      id: Number(editingSection.id),
+                      sectionName: editingSection.name || '',
+                      isHidden: editingSection.isHidden ? true : false
+                    };
+                    await apiFetch('/Section/UpdateSection', { method: 'PUT', body: JSON.stringify(payload) });
+                    setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden }) : s));
                     setIsEditSectionOpen(false);
                     toast.success("Section updated successfully");
                   } catch (err: any) {
@@ -6701,15 +7020,15 @@ export default function App() {
       </Dialog>
       {/* Add New Person Dialog */}
       <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[600px] flex flex-col max-h-[90vh]">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-primary" />
               Add New Household Member
             </DialogTitle>
             <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[80vh] px-1">
+          <div className="flex-1 overflow-y-auto px-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <div className="grid gap-6 pt-[3px] py-4">
               <div className="space-y-4">
                 <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
@@ -6784,8 +7103,8 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </ScrollArea>
-          <DialogFooter>
+          </div>
+          <DialogFooter className="shrink-0 pt-4 border-t">
             
             <Button onClick={async () => {
               try {
@@ -7785,7 +8104,7 @@ export default function App() {
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(appNamesDetailList.applianceType || []).map(t => (
+                      {(appNamesDetailList?.applianceType || []).map(t => (
                         <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -7800,25 +8119,18 @@ export default function App() {
                     Door Type
                   </Label>
                   <Select 
-                    value={editingDevice.doorType || 'interior'} 
-                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: v })}
+                    value={editingDevice.doorType?.toString() || '1'} 
+                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: parseInt(v) })}
                   >
                     <SelectTrigger id="edit-door-type">
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="interior">
-                        <div className="flex items-center gap-2">
-                          <HomeIcon className="h-4 w-4" />
-                          <span>Interior</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="exterior">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4" />
-                          <span>Exterior</span>
-                        </div>
-                      </SelectItem>
+                      {(appNamesDetailList?.doorType || []).map((dt: any) => (
+                        <SelectItem key={dt.id} value={dt.id.toString()}>
+                          {dt.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -7839,7 +8151,7 @@ export default function App() {
                   <SelectContent>
                     <SelectItem value="none">No Room (Section Level)</SelectItem>
                     {(rooms || []).map(r => (
-                      <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                      <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -7858,7 +8170,7 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent>
                     {(sections || []).map(s => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -7925,10 +8237,7 @@ export default function App() {
             return (
               <div className="pt-[3px] pb-4 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                    <div className="font-medium text-lg">{viewingRoom.name}</div>
-                  </div>
+                  
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium">{(sections || []).find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
@@ -7943,10 +8252,7 @@ export default function App() {
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
                         <div className="font-medium">{currentRoomDto.createdOn ? format(new Date(currentRoomDto.createdOn), 'PPp') : 'N/A'}</div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                        <div className="font-medium">{currentRoomDto.personName || currentRoomDto.peronName || 'System'}</div>
-                      </div>
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
                         <div className="font-medium">
@@ -8061,7 +8367,7 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent>
                     {(sections || []).map(s => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -8718,7 +9024,7 @@ export default function App() {
               requestAuth(async () => {
                 // Pack as UpdateHardwareDto
                 const updateDto: UpdateHardwareDto = {
-                  id: hardwareForm.id as number,
+                  id: Number(hardwareForm.id),
                   hardwareName: hardwareForm.hardwareName || '',
                   authKey: hardwareForm.authKey || '',
                   lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
@@ -9007,12 +9313,13 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">{(sections || []).find(s => s.id === selectedExternal.sectionId)?.name || 'N/A'}</div>
+                  <div className="font-medium">{(sections || []).find(s => s.id === selectedExternal.sectionId || s.id.toString() === selectedExternal.sectionId?.toString())?.name || 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                  <div className="font-medium">{(rooms || []).find(r => r.id === selectedExternal.roomId)?.name || 'N/A'}</div>
+                  <div className="font-medium">{(rooms || []).find(r => r.id === selectedExternal.roomId || r.id.toString() === selectedExternal.roomId?.toString())?.name || 'N/A'}</div>
                 </div>
+                
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
                   <div className="font-medium">{selectedExternal.createdByName || 'System'}</div>
@@ -9105,7 +9412,7 @@ export default function App() {
                   <SelectContent>
                     <SelectItem value="none">No Section</SelectItem>
                     {(sections || []).map(section => (
-                      <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
+                      <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -9125,7 +9432,7 @@ export default function App() {
                   <SelectContent>
                     <SelectItem value="none">No Room</SelectItem>
                     {(rooms || []).map(room => (
-                      <SelectItem key={room.id} value={room.id}>{room.name}</SelectItem>
+                      <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -9215,7 +9522,8 @@ export default function App() {
       }}>
         <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] sm:max-w-[92vw] md:max-w-6xl h-[85vh] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background text-foreground">
           {(() => {
-            const currentCameraDto = (cameras || []).find(c => c.id.toString() === selectedCamera?.id.toString() || c.cameraName === selectedCamera?.name);
+            const rawCamId = selectedCamera ? getRawId(selectedCamera.id) : '';
+            const currentCameraDto = (cameras || []).find(c => c.id.toString() === rawCamId || c.cameraName === selectedCamera?.name);
             const liveStreamUrl = currentCameraDto?.liveStreamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
             const isLive = !playingRecordingPath;
             const currentVideoUrl = playingRecordingPath || liveStreamUrl;
@@ -9240,7 +9548,7 @@ export default function App() {
                         </Badge>
                       </h2>
                       <p className="text-xs text-muted-foreground font-mono">
-                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? (rooms || []).find(r => r.id === selectedCamera.room)?.name : 'Main Hub'}
+                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Main Hub'}
                       </p>
                     </div>
                   </div>
@@ -9252,7 +9560,7 @@ export default function App() {
                       className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                       onClick={() => {
                         if (selectedCamera) {
-                          handleEditDevice(selectedCamera.id);
+                          handleEditDevice(selectedCamera.id, 'camera');
                           setIsCameraModalOpen(false);
                         }
                       }}
@@ -9388,13 +9696,13 @@ export default function App() {
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
                           <span className="font-semibold text-foreground">
-                            {selectedCamera?.room ? (rooms || []).find(r => r.id === selectedCamera.room)?.name : 'Unassigned Room'}
+                            {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Unassigned Room'}
                           </span>
                         </div>
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
                           <span className="font-semibold text-foreground">
-                            {selectedCamera?.section ? (sections || []).find(s => s.id === selectedCamera.section)?.name : 'Security'}
+                            {selectedCamera?.section ? (sections || []).find(s => s.id.toString() === selectedCamera.section?.toString())?.name : 'Security'}
                           </span>
                         </div>
                       </div>
@@ -9418,14 +9726,8 @@ export default function App() {
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                           <div className="font-medium">{(sections || []).find(s => s.id === currentCameraDto?.sectionId)?.name || 'N/A'}</div>
                         </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                          <div className="font-medium">{(rooms || []).find(r => r.id === currentCameraDto?.roomId)?.name || 'N/A'}</div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                          <div className="font-medium">{currentCameraDto?.peronName || 'System'}</div>
-                        </div>
+                        
+                        
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                           <div className="font-medium">
@@ -9532,7 +9834,7 @@ export default function App() {
                                           onClick={() => {
                                             // Handle record deletion
                                             setCameras(prev => prev.map(c => {
-                                              if (c.id.toString() === selectedCamera?.id.toString()) {
+                                              if (c.id.toString() === getRawId(selectedCamera?.id)) {
                                                 return {
                                                   ...c,
                                                   recordings: c.recordings.filter(r => r.filePath !== recording.filePath)
@@ -9574,7 +9876,7 @@ export default function App() {
               className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 if (selectedAppliance) {
-                  handleEditDevice(selectedAppliance.id);
+                  handleEditDevice(selectedAppliance.id, 'appliance');
                   setIsApplianceModalOpen(false);
                 }
               }}
@@ -9609,7 +9911,8 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedAppliance && (() => {
-            const currentApplianceDto = (appliances || []).find(a => a.id.toString() === selectedAppliance.id.toString() || a.applianceName === selectedAppliance.name) as any;
+            const rawAppId = getRawId(selectedAppliance.id);
+            const currentApplianceDto = (appliances || []).find(a => a.id.toString() === rawAppId || a.applianceName === selectedAppliance.name) as any;
             return (
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -9620,14 +9923,8 @@ export default function App() {
                     {selectedAppliance.status === 'on' ? 'Active' : 'Inactive'}
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                  <div className="font-medium">{selectedAppliance.room ? (rooms || []).find(r => r.id === selectedAppliance.room)?.name : 'N/A'}</div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Power Usage</span>
-                  <div className="font-medium text-emerald-600 dark:text-emerald-400">{selectedAppliance.powerUsage || 0} W</div>
-                </div>
+                
+                
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Device Type</span>
                   <div className="font-medium capitalize">{selectedAppliance.type}</div>
@@ -9650,14 +9947,8 @@ export default function App() {
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                       <div className="font-medium">{(sections || []).find(s => s.id === currentApplianceDto.sectionId)?.name || 'N/A'}</div>
                     </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                      <div className="font-medium">{(rooms || []).find(r => r.id === currentApplianceDto.roomId)?.name || 'N/A'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                      <div className="font-medium">{currentApplianceDto.peronName || 'System'}</div>
-                    </div>
+                    
+                    
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                       <div className="font-medium">
@@ -9699,7 +9990,7 @@ export default function App() {
               className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 if (selectedDoor) {
-                  handleEditDevice(selectedDoor.id);
+                  handleEditDevice(selectedDoor.id, 'door');
                   setIsDoorModalOpen(false);
                 }
               }}
@@ -9734,7 +10025,8 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedDoor && (() => {
-            const currentDoorDto = (doors || []).find(d => d.id.toString() === selectedDoor.id.toString() || d.doorName === selectedDoor.name) as any;
+            const rawDoorId = getRawId(selectedDoor.id);
+            const currentDoorDto = (doors || []).find(d => d.id.toString() === rawDoorId || d.doorName === selectedDoor.name) as any;
             return (
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -9752,10 +10044,7 @@ export default function App() {
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Type</span>
                   <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                  <div className="font-medium">{selectedDoor.room ? (rooms || []).find(r => r.id === selectedDoor.room)?.name : 'N/A'}</div>
-                </div>
+                
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                   <div className="font-medium">{selectedDoor.section ? (sections || []).find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
@@ -9774,18 +10063,9 @@ export default function App() {
                         {currentDoorDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                       </div>
                     </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                      <div className="font-medium">{currentDoorDto.peronName || 'System'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.roomName || (rooms || []).find(r => r.id === currentDoorDto.roomId)?.name || 'Hub'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                      <div className="font-medium text-[10px]">{currentDoorDto.sectionName || (sections || []).find(s => s.id === currentDoorDto.sectionId)?.name || 'Area'}</div>
-                    </div>
+                    
+                    
+                    
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Deletion Status</span>
                       <div className="font-medium">
@@ -9827,7 +10107,7 @@ export default function App() {
               className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 if (selectedLight) {
-                  handleEditDevice(selectedLight.id);
+                  handleEditDevice(selectedLight.id, 'light');
                   setIsLightModalOpen(false);
                 }
               }}
@@ -9862,7 +10142,8 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedLight && (() => {
-            const currentLightDto = (lights || []).find(l => l.lightName === selectedLight?.name || l.id.toString() === selectedLight?.id.toString());
+            const rawLightId = getRawId(selectedLight.id);
+            const currentLightDto = (lights || []).find(l => l.lightName === selectedLight?.name || l.id.toString() === rawLightId) as any;
             return (
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -9877,10 +10158,7 @@ export default function App() {
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Brightness</span>
                     <div className="font-medium">{selectedLight.value || currentLightDto?.brightnessLevel || 0}%</div>
                   </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                    <div className="font-medium">{selectedLight.room ? (rooms || []).find(r => r.id === selectedLight.room)?.name : 'N/A'}</div>
-                  </div>
+                  
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium">{selectedLight.section ? (sections || []).find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
@@ -9904,14 +10182,8 @@ export default function App() {
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                         <div className="font-medium">{(sections || []).find(s => s.id === currentLightDto.sectionId)?.name || 'N/A'}</div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                        <div className="font-medium">{(rooms || []).find(r => r.id === currentLightDto.roomId)?.name || 'N/A'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                        <div className="font-medium">{currentLightDto.peronName || 'System'}</div>
-                      </div>
+                      
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                         <div className="font-medium">
@@ -10023,10 +10295,7 @@ export default function App() {
                           {currentSectionDto.isDeleted ? <Badge variant="destructive">Deleted</Badge> : <Badge variant="secondary">Active</Badge>}
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                        <div className="font-medium text-sm">{currentSectionDto.peronName || 'System'}</div>
-                      </div>
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
                         <div className="font-medium text-sm">{currentSectionDto.createdByName || 'System'}</div>
@@ -10058,7 +10327,7 @@ export default function App() {
               className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 if (selectedWindow) {
-                  handleEditDevice(selectedWindow.id);
+                  handleEditDevice(selectedWindow.id, 'window');
                   setIsViewWindowOpen(false);
                 }
               }}
@@ -10093,7 +10362,8 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedWindow && (() => {
-            const currentWindowDto = (windows || []).find(w => w.windowName === selectedWindow?.name || w.id.toString() === selectedWindow?.id.toString());
+            const rawWinId = getRawId(selectedWindow.id);
+            const currentWindowDto = (windows || []).find(w => w.windowName === selectedWindow?.name || w.id.toString() === rawWinId) as any;
             return (
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -10117,10 +10387,7 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Location</span>
-                    <div className="font-medium text-sm">{selectedWindow.room ? (rooms || []).find(r => r.id === selectedWindow.room)?.name : 'N/A'}</div>
-                  </div>
+                  
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                     <div className="font-medium text-sm">{selectedWindow.section ? (sections || []).find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
@@ -10144,14 +10411,8 @@ export default function App() {
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                         <div className="font-medium text-sm">{(sections || []).find(s => s.id === currentWindowDto.sectionId)?.name || 'N/A'}</div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
-                        <div className="font-medium text-sm">{(rooms || []).find(r => r.id === currentWindowDto.roomId)?.name || 'N/A'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Person Name</span>
-                        <div className="font-medium text-sm">{currentWindowDto.peronName || 'System'}</div>
-                      </div>
+                      
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                         <div className="font-medium">
@@ -10454,7 +10715,13 @@ export default function App() {
                 if (!actionForm.actionName) return;
                 requestAuth(async () => {
                   try {
-                    const res: any = await apiFetch(`/Action/CreateAction?ActionName=${encodeURIComponent(actionForm.actionName)}&Description=${encodeURIComponent(actionForm.description || '')}`, { method: 'POST', body: '' });
+                    const res: any = await apiFetch('/Action/CreateAction', { 
+                      method: 'POST', 
+                      body: JSON.stringify({ 
+                        ActionName: actionForm.actionName, 
+                        Description: actionForm.description || '' 
+                      }) 
+                    });
                     if (res && res.data) {
                       setActions(prev => [...prev, res.data]);
                       toast.success('Action created successfully!');
@@ -10534,7 +10801,14 @@ export default function App() {
                 if (selectedAction) {
                   requestAuth(async () => {
                     try {
-                      await apiFetch(`/Action/UpdateAction?Id=${selectedAction.id}&ActionName=${encodeURIComponent(actionForm.actionName)}&Description=${encodeURIComponent(actionForm.description || '')}`, { method: 'PUT', body: '' });
+                      await apiFetch('/Action/UpdateAction', { 
+                        method: 'PUT', 
+                        body: JSON.stringify({ 
+                          Id: Number(selectedAction.id), 
+                          ActionName: actionForm.actionName, 
+                          Description: actionForm.description || '' 
+                        }) 
+                      });
                       setActions(prev => prev.map(a => a.id === selectedAction.id ? {
                         ...a,
                         actionName: actionForm.actionName,
@@ -12081,7 +12355,7 @@ export default function App() {
                     </SelectTrigger>
                     <SelectContent>
                       {(allUsers || []).map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
+                        <SelectItem key={u.id} value={u.id.toString()}>
                           {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
                         </SelectItem>
                       ))}
@@ -12396,32 +12670,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {formActionStatus && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, x: 20 }}
-            animate={{ opacity: 1, y: 0, x: 0 }}
-            exit={{ opacity: 0, y: 20, transition: { duration: 0.2 } }}
-            className={cn(
-              "fixed bottom-6 right-6 z-[99999] px-6 py-4 bg-white/95 backdrop-blur-md shadow-2xl rounded-xl border-[2px] max-w-sm flex items-start gap-4 pointer-events-auto",
-              formActionStatus.isSuccess ? "border-green-500" : "border-yellow-500"
-            )}
-          >
-            <div className={cn(
-              "h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5",
-              formActionStatus.isSuccess ? "bg-green-100 text-green-600" : "bg-yellow-100 text-yellow-600"
-            )}>
-              {formActionStatus.isSuccess ? <CheckCheck className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-            </div>
-            <div className="flex flex-col">
-              <h4 className="font-bold text-slate-900 text-sm">
-                {formActionStatus.isSuccess ? "Success" : "Update"}
-              </h4>
-              <p className="text-sm font-medium text-slate-600">{formActionStatus.message}</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   Lock, 
   Unlock, 
   DoorOpen,
+  DoorClosed,
   Power, 
   Thermometer, 
   Camera, 
@@ -33,9 +34,11 @@ interface DeviceCardProps {
   device: Device;
   onToggle: (id: string) => void;
   onValueChange?: (id: string, value: number) => void;
+  onValueChangeEnd?: (id: string, value: number) => void;
   onStatusChange?: (id: string, status: string) => void;
-  onDelete?: (id: string) => void;
-  onEdit?: (id: string) => void;
+  onDoorAction?: (id: string, action: 'lock'|'unlock'|'open'|'close') => void;
+  onDelete?: (id: string, type?: string) => void;
+  onEdit?: (id: string, type?: string) => void;
   onClick?: (device: Device) => void;
   variant?: 'default' | 'summary';
 }
@@ -71,7 +74,7 @@ const getIcon = (device: Device) => {
   }
 };
 
-export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, onDelete, onEdit, onClick, variant = 'default' }: DeviceCardProps) {
+export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, onStatusChange, onDoorAction, onDelete, onEdit, onClick, variant = 'default' }: DeviceCardProps) {
   const isActive = device.status === 'on' || device.status === 'unlocked' || device.status === 'active' || device.status === 'open';
   const isLocked = device.status === 'locked' || device.status === 'open-locked';
   const isOpen = device.status === 'open' || device.status === 'open-locked';
@@ -80,6 +83,11 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
   const handleDoorAction = (action: 'lock' | 'unlock' | 'open' | 'close') => {
     if ((device.type !== 'door' && device.type !== 'window') || isSummary) return;
     
+    if (onDoorAction) {
+      onDoorAction(device.id, action);
+      return;
+    }
+
     if (action === 'lock') {
       // Always close and lock as requested
       onStatusChange?.(device.id, 'locked');
@@ -118,7 +126,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
     >
       <Card 
         className={cn(
-          "group relative overflow-hidden transition-all duration-300 hover:shadow-md",
+          "group relative overflow-hidden transition-all duration-300 hover:shadow-md border",
           isActive ? "border-primary/50 bg-primary/5" : "bg-card",
           onClick ? "cursor-pointer" : ""
         )}
@@ -216,7 +224,11 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
                   onClick={(e) => { e.stopPropagation(); handleDoorAction(isOpen ? 'close' : 'open'); }}
                   title={isOpen ? 'Close' : 'Open'}
                 >
-                  {isOpen ? (device.status === 'open-locked' ? <DoorOpen className="h-4 w-4" /> : <WindowIcon className="h-4 w-4" />) : <WindowIcon className="h-4 w-4" />}
+                  {device.type === 'door' ? (
+                    isOpen ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />
+                  ) : (
+                    isOpen ? <WindowIcon className="h-4 w-4" /> : <WindowIcon className="h-4 w-4 opacity-40" />
+                  )}
                 </Button>
               </div>
             )}
@@ -238,6 +250,8 @@ export function DeviceCard({ device, onToggle, onValueChange, onStatusChange, on
                   step="1"
                   value={device.value}
                   onChange={(e) => { e.stopPropagation(); onValueChange?.(device.id, parseInt(e.target.value)); }}
+                  onMouseUp={(e) => { e.stopPropagation(); onValueChangeEnd?.(device.id, device.value || 0); }}
+                  onTouchEnd={(e) => { e.stopPropagation(); onValueChangeEnd?.(device.id, device.value || 0); }}
                   onPointerDown={(e) => e.stopPropagation()}
                   className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
                 />

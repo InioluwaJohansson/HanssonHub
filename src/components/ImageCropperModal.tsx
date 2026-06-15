@@ -4,7 +4,7 @@ import 'react-image-crop/dist/ReactCrop.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 
-import { Check } from 'lucide-react';
+import { Check, Scissors } from 'lucide-react';
 
 interface ImageCropperModalProps {
   isOpen: boolean;
@@ -76,7 +76,7 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Crop Image</DialogTitle>
+          <DialogTitle className="flex items-center"><Scissors className="w-5 h-5 mr-2" />Crop Image</DialogTitle>
         </DialogHeader>
         <div className="flex justify-center items-center max-h-[60vh] overflow-hidden">
           {imageSrc && (
@@ -85,7 +85,6 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
               onChange={(_, percentCrop) => setCrop(percentCrop)}
               onComplete={(c) => setCompletedCrop(c)}
               aspect={1}
-              circularCrop
             >
               <img
                 ref={imgRef}
@@ -98,7 +97,6 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
           )}
         </div>
         <DialogFooter className="border-t pt-4">
-          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
           <Button onClick={handleCropComplete} className="bg-black hover:bg-black/90 text-white rounded-xl flex items-center gap-2">
             <Check className="h-4 w-4" />
             Save Image

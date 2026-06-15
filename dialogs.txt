@@ -1,0 +1,257 @@
+3704:          <Dialog open={isViewLogOpen} onOpenChange={setIsViewLogOpen}>
+3705:            <DialogContent className="sm:max-w-[480px] rounded-3xl border shadow-2xl p-6 bg-card" showCloseButton={false}>
+3707:              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+3711:              <DialogHeader className="mb-0 border-b text-left pr-12 pb-4">
+3712:                <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-foreground justify-start">
+3716:                <DialogDescription className="text-xs mt-1 text-left">
+6096:      <Dialog open={isAddDeviceOpen} onOpenChange={setIsAddDeviceOpen}>
+6097:        <DialogContent className="sm:max-w-[400px]">
+6098:          <DialogHeader className="mb-0">
+6099:            <DialogTitle className="flex items-center gap-2">
+6115:          <DialogDescription>
+6317:          <DialogFooter>
+6338:      <Dialog open={isAddRoomOpen} onOpenChange={setIsAddRoomOpen}>
+6339:        <DialogContent className="sm:max-w-[400px]">
+6340:          <DialogHeader className="mb-0">
+6341:            <DialogTitle className="flex items-center gap-2">
+6345:            <DialogDescription>
+6450:          <DialogFooter>
+6459:      <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
+6460:        <DialogContent className="sm:max-w-[400px]">
+6461:          <DialogHeader className="mb-0">
+6462:            <DialogTitle className="flex items-center gap-2">
+6466:            <DialogDescription>Update the details and visibility of this section.</DialogDescription>
+6512:          <DialogFooter>
+6541:      <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+6542:        <DialogContent className="sm:max-w-[400px]">
+6543:          <DialogHeader>
+6544:            <DialogTitle className="flex items-center gap-2">
+6548:            <DialogDescription>
+6607:          <DialogFooter>
+6639:      <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
+6640:        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 shadow-lg shadow-yellow-100/50">
+6641:          <DialogHeader className="mb-0">
+6642:            <DialogTitle className="flex items-center gap-2 text-yellow-700">
+6646:            <DialogDescription className="text-yellow-800/70">
+6705:          <DialogFooter>
+6796:      <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
+6797:        <DialogContent className="sm:max-w-[600px]">
+6798:          <DialogHeader className="mb-0">
+6799:            <DialogTitle className="flex items-center gap-2">
+6803:            <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
+6881:          <DialogFooter>
+6908:      <Dialog open={isEditPersonRoleOpen} onOpenChange={setIsEditPersonRoleOpen}>
+6909:        <DialogContent className="sm:max-w-[400px]">
+6910:          <DialogHeader>
+6911:            <DialogTitle className="flex items-center gap-2">
+6915:            <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
+6935:          <DialogFooter>
+6974:      <Dialog open={isViewPersonDetailsOpen} onOpenChange={setIsViewPersonDetailsOpen}>
+6975:        <DialogContent className="sm:max-w-[600px]" showCloseButton={false}>
+6976:          <DialogHeader className="mb-0">
+6979:                <DialogTitle className="flex items-center gap-2">
+6983:                <DialogDescription className="mt-0">Detailed view of user properties and system settings.</DialogDescription>
+7042:                <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+7122:          <DialogFooter className="sm:justify-end">
+7127:      <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
+7128:        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden">
+7129:          <DialogHeader className="p-6 pb-2">
+7130:            <DialogTitle className="flex items-center gap-2">
+7134:            <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
+7180:          <DialogFooter className="p-6 border-t bg-slate-50 flex items-center justify-center sm:justify-center">
+7189:      <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
+7190:        <DialogContent className="sm:max-w-[400px]">
+7191:          <DialogHeader>
+7192:            <DialogTitle className="flex items-center gap-2">
+7196:            <DialogDescription>Update category details and icon.</DialogDescription>
+7240:          <DialogFooter>
+7250:      <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) setEditingContactId(null); }}>
+7251:        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-black bg-white shadow-2xl">
+7252:          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b bg-white pr-16">
+7256:                <DialogTitle className="text-lg font-bold tracking-tight">
+7261:            <DialogDescription className="text-xs font-medium mt-1 text-muted-foreground">Fill in the contact details and addresses.</DialogDescription>
+7523:          <DialogFooter className="p-6 border-t gap-3 bg-slate-50 flex items-center justify-end sm:items-center">
+7532:      <Dialog open={isDeleteContactOpen} onOpenChange={setIsDeleteContactOpen}>
+7533:        <DialogContent className="sm:max-w-[400px]">
+7534:          <DialogHeader className="mb-0">
+7535:            <DialogTitle className="flex items-center gap-2 text-destructive">
+7539:            <DialogDescription>
+7543:          <DialogFooter>
+7550:      <Dialog open={isAddSceneOpen} onOpenChange={setIsAddSceneOpen}>
+7551:        <DialogContent className="sm:max-w-[400px]">
+7552:          <DialogHeader className="mb-0">
+7553:            <DialogTitle className="flex items-center gap-2">
+7557:            <DialogDescription>
+7590:          <DialogFooter>
+7597:      <Dialog open={isAddSectionOpen} onOpenChange={setIsAddSectionOpen}>
+7598:        <DialogContent className="sm:max-w-[400px]">
+7599:          <DialogHeader className="mb-0">
+7600:            <DialogTitle className="flex items-center gap-2">
+7604:            <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
+7633:          <DialogFooter>
+7643:      <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
+7644:        <DialogContent className={cn("sm:max-w-[520px] border-2 transition-colors duration-300", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/10" : authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50")}>
+7649:                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+7653:                <DialogDescription>
+7758:      <Dialog open={isEditDeviceOpen} onOpenChange={setIsEditDeviceOpen}>
+7759:        <DialogContent className="sm:max-w-[400px]">
+7760:          <DialogHeader className="mb-0">
+7761:            <DialogTitle className="flex items-center gap-2">
+7768:            <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
+7961:          <DialogFooter>
+7972:      <Dialog open={isViewRoomOpen} onOpenChange={setIsViewRoomOpen}>
+7973:        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+8003:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+8007:          <DialogHeader className="mb-0 pr-24">
+8008:            <DialogTitle className="flex items-center gap-2">
+8012:            <DialogDescription>
+8073:      <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
+8074:        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white" showCloseButton={false}>
+8076:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 transition-colors" />}>
+8080:          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white">
+8081:            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900">
+8085:            <DialogDescription className="text-xs mt-1 text-slate-500">
+8120:      <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
+8121:        <DialogContent className="sm:max-w-[400px]">
+8122:          <DialogHeader className="mb-0">
+8123:            <DialogTitle className="flex items-center gap-2">
+8127:            <DialogDescription>Update the details of this room.</DialogDescription>
+8232:          <DialogFooter>
+8249:      <Dialog open={isViewContactOpen} onOpenChange={setIsViewContactOpen}>
+8250:        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+8278:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+8282:          <DialogHeader className="mb-0 pr-24">
+8283:            <DialogTitle className="flex items-center gap-2">
+8351:      <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
+8352:        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]" showCloseButton={false}>
+8392:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+8396:          <DialogHeader className="mb-0 pr-24">
+8397:            <DialogTitle className="flex items-center gap-2">
+8401:            <DialogDescription>
+8531:      <Dialog open={isAddHardwareOpen} onOpenChange={setIsAddHardwareOpen}>
+8532:        <DialogContent className="sm:max-w-[420px]">
+8533:          <DialogHeader className="mb-0">
+8534:            <DialogTitle className="flex items-center gap-2">
+8538:            <DialogDescription>
+8557:          <DialogFooter>
+8585:      <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
+8586:        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-[90vw]">
+8587:          <DialogHeader className="mb-0">
+8588:            <DialogTitle className="flex items-center gap-2">
+8592:            <DialogDescription>
+8806:        <DialogFooter>
+8870:      <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
+8871:        <DialogContent className="sm:max-w-[420px]">
+8872:          <DialogHeader className="mb-0">
+8873:            <DialogTitle className="flex items-center gap-2">
+8877:            <DialogDescription>
+8968:          <DialogFooter>
+9027:      <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
+9028:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+9065:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+9069:          <DialogHeader className="mb-0 pr-24">
+9070:            <DialogTitle className="flex items-center gap-2">
+9074:            <DialogDescription>
+9149:      <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
+9150:        <DialogContent className="sm:max-w-[420px]">
+9151:          <DialogHeader className="mb-0">
+9152:            <DialogTitle className="flex items-center gap-2">
+9156:            <DialogDescription>
+9258:          <DialogFooter>
+9302:      <Dialog open={isCameraModalOpen} onOpenChange={(open) => {
+9309:        <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] sm:max-w-[92vw] md:max-w-6xl h-[85vh] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background text-foreground">
+9661:      <Dialog open={isApplianceModalOpen} onOpenChange={setIsApplianceModalOpen}>
+9662:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+9691:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+9695:          <DialogHeader className="mb-0 pr-24">
+9696:            <DialogTitle className="flex items-center gap-2">
+9700:            <DialogDescription>
+9786:      <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
+9787:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+9816:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+9820:          <DialogHeader className="mb-0 pr-24">
+9821:            <DialogTitle className="flex items-center gap-2">
+9825:            <DialogDescription>
+9914:      <Dialog open={isLightModalOpen} onOpenChange={setIsLightModalOpen}>
+9915:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+9944:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+9948:          <DialogHeader className="mb-0 pr-24">
+9949:            <DialogTitle className="flex items-center gap-2">
+9953:            <DialogDescription>
+10039:      <Dialog open={isViewSectionOpen} onOpenChange={setIsViewSectionOpen}>
+10040:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+10079:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+10083:          <DialogHeader className="mb-0 pr-24">
+10084:            <DialogTitle className="flex items-center gap-2">
+10088:            <DialogDescription>
+10145:      <Dialog open={isViewWindowOpen} onOpenChange={setIsViewWindowOpen}>
+10146:        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+10175:            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+10179:          <DialogHeader className="mb-0 pr-24">
+10180:            <DialogTitle className="flex items-center gap-2">
+10184:            <DialogDescription>
+10278:      <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
+10279:        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900" showCloseButton={false}>
+10319:            <DialogClose render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+10323:          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-slate-900 border-b mb-0 shrink-0 pr-40 flex flex-col justify-center">
+10325:              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2">
+10329:              <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2 leading-none whitespace-nowrap">
+10510:      <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
+10511:        <DialogContent className="sm:max-w-[420px]">
+10512:          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+10514:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+10518:              <DialogDescription className="text-xs font-medium">Define a new automated sequence</DialogDescription>
+10543:          <DialogFooter>
+10590:      <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
+10591:        <DialogContent className="sm:max-w-[420px]">
+10592:          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+10594:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+10598:              <DialogDescription className="text-xs font-medium">Update action details</DialogDescription>
+10623:          <DialogFooter>
+10656:      <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
+10657:        <DialogContent className="sm:max-w-[420px]">
+10658:          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+10660:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+10664:              <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
+10771:          <DialogFooter className="p-6 flex items-center justify-center">
+10826:      <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
+10827:        <DialogContent className="sm:max-w-[420px]">
+10828:          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+10830:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+10834:              <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
+10941:          <DialogFooter className="p-6 flex items-center justify-center">
+10995:      <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
+10996:        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+11707:      <Dialog open={isEditGroupOpen} onOpenChange={(open) => {
+11717:        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+11718:          <DialogHeader className="p-6 pb-2 mb-0">
+11722:                <DialogTitle className="text-xl font-bold text-slate-900 mb-[3px]">
+11727:            <DialogDescription className="pl-7 text-[13px] leading-tight">
+11850:      <Dialog open={isNewChatOpen} onOpenChange={(open) => {
+11859:        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white max-h-[90vh] flex flex-col">
+11860:          <DialogHeader className="p-6 pb-2 mb-0 flex flex-row items-center justify-between shrink-0">
+11866:                <DialogTitle className="text-xl font-bold mb-[3px]">
+11869:                <DialogDescription className="text-slate-500 text-sm">
+11998:      <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
+11999:        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+12000:          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between select-none">
+12004:                <DialogTitle className="text-xl font-bold tracking-tight">Send file(s)</DialogTitle>
+12124:      <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
+12125:        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+12126:          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between">
+12130:                <DialogTitle className="text-xl font-bold tracking-tight">Image Preview</DialogTitle>
+12152:      <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
+12153:        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col max-h-[90vh]">
+12154:          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+12156:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+12160:              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register biometric data for a user</DialogDescription>
+12247:          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+12271:      <Dialog open={messageToDelete !== null} onOpenChange={(open) => !open && setMessageToDelete(null)}>
+12272:        <DialogContent className="sm:max-w-[400px] p-8 overflow-hidden bg-white border border-black shadow-2xl rounded-2xl text-center">
+12280:          <DialogFooter className="flex items-center justify-center gap-3 sm:justify-center border-none p-0 mt-2">
+12309:      <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
+12310:        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
+12311:          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+12313:              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+12317:              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register NFID tag or device for a user</DialogDescription>
+12363:          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
