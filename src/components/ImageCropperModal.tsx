@@ -78,20 +78,22 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
         <DialogHeader>
           <DialogTitle className="flex items-center"><Scissors className="w-5 h-5 mr-2" />Crop Image</DialogTitle>
         </DialogHeader>
-        <div className="flex justify-center items-center max-h-[60vh] overflow-hidden">
+        <div className="flex justify-center items-center w-full h-[50vh] overflow-hidden bg-slate-50/50 p-3 rounded-xl border border-slate-100">
           {imageSrc && (
             <ReactCrop
               crop={crop}
-              onChange={(_, percentCrop) => setCrop(percentCrop)}
+              onChange={(c) => setCrop(c)}
               onComplete={(c) => setCompletedCrop(c)}
               aspect={1}
+              className="max-h-full max-w-full"
             >
               <img
                 ref={imgRef}
                 alt="Crop me"
                 src={imageSrc}
                 onLoad={onImageLoad}
-                className="max-h-[50vh] w-auto object-contain"
+                style={{ maxHeight: '45vh', maxWidth: '100%', objectFit: 'contain' }}
+                className="block mx-auto"
               />
             </ReactCrop>
           )}

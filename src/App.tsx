@@ -75,7 +75,12 @@ import {
   MessageAttachmentDto,
   CreateDirectChatDto,
   CreateGroupChatDto,
-  CreateRoomDto
+  CreateRoomDto,
+  UpdateGroupChatDto,
+  MessageQueryDto,
+  RemoveParticipantDto,
+  AddParticipantsDto,
+  RealtimeMessageDto
 } from './types';
 import { INITIAL_CHATS, INITIAL_CHAT_MESSAGES } from './chatData';
 import { toast, Toaster } from 'sonner';
@@ -195,6 +200,7 @@ import {
   XCircle,
   Pause,
   Reply,
+  Forward,
   CornerUpLeft,
   Settings,
   UserPlus,
@@ -211,7 +217,12 @@ import {
   ScanLine,
   LogOut,
   Activity,
-  AlertTriangle
+  AlertTriangle,
+  AlertCircle,
+  Terminal,
+  Volume2,
+  Code2,
+  UserMinus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
@@ -263,6 +274,32 @@ const getRawId = (id: string | number | undefined): string => {
   if (id === undefined || id === null) return '';
   const s = id.toString();
   return s.includes('-') ? s.split('-')[1] : s;
+};
+
+const dataURLtoFile = (dataurl: string, filename: string): File => {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+};
+
+const getFullImageUrl = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const cleanUrl = url.startsWith('/') ? url.slice(1) : url;
+  const baseDomain = API_BASE_URL.replace(/\/Home_Security$/, '').replace(/\/$/, '');
+  
+  if (cleanUrl.startsWith('storage/')) {
+    return `${baseDomain}/${cleanUrl}`;
+  }
+  return `${baseDomain}/storage/${cleanUrl}`;
 };
 
 const NoItems = ({ icon: Icon = Info, message = "No items found." }: { icon?: any, message?: string }) => (
@@ -340,6 +377,18 @@ const mapSection = (s: any): Section => {
     sectionId: s.sectionId ?? s.id,
     sectionName: s.sectionName || s.name,
   } as Section;
+};
+
+const base64ToFile = (base64: string, filename: string): File => {
+  const arr = base64.split(',');
+  const mime = arr[0].match(/:(.*?);/)![1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
 };
 
 export default function App() {
@@ -505,15 +554,14 @@ export default function App() {
 
   React.useEffect(() => {
     const handleAuthExpired = () => {
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('userName');
-      localStorage.removeItem('roleName');
-      localStorage.removeItem('personId');
+      localStorage.clear();
       fetchedViewsRef.current = {};
       setIsLoggedIn(false);
       setUserDto(null);
       setUserProfile(null);
+      setChats([]);
+      setChatMessages([]);
+      setActiveChatId(null);
       toast.error("Session expired. Please log in again.");
     };
     window.addEventListener('auth-expired', handleAuthExpired);
@@ -521,15 +569,21 @@ export default function App() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('userId');
-    localStorage.removeItem('userName');
-    localStorage.removeItem('roleName');
-    localStorage.removeItem('personId');
-    
+    // const { homeSecurityConnection } = initSignalR();
+    // if (homeSecurityConnection && activeChatId && homeSecurityConnection.state === "Connected") {
+    //   homeSecurityConnection.invoke("LeaveChat", activeChatId)
+    //     .then(() => console.log(`Left SignalR chat group ${activeChatId}`))
+    //     .catch(err => console.error("Failed to leave chat on logout:", err));
+    // }
+
+    localStorage.clear();
     fetchedViewsRef.current = {};
     setIsLoggedIn(false);
     setUserDto(null);
+    setUserProfile(null);
+    setChats([]);
+    setChatMessages([]);
+    setActiveChatId(null);
     toast.success("Successfully logged out");
   };
 
@@ -573,7 +627,7 @@ export default function App() {
   }, [activeView, visibleLogsCount, logs.length, isPagingLoading]);
 
   const [contacts, setContacts] = React.useState<ContactType[]>([]);
-  const [contactCategories, setContactCategories] = React.useState<ContactCategory[]>(CONTACT_CATEGORIES);
+  const [contactCategories, setContactCategories] = React.useState<ContactCategory[]>([]);
   const [contactSearchQuery, setContactSearchQuery] = React.useState('');
   const [contactSortCategory, setContactSortCategory] = React.useState<string>('all');
   const [contactView, setContactView] = React.useState<'overview' | 'all'>('overview');
@@ -705,7 +759,7 @@ export default function App() {
     windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
     doorIdNames: (doors || []).map(d => ({ id: d.id, name: d.doorName })),
     externalIdNames: (externals || []).map(e => ({ id: e.id, name: e.externalName })),
-    personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` })),
+    personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`, imageUrl: u.getPersonDetailsDto.imageUrl })),
     contactCategoryIdNames: (contactCategories || []).map(c => ({ id: c.id, name: c.name })),
     actionIdNames: (actions || []).map(a => ({ id: a.id, name: a.actionName })),
     applianceType: [
@@ -744,6 +798,78 @@ export default function App() {
     roomIds: (rooms || []).map(r => ({ id: r.id, name: r.name })),
     sectionIds: (sections || []).map(s => ({ id: s.id, name: s.name })),
   });
+
+  React.useEffect(() => {
+    setAppNamesDetailList((prev: any) => ({
+      ...prev,
+      applianceIdNames: (appliances || []).map(a => ({ id: a.id, name: a.applianceName })),
+      cameraIdNames: (cameras || []).map(c => ({ id: c.id, name: c.cameraName })),
+      lightIdNames: (lights || []).map(l => ({ id: l.id, name: l.lightName })),
+      windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
+      doorIdNames: (doors || []).map(d => ({ id: d.id, name: d.doorName })),
+      externalIdNames: (externals || []).map(e => ({ id: e.id, name: e.externalName })),
+      personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`, imageUrl: u.getPersonDetailsDto.imageUrl, isOnline: u.isOnline ?? !u.disabled })),
+      contactCategoryIdNames: (contactCategories || []).map(c => ({ id: c.id, name: c.name })),
+      roomIds: (rooms || []).map(r => ({ id: r.id, name: r.name })),
+      sectionIds: (sections || []).map(s => ({ id: s.id, name: s.name })),
+    }));
+  }, [allUsers, appliances, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
+
+  const getUserDetailsById = React.useCallback((personId: number) => {
+    const list = appNamesDetailList?.personIdNames || [];
+    const found = list.find((u: any) => u.id === personId);
+    return found ? { fullName: found.name, profileImageUrl: found.imageUrl } : null;
+  }, [appNamesDetailList]);
+
+  const getChatDisplayName = React.useCallback((chat: ChatDto) => {
+    if (chat.isGroup) return chat.name;
+    const otherParticipant = chat.participants?.find(p => p.personId !== userProfile?.id);
+    if (otherParticipant) {
+      const detail = getUserDetailsById(otherParticipant.personId);
+      return detail?.fullName || otherParticipant.fullName || chat.name || 'Private Chat';
+    }
+    return chat.name || 'Private Chat';
+  }, [getUserDetailsById, userProfile]);
+
+  const getChatDisplayImageUrl = React.useCallback((chat: ChatDto) => {
+    if (chat.isGroup) return chat.imageUrl;
+    const otherParticipant = chat.participants?.find(p => p.personId !== userProfile?.id);
+    if (otherParticipant) {
+      const detail = getUserDetailsById(otherParticipant.personId);
+      return detail?.profileImageUrl || otherParticipant.profileImageUrl || chat.imageUrl;
+    }
+    return chat.imageUrl;
+  }, [getUserDetailsById, userProfile]);
+
+  const getChatDisplayInitial = React.useCallback((chat: ChatDto) => {
+    const displayName = getChatDisplayName(chat);
+    return displayName ? displayName.charAt(0).toUpperCase() : 'U';
+  }, [getChatDisplayName]);
+
+  const getMessageSenderName = React.useCallback((msg: MessageDto) => {
+    const detail = getUserDetailsById(msg.senderPersonId);
+    return detail?.fullName || msg.senderName;
+  }, [getUserDetailsById]);
+
+  const getMessageSenderProfileImage = React.useCallback((msg: MessageDto) => {
+    const detail = getUserDetailsById(msg.senderPersonId);
+    return detail?.profileImageUrl || msg.senderProfileImage;
+  }, [getUserDetailsById]);
+
+  const getGroupMemberNames = React.useCallback((chat: ChatDto) => {
+    return (chat.participants || [])
+      .map(p => {
+        const u = (allUsers || []).find(user => user.id === p.personId);
+        if (u) {
+          return u.getPersonDetailsDto.firstName;
+        }
+        const detail = getUserDetailsById(p.personId);
+        const name = detail?.fullName || p.fullName || '';
+        return name ? name.trim().split(' ')[0] : '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }, [allUsers, getUserDetailsById]);
 
   const [dashboardData, setDashboardData] = React.useState<any>(null);
   const [dashboardRotation, setDashboardRotation] = React.useState(0);
@@ -901,6 +1027,29 @@ export default function App() {
       apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
         .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setHardwares(res.data); } else { setHardwares([]); } })
         .catch(() => setHardwares([]));
+
+      apiFetch('/Person/GetAllPersons', { method: 'POST' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setAllUsers(res.data); else setAllUsers([]); })
+        .catch(err => { console.error("Failed to preload persons", err); setAllUsers([]); });
+
+      apiFetch('/Dashboard/GetAppNamesIdList', { method: 'POST' })
+        .then((data: any) => {
+          if (data && (data.data ?? data.Data)) {
+             const responseData = data.data ?? data.Data;
+             setAppNamesDetailList((prev: any) => {
+               const next = { ...prev };
+               Object.keys(responseData).forEach(key => {
+                 if (responseData[key] !== null && responseData[key] !== undefined) {
+                   next[key] = responseData[key];
+                   if (key === 'DoorType') next['doorType'] = responseData[key];
+                   if (key === 'doorType') next['DoorType'] = responseData[key];
+                 }
+               });
+               return next;
+             });
+          }
+        })
+        .catch(err => console.error("Failed to preload app list data", err));
     }
 
     // 2. All Users (Persons) Page
@@ -1023,16 +1172,13 @@ export default function App() {
 
     // 10. Contact (and Categories) Page
     if (activeView === 'contacts') {
-      if (!fetchedViewsRef.current['contacts']) {
-        fetchedViewsRef.current['contacts'] = true;
-        apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
-          .catch(err => { console.error("Failed to load contact categories", err); setContactCategories([]); });
-        
-        apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); else setContacts([]); })
-          .catch(err => { console.error("Failed to load contacts", err); setContacts([]); });
-      }
+      apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
+        .catch(err => { console.error("Failed to load contact categories", err); setContactCategories([]); });
+      
+      apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); else setContacts([]); })
+        .catch(err => { console.error("Failed to load contacts", err); setContacts([]); });
     }
 
     // 11. Appliance Page
@@ -1180,8 +1326,15 @@ export default function App() {
   const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
   const [generatedToken, setGeneratedToken] = React.useState<GetTokenDto | null>(null);
   const [newGroupImageUrl, setNewGroupImageUrl] = React.useState("");
+  const [newGroupImageFile, setNewGroupImageFile] = React.useState<File | null>(null);
+  const [profileImageFile, setProfileImageFile] = React.useState<File | null>(null);
   const [editingGroupId, setEditingGroupId] = React.useState<number | null>(null);
   const [isEditGroupOpen, setIsEditGroupOpen] = React.useState(false);
+  const [isViewGroupOpen, setIsViewGroupOpen] = React.useState(false);
+  const [isDeleteChatModalOpen, setIsDeleteChatModalOpen] = React.useState(false);
+  const [isGroupImageCropperOpen, setIsGroupImageCropperOpen] = React.useState(false);
+  const [tempGroupImageUrl, setTempGroupImageUrl] = React.useState("");
+  const groupImageInputRef = React.useRef<HTMLInputElement>(null);
   const [isAddSceneOpen, setIsAddSceneOpen] = React.useState(false);
   const [newRoom, setNewRoom] = React.useState<Partial<Room & CreateRoomDto>>({
     name: '',
@@ -1260,6 +1413,12 @@ export default function App() {
         ...prev, 
         getPersonDetailsDto: { ...prev.getPersonDetailsDto, imageUrl: croppedImageUrl } 
       }));
+      try {
+        const file = dataURLtoFile(croppedImageUrl, 'profile-avatar.png');
+        setProfileImageFile(file);
+      } catch (err) {
+        console.error("Failed to convert cropped image to file", err);
+      }
     }
   };
 
@@ -1353,6 +1512,9 @@ export default function App() {
 
   // Chat State
   const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
+  const [hasLoadedChats, setHasLoadedChats] = React.useState(false);
+  
+  
   const [isPreviewModalOpen, setIsPreviewModalOpen] = React.useState(false);
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState("");
   const isChatModalOpenRef = React.useRef(isChatModalOpen);
@@ -1411,6 +1573,45 @@ export default function App() {
   const [selectedFingerprintHardwareId, setSelectedFingerprintHardwareId] = React.useState<string>("");
   const [chats, setChats] = React.useState<ChatDto[]>([]);
   const [chatMessages, setChatMessages] = React.useState<MessageDto[]>([]);
+  const chatScrollRef = React.useRef<HTMLDivElement>(null);
+  const [activeFloatingDate, setActiveFloatingDate] = React.useState<string>("");
+
+  const getMessageDateLabel = (date: Date) => {
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return format(date, 'MMMM d, yyyy');
+    }
+  };
+
+  const handleChatScroll = () => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+
+    const groups = container.querySelectorAll('[data-date-group]');
+    let currentActiveLabel = "";
+    const containerRect = container.getBoundingClientRect();
+
+    groups.forEach((groupEl) => {
+      const rect = groupEl.getBoundingClientRect();
+      const relativeTop = rect.top - containerRect.top;
+      if (relativeTop <= 80) {
+        currentActiveLabel = groupEl.getAttribute('data-date-group') || "";
+      }
+    });
+
+    if (currentActiveLabel) {
+      setActiveFloatingDate(currentActiveLabel);
+    } else if (groups.length > 0) {
+      setActiveFloatingDate(groups[0].getAttribute('data-date-group') || "");
+    }
+  };
   const [newGroupRoom, setNewGroupRoom] = React.useState<string>("none");
   const [newGroupSection, setNewGroupSection] = React.useState<string>("");
   const [chatInput, setChatInput] = React.useState("");
@@ -1425,10 +1626,177 @@ export default function App() {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const longPressTimeout = React.useRef<any>(null);
+  const chatBoxMessagesContainerRef = React.useRef<HTMLDivElement>(null);
   const [activeChatId, setActiveChatId] = React.useState<number | null>(null);
+  const activeChatIdRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  const userProfileRef = React.useRef<any>(null);
+  React.useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
+
+  const signalRConnectionRef = React.useRef<any>(null);
+
   const [messageToDelete, setMessageToDelete] = React.useState<MessageDto | null>(null);
+  const [messageToEdit, setMessageToEdit] = React.useState<MessageDto | null>(null);
+  const [editMessageContent, setEditMessageContent] = React.useState("");
+  const [selectedMessageId, setSelectedMessageId] = React.useState<number | null>(null);
+  const [optionsPosition, setOptionsPosition] = React.useState<'above' | 'below'>('below');
+
+  const handleLongPress = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    setSelectedMessageRect({
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+
+  const fetchUnreadCountsForAllChats = async (loadedChats: ChatDto[]) => {
+    const updatedChats = await Promise.all(loadedChats.map(async (chat) => {
+      let count = chat.unreadCount || 0;
+      try {
+        const res = await apiFetch<any>(`/Message/GetUnreadCount?chatId=${chat.id}`, { method: 'GET' });
+        if (res && typeof res.unreadCount === 'number') count = res.unreadCount;
+        else if (res && typeof res.count === 'number') count = res.count;
+        else if (res && typeof res.data === 'number') count = res.data;
+        else if (typeof res === 'number') count = res;
+      } catch {
+        try {
+          const res = await apiFetch<any>(`/Chat/GetUnreadCount?chatId=${chat.id}`, { method: 'GET' });
+          if (res && typeof res.unreadCount === 'number') count = res.unreadCount;
+          else if (res && typeof res.count === 'number') count = res.count;
+          else if (res && typeof res.data === 'number') count = res.data;
+          else if (typeof res === 'number') count = res;
+        } catch {
+          // Keep existing unreadCount if fetch fails
+        }
+      }
+      return { ...chat, unreadCount: count };
+    }));
+    setChats(updatedChats);
+  };
+
+  const markChatAsRead = async (chatId: number) => {
+    try {
+      await apiFetch(`/Message/MarkAsRead?chatId=${chatId}`, { method: 'POST' });
+    } catch {
+      try {
+        await apiFetch(`/Chat/MarkAsRead?chatId=${chatId}`, { method: 'POST' });
+      } catch {
+        try {
+          await apiFetch(`/Message/ReadChat?chatId=${chatId}`, { method: 'POST' });
+        } catch {
+          try {
+            await apiFetch(`/Chat/ReadChat?chatId=${chatId}`, { method: 'POST' });
+          } catch {
+            // Silently catch if not supported
+          }
+        }
+      }
+    }
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, unreadCount: 0 } : c));
+  };
+
+  const chatsRef = React.useRef<ChatDto[]>([]);
+  React.useEffect(() => {
+    chatsRef.current = chats;
+    const conn = signalRConnectionRef.current;
+    if (conn && conn.state === "Connected" && chats.length > 0) {
+      chats.forEach(chat => {
+        conn.invoke("JoinChat", chat.id)
+          .catch(err => console.warn(`Failed to automatically join SignalR chat group ${chat.id}:`, err));
+      });
+    }
+  }, [chats]);
+
+  React.useEffect(() => {
+    if (activeChatId) {
+      markChatAsRead(activeChatId);
+
+      // SignalR JoinChat group subscription
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        conn.invoke("JoinChat", activeChatId)
+          .then(() => console.log(`Joined SignalR chat group ${activeChatId}`))
+          .catch(err => console.error(`Failed to join SignalR chat group ${activeChatId}:`, err));
+      }
+    }
+  }, [activeChatId]);
+
+  const loadMyChats = async (force = false) => {
+    // Try to load cached chats from localStorage
+    const cachedChatsStr = localStorage.getItem('chats_cache');
+    let cachedChats: ChatDto[] = [];
+    if (cachedChatsStr) {
+      try {
+        cachedChats = JSON.parse(cachedChatsStr);
+      } catch (e) {
+        console.error('Failed to parse chats_cache:', e);
+      }
+    }
+
+    // Immediately display saved data if state is currently empty
+    if (cachedChats.length > 0) {
+      setChats(prev => {
+        if (prev.length === 0) {
+          return cachedChats;
+        }
+        return prev;
+      });
+      setHasLoadedChats(true);
+    }
+
+    try {
+      const data = await apiFetch<ChatDto[]>('/Chat/GetMyChats', { method: 'GET' });
+      const fetchedChats = data || [];
+      
+      // Save cache
+      localStorage.setItem('chats_cache', JSON.stringify(fetchedChats));
+
+      // Update state without triggering a re-render if data is the same
+      setChats(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(fetchedChats)) {
+          return fetchedChats;
+        }
+        return prev;
+      });
+      setHasLoadedChats(true);
+      if (fetchedChats.length > 0) {
+        fetchUnreadCountsForAllChats(fetchedChats);
+      }
+    } catch (err: any) {
+      if (cachedChats.length === 0) {
+        toast.error('Failed to load chats: ' + err.message);
+      } else {
+        console.warn('Silent chat update failed:', err);
+      }
+    }
+  };
+
+  React.useEffect(() => {
+    if (isChatModalOpen && !hasLoadedChats) {
+      loadMyChats();
+    }
+  }, [isChatModalOpen, hasLoadedChats]);
+
+  React.useEffect(() => {
+    if (isLoggedIn && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, [isLoggedIn]);
   const [chatSearchQuery, setChatSearchQuery] = React.useState("");
   const [isChatSearchVisible, setIsChatSearchVisible] = React.useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = React.useState("");
+  const [selectedMessageRect, setSelectedMessageRect] = React.useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [forwardingMessage, setForwardingMessage] = React.useState<MessageDto | null>(null);
+  const [isForwardModalOpen, setIsForwardModalOpen] = React.useState(false);
+  const [forwardSearchQuery, setForwardSearchQuery] = React.useState("");
   const [isUploadPreviewOpen, setIsUploadPreviewOpen] = React.useState(false);
   const [uploadPreviewFiles, setUploadPreviewFiles] = React.useState<File[]>([]);
   const [uploadPreviewType, setUploadPreviewType] = React.useState<'image' | 'file' | null>(null);
@@ -1441,7 +1809,10 @@ export default function App() {
   const [selectedParticipants, setSelectedParticipants] = React.useState<number[]>([]);
   const [newGroupName, setNewGroupName] = React.useState("");
   const [newGroupDescription, setNewGroupDescription] = React.useState("");
-
+  const [typingUsers, setTypingUsers] = React.useState<Record<number, Record<number, { name: string, isTyping: boolean }>>>({});
+  const typingTimeoutsRef = React.useRef<Record<string, any>>({});
+  const [chatCurrentPages, setChatCurrentPages] = React.useState<Record<number, number>>({});
+  const [isChatPagingLoading, setIsChatPagingLoading] = React.useState(false);
   React.useEffect(() => {
     if (isRecording) {
       recordingTimerRef.current = setInterval(() => {
@@ -1482,13 +1853,41 @@ export default function App() {
       userProfileId: userProfile?.id,
     };
     
-    const { homeSecurityConnection, chatConnection } = initSignalR();
+    const { homeSecurityConnection } = initSignalR();
+    signalRConnectionRef.current = homeSecurityConnection;
 
     if (homeSecurityConnection!.state === "Disconnected") {
-      homeSecurityConnection!.start().catch(err => console.error("SignalR Connection Error: ", err));
-    }
-    if (chatConnection!.state === "Disconnected") {
-      chatConnection!.start().catch(err => console.error("Chat SignalR Connection Error: ", err));
+      homeSecurityConnection!.start().then(() => {
+        // Automatically invoke JoinChat if we already have an active chat when connecting
+        const activeChatIdVal = activeChatIdRef.current;
+        if (activeChatIdVal && homeSecurityConnection!.state === "Connected") {
+          homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
+            .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal} on reconnect`))
+            .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
+        }
+        // Also automatically join all loaded chats so we get typing/messages correctly for everything
+        const allChatsVal = chatsRef.current || [];
+        if (allChatsVal.length > 0 && homeSecurityConnection!.state === "Connected") {
+          allChatsVal.forEach(chat => {
+            homeSecurityConnection!.invoke("JoinChat", chat.id)
+              .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
+          });
+        }
+      }).catch(err => console.error("SignalR Connection Error: ", err));
+    } else if (homeSecurityConnection!.state === "Connected") {
+      const activeChatIdVal = activeChatIdRef.current;
+      if (activeChatIdVal) {
+        homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
+          .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal}`))
+          .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
+      }
+      const allChatsVal = chatsRef.current || [];
+      if (allChatsVal.length > 0) {
+        allChatsVal.forEach(chat => {
+          homeSecurityConnection!.invoke("JoinChat", chat.id)
+            .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
+        });
+      }
     }
 
     const hsWrapper = homeSecurityConnection!;
@@ -1690,28 +2089,225 @@ export default function App() {
         setFingerprintImages(prev => [...prev, data.fingerPrintEncoding]);
     });
 
-    // Chat Events via chatConnection
-    const csWrapper = chatConnection!;
-    const cs = {
-      on: (event, callback) => csWrapper.on(event, (data) => { console.log('SignalR Chat Event:', event, data); callback(data); }),
-      off: (event) => csWrapper.off(event)
-    };
-    cs.on("chat:history", (history) => setChatMessages(history));
-    cs.on("chat:message", (msg) => {
+    // --- Chat Events via homeSecurityConnection (hs) ---
+    hs.on("MessageSent", (msg: MessageDto) => {
       setChatMessages(prev => {
-        if (prev.some(m => m.id === (msg.id ?? msg.Id))) return prev;
+        if (prev.some(m => m.id === msg.id)) return prev;
         
-        if (!refs.isChatModalOpen && (msg.senderId ?? msg.SenderId) !== refs.userProfileId) {
-          setChatPopups(p => {
-             if (p.some(m => m.id === (msg.id ?? msg.Id))) return p;
-             return [...p, msg];
-          });
-          setTimeout(() => {
-            setChatPopups(p => p.filter(x => x.id !== (msg.id ?? msg.Id)));
-          }, 5000);
+        // Optimistic reconciliation for messages sent by me
+        const profile = userProfileRef.current;
+        const isMe = msg.senderPersonId === profile?.id;
+        if (isMe) {
+          const optIndex = prev.findIndex(m => (m as any).status === 'sending' && m.chatId === msg.chatId && m.content === msg.content);
+          if (optIndex !== -1) {
+            const next = [...prev];
+            next[optIndex] = { ...msg, status: 'sent' };
+            return next;
+          }
         }
+        
         return [...prev, msg];
       });
+
+      const profile = userProfileRef.current;
+      const activeChatIdVal = activeChatIdRef.current;
+      const isChatOpen = isChatModalOpenRef.current;
+
+      const isMe = msg.senderPersonId === profile?.id;
+      if (!isMe) {
+        // Show floating notification if chat modal is closed OR we're not on this chat
+        if (!isChatOpen || activeChatIdVal !== msg.chatId) {
+          setChatPopups(p => {
+            if (p.some(m => m.id === msg.id)) return p;
+            return [...p, msg];
+          });
+          setTimeout(() => {
+            setChatPopups(p => p.filter(x => x.id !== msg.id));
+          }, 5000);
+        }
+
+        // System notification when minimized
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          const displayContent = msg.content || (msg.attachments && msg.attachments.length > 0 ? "Sent an attachment" : "New message");
+          const cleanContent = displayContent.length > 60 ? displayContent.substring(0, 57) + "..." : displayContent;
+          const n = new Notification(msg.senderName || "New Message", {
+            body: cleanContent,
+            icon: msg.senderProfileImage && msg.senderProfileImage.startsWith('data:') 
+              ? msg.senderProfileImage 
+              : (msg.senderProfileImage && msg.senderProfileImage.startsWith('http') ? msg.senderProfileImage : undefined),
+            tag: `chat_${msg.chatId}`,
+            renotify: true
+          } as any);
+          n.onclick = () => {
+            window.focus();
+            setActiveChatId(msg.chatId);
+            setIsChatModalOpen(true);
+          };
+        }
+      }
+
+      // Update unread count and lastMessage
+      setChats(prev => prev.map(c => {
+        if (c.id === msg.chatId) {
+          const shouldInc = !isMe && (!isChatOpen || activeChatIdVal !== msg.chatId);
+          return { 
+            ...c, 
+            unreadCount: shouldInc ? (c.unreadCount || 0) + 1 : c.unreadCount,
+            lastMessage: msg 
+          };
+        }
+        return c;
+      }));
+    });
+
+    hs.on("MessageEdited", (msg: MessageDto) => {
+      setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+      setChats(prev => prev.map(c => c.id === msg.chatId && c.lastMessage?.id === msg.id ? { ...c, lastMessage: msg } : c));
+    });
+
+    hs.on("MessageDeleted", (data: any) => {
+      const cid = data.chatId ?? data.ChatId;
+      const mid = data.messageId ?? data.MessageId;
+      const isDel = data.isDeleted ?? data.IsDeleted;
+      setChatMessages(prev => prev.map(m => m.id === mid ? { ...m, isDeleted: isDel } : m));
+      setChats(prev => prev.map(c => {
+        if (c.id === cid && c.lastMessage?.id === mid) {
+          return { ...c, lastMessage: { ...c.lastMessage, isDeleted: isDel } };
+        }
+        return c;
+      }));
+    });
+
+    hs.on("UserTyping", (dto: any) => {
+      const chatId = dto.chatId ?? dto.ChatId;
+      const personId = dto.personId ?? dto.PersonId;
+      const isTyping = dto.isTyping ?? dto.IsTyping;
+      const fullName = dto.fullName ?? dto.FullName ?? "";
+      
+      const profile = userProfileRef.current;
+      if (personId === profile?.id) return;
+      
+      setTypingUsers(prev => {
+        const chatTyping = { ...(prev[chatId] || {}) };
+        if (isTyping) {
+          chatTyping[personId] = { name: fullName, isTyping: true };
+        } else {
+          delete chatTyping[personId];
+        }
+        return { ...prev, [chatId]: chatTyping };
+      });
+
+      const timeoutKey = `${chatId}-${personId}`;
+      if (typingTimeoutsRef.current[timeoutKey]) {
+        clearTimeout(typingTimeoutsRef.current[timeoutKey]);
+      }
+
+      if (isTyping) {
+        typingTimeoutsRef.current[timeoutKey] = setTimeout(() => {
+          setTypingUsers(prev => {
+            const chatTyping = { ...(prev[chatId] || {}) };
+            delete chatTyping[personId];
+            return { ...prev, [chatId]: chatTyping };
+          });
+          delete typingTimeoutsRef.current[timeoutKey];
+        }, 5000);
+      }
+    });
+
+    hs.on("ChatCreated", (chat: ChatDto) => {
+      setChats(prev => {
+        if (prev.some(c => c.id === chat.id)) return prev;
+        return [chat, ...prev];
+      });
+    });
+
+    hs.on("GroupChatCreated", (chat: ChatDto) => {
+      setChats(prev => {
+        if (prev.some(c => c.id === chat.id)) return prev;
+        return [chat, ...prev];
+      });
+    });
+
+    hs.on("GroupChatUpdated", (chat: ChatDto) => {
+      setChats(prev => prev.map(c => c.id === chat.id ? { ...c, ...chat } : c));
+    });
+
+    hs.on("ChatDeleted", (data: any) => {
+      const cid = data.chatId ?? data.ChatId;
+      setChats(prev => prev.filter(c => c.id !== cid));
+      if (activeChatIdRef.current === cid) {
+        setActiveChatId(null);
+      }
+    });
+
+    hs.on("ParticipantsAdded", (data: any) => {
+      const list = Array.isArray(data) ? data : [data];
+      if (list.length === 0) return;
+      const cid = list[0].chatId ?? list[0].ChatId;
+      setChats(prev => prev.map(c => {
+        if (c.id !== cid) return c;
+        const currentParts = c.participants || [];
+        const newParts = [...currentParts];
+        list.forEach(item => {
+          const pid = item.personId ?? item.PersonId;
+          if (!newParts.some(p => p.personId === pid)) {
+            newParts.push({
+              personId: pid,
+              isAdmin: item.isAdmin ?? item.IsAdmin ?? false,
+              isOnline: false,
+              fullName: "",
+              profileImageUrl: null
+            });
+          }
+        });
+        return { ...c, participants: newParts };
+      }));
+    });
+
+    hs.on("ParticipantRemoved", (data: any) => {
+      const cid = data.chatId ?? data.ChatId;
+      const pid = data.personId ?? data.PersonId;
+      const profile = userProfileRef.current;
+      if (pid === profile?.id) {
+        setChats(prev => prev.filter(c => c.id !== cid));
+        if (activeChatIdRef.current === cid) {
+          setActiveChatId(null);
+        }
+      } else {
+        setChats(prev => prev.map(c => {
+          if (c.id !== cid) return c;
+          return { ...c, participants: (c.participants || []).filter(p => p.personId !== pid) };
+        }));
+      }
+    });
+
+    hs.on("MessagesRead", (data: any) => {
+      const cid = data.chatId ?? data.ChatId;
+      const pid = data.personId ?? data.PersonId;
+      const profile = userProfileRef.current;
+      if (pid === profile?.id) {
+        setChats(prev => prev.map(c => c.id === cid ? { ...c, unreadCount: 0 } : c));
+      }
+    });
+
+    hs.on("UserOnline", (personId: number) => {
+      setChats(prev => prev.map(c => {
+        const updatedParticipants = (c.participants || []).map(p => 
+          p.personId === personId ? { ...p, isOnline: true } : p
+        );
+        return { ...c, participants: updatedParticipants };
+      }));
+      setAllUsers(prev => prev.map(u => u.id === personId ? { ...u, isOnline: true } : u));
+    });
+
+    hs.on("UserOffline", (personId: number) => {
+      setChats(prev => prev.map(c => {
+        const updatedParticipants = (c.participants || []).map(p => 
+          p.personId === personId ? { ...p, isOnline: false } : p
+        );
+        return { ...c, participants: updatedParticipants };
+      }));
+      setAllUsers(prev => prev.map(u => u.id === personId ? { ...u, isOnline: false } : u));
     });
 
     return () => {
@@ -1762,8 +2358,25 @@ export default function App() {
        hs.off("PersonUpdated");
        hs.off("PersonStatusChanged");
 
-       cs.off("chat:history");
-       cs.off("chat:message");
+       hs.off("MessageSent");
+       hs.off("MessageEdited");
+       hs.off("MessageDeleted");
+       hs.off("UserTyping");
+       hs.off("ChatCreated");
+       hs.off("GroupChatCreated");
+       hs.off("GroupChatUpdated");
+       hs.off("ChatDeleted");
+       hs.off("ParticipantsAdded");
+       hs.off("ParticipantRemoved");
+       hs.off("MessagesRead");
+       hs.off("UserOnline");
+       hs.off("UserOffline");
+        
+        // Clear typing timeouts
+        if (typingTimeoutsRef.current) {
+          Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
+          typingTimeoutsRef.current = {};
+        }
     };
   }, [isLoggedIn]);
 
@@ -1827,36 +2440,90 @@ export default function App() {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [chatMessages, isChatModalOpen]);
+    const timer = setTimeout(() => {
+      handleChatScroll();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [chatMessages, isChatModalOpen, activeChatId]);
 
-  const handleSendMessage = () => {
-    if (!chatInput.trim() || activeChatId === null) return;
-    const msg: MessageDto = {
-      id: Date.now(),
-      chatId: activeChatId,
-      senderPersonId: userProfile.id,
-      senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-      senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
+  const handleSendMessage = async (customDto?: SendMessageDto | React.MouseEvent, customTempId?: number) => {
+    const isRetry = !!(customDto && typeof customDto === 'object' && 'content' in customDto);
+    const sendDto: SendMessageDto = isRetry ? (customDto as SendMessageDto) : {
+      chatId: activeChatId!,
       content: chatInput,
       type: MessageType.Text,
-      isEdited: false,
-      isDeleted: false,
-      sentAt: new Date().toISOString(),
-      attachments: [],
-      replyToId: replyingTo?.id
+      attachments: []
     };
+
+    if (!isRetry && (!chatInput.trim() || activeChatId === null)) return;
+
+    const tempId = customTempId || Date.now() * -1;
     
-    // Update local state and emit
-    setChatMessages(prev => [...prev, msg]);
-    if (socketRef.current) {
-      socketRef.current.emit("chat:message", msg);
+    if (!isRetry) {
+      const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
+        id: tempId,
+        chatId: activeChatId!,
+        senderPersonId: userProfile.id,
+        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+        content: chatInput,
+        type: MessageType.Text,
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+        attachments: [],
+        replyToId: replyingTo?.id || undefined,
+        status: 'sending'
+      };
+
+      setChatMessages(prev => [...prev, tempMsg]);
+      setChatInput("");
+      setReplyingTo(null);
+    } else {
+      // For retry, change status to 'sending'
+      setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sending' } : m));
     }
+
+    try {
+      const savedMsg = await apiFetch<MessageDto>('/Message/SendMessage', {
+        method: 'POST',
+        body: JSON.stringify(sendDto)
+      });
+      // Replace optimistic message with saved message
+      setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent' } : m));
+    } catch (err: any) {
+      setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+      toast.error('Failed to send message: ' + err.message);
+    }
+  };
+
+  const handleForwardMessage = async (targetChatId: number) => {
+    if (!forwardingMessage) return;
     
-    // Update last message in chats
-    setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
-    
-    setChatInput("");
-    setReplyingTo(null);
+    const sendDto: SendMessageDto = {
+      chatId: targetChatId,
+      content: forwardingMessage.content,
+      type: forwardingMessage.type,
+      attachments: (forwardingMessage.attachments || []).map(att => ({
+        fileName: att.fileName,
+        filePath: att.filePath,
+        contentType: att.contentType,
+        fileSize: att.fileSize,
+        thumbnailPath: att.thumbnailPath
+      }))
+    };
+
+    try {
+      await apiFetch<MessageDto>('/Message/SendMessage', {
+        method: 'POST',
+        body: JSON.stringify(sendDto)
+      });
+      toast.success('Message forwarded successfully!');
+      setIsForwardModalOpen(false);
+      setForwardingMessage(null);
+    } catch (err: any) {
+      toast.error('Failed to forward message: ' + err.message);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'file') => {
@@ -1880,180 +2547,276 @@ export default function App() {
       return new Promise<MessageAttachmentDto>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => {
+          let thumbPath: string | undefined = undefined;
+          if (file.type.startsWith('image/')) {
+            thumbPath = `/thumbnails/img_${file.name}`;
+          } else if (file.type.startsWith('video/')) {
+            thumbPath = `/thumbnails/vid_${file.name}`;
+          }
           resolve({
             fileName: file.name,
             filePath: reader.result?.toString() || '',
             contentType: file.type,
-            fileSize: file.size
+            fileSize: file.size,
+            thumbnailPath: thumbPath
           });
         };
         reader.readAsDataURL(file);
       });
     });
 
-    Promise.all(uploadPromises).then(attachments => {
-      const type = uploadPreviewType;
-      let textContent = uploadPreviewText.trim();
-      if (!textContent) {
-        textContent = attachments.length > 1 ? `Sent ${attachments.length} ${type}s` : `Sent a ${type}`;
+    Promise.all(uploadPromises).then(async attachments => {
+      const file = uploadPreviewFiles[0];
+      let msgType = MessageType.File;
+      if (file.type.startsWith('image/')) {
+        msgType = MessageType.Image;
+      } else if (file.type.startsWith('video/')) {
+        msgType = MessageType.Video;
+      } else if (file.type.startsWith('audio/')) {
+        msgType = MessageType.Audio;
       }
 
-      const msg: MessageDto = {
-        id: Date.now() + Math.random(),
-        chatId: activeChatId,
+      let textContent = uploadPreviewText.trim();
+      if (!textContent) {
+        const typeLabel = msgType === MessageType.Image ? 'image' : 
+                          msgType === MessageType.Video ? 'video' : 
+                          msgType === MessageType.Audio ? 'audio' : 'file';
+        textContent = attachments.length > 1 ? `Sent ${attachments.length} ${typeLabel}s` : `Sent a ${typeLabel}`;
+      }
+
+      const sendDto: SendMessageDto = {
+        chatId: activeChatId!,
+        content: textContent,
+        type: msgType,
+        attachments: attachments
+      };
+
+      const tempId = Date.now() * -1;
+      const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
+        id: tempId,
+        chatId: activeChatId!,
         senderPersonId: userProfile.id,
         senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl,
+        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
         content: textContent,
-        type: type === 'image' ? MessageType.Image : MessageType.File,
+        type: msgType,
         isEdited: false,
         isDeleted: false,
         sentAt: new Date().toISOString(),
         attachments: attachments,
-        replyToId: replyingTo?.id
+        replyToId: replyingTo?.id || undefined,
+        status: 'sending'
       };
-      
-      setChatMessages(prev => [...prev, msg]);
-      if (socketRef.current) {
-        socketRef.current.emit("chat:message", msg);
-      }
-      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, lastMessage: msg } : c));
-      
+
+      setChatMessages(prev => [...prev, tempMsg]);
       setUploadPreviewFiles([]);
       setUploadPreviewText("");
       setUploadPreviewType(null);
       setReplyingTo(null);
+
+      try {
+        const savedMsg = await apiFetch<MessageDto>('/Message/SendMessage', {
+          method: 'POST',
+          body: JSON.stringify(sendDto)
+        });
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent' } : m));
+      } catch (err: any) {
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+        toast.error('Failed to send media: ' + err.message);
+      }
     });
   };
 
-  const startDirectChat = (person: GetPersonDto) => {
-    // Check if chat already exists
-    const existingChat = (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === person.id));
-    if (existingChat) {
-      setActiveChatId(existingChat.id);
-    } else {
-      const newChat: ChatDto = {
-        id: Date.now(),
-        name: `${person.getPersonDetailsDto.firstName} ${person.getPersonDetailsDto.lastName}`,
-        isGroup: false,
-        imageUrl: person.getPersonDetailsDto.imageUrl,
-        createdAt: new Date().toISOString(),
-        participants: [
-          {
-            personId: userProfile.id,
-            fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-            profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
-            isAdmin: true,
-            isOnline: true
-          },
-          {
-            personId: person.id,
-            fullName: `${person.getPersonDetailsDto.firstName} ${person.getPersonDetailsDto.lastName}`,
-            profileImageUrl: person.getPersonDetailsDto.imageUrl,
-            isAdmin: false,
-            isOnline: !person.disabled
-          }
-        ],
-        unreadCount: 0
-      };
-      setChats(prev => [newChat, ...prev]);
-      setActiveChatId(newChat.id);
+  const startDirectChat = async (person: GetPersonDto) => {
+    try {
+      const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${person.id}`, { method: 'POST' });
+      // The response might be the created chat object. Let's add it to state or just reload chats.
+      await loadMyChats(true);
+      if (response && response.id) {
+        setActiveChatId(response.id);
+      } else {
+        // Fallback: search for chat with person
+        const existingChat = (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === person.id));
+        if (existingChat) {
+          setActiveChatId(existingChat.id);
+        }
+      }
+      setIsNewChatOpen(false);
+    } catch (err: any) {
+      toast.error('Failed to create chat: ' + err.message);
     }
-    setIsNewChatOpen(false);
   };
 
-  const handleCreateGroup = () => {
+  const handleCreateGroup = async () => {
     if (!newGroupName.trim() || selectedParticipants.length === 0) return;
 
-    // Apply CreateGroupChatDto
-    const groupPayload: CreateGroupChatDto = {
-      name: newGroupName,
-      description: newGroupDescription,
-      imageUrl: newGroupImageUrl || `https://picsum.photos/seed/${newGroupName}/100/100`,
-      participantPersonIds: [userProfile.id, ...selectedParticipants]
-    };
+    try {
+      let uploadedImageUrl = "";
+      if (newGroupImageFile) {
+        const uploadFd = new FormData();
+        uploadFd.append('file', newGroupImageFile);
+        const uploadRes = await apiFetch<any>('/Message/UploadFile', {
+          method: 'POST',
+          body: uploadFd
+        });
+        if (uploadRes && uploadRes.data) {
+          uploadedImageUrl = uploadRes.data;
+        }
+      }
 
-    const participants: ChatParticipantDto[] = [
-      {
-        personId: userProfile.id,
-        fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
-        isAdmin: true,
-        isOnline: true
-      },
-      ...selectedParticipants.map(id => {
-        const p = (allUsers || []).find(u => u.id === id);
-        return {
-          personId: id,
-          fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
-          profileImageUrl: p?.getPersonDetailsDto.imageUrl,
-          isAdmin: false,
-          isOnline: !(p?.disabled)
-        };
-      })
-    ];
+      const createDto = {
+        Name: newGroupName,
+        Description: newGroupDescription || "",
+        ImageUrl: uploadedImageUrl,
+        ParticipantPersonIds: [userProfile.id, ...selectedParticipants]
+      };
 
-    const newChat: ChatDto = {
-      id: Date.now(),
-      name: groupPayload.name,
-      description: groupPayload.description,
-      isGroup: true,
-      imageUrl: groupPayload.imageUrl,
-      createdAt: new Date().toISOString(),
-      participants,
-      unreadCount: 0,
-      roomId: newGroupRoom === "none" ? undefined : parseInt(newGroupRoom),
-      sectionId: newGroupSection ? parseInt(newGroupSection) : undefined
-    };
-
-    setChats(prev => [newChat, ...prev]);
-    setActiveChatId(newChat.id);
-    setIsNewChatOpen(false);
-    setIsGroupMode(false);
-    setSelectedParticipants([]);
-    setNewGroupName("");
-    setNewGroupDescription("");
+      await apiFetch<any>('/Chat/CreateGroupChat', {
+        method: 'POST',
+        body: JSON.stringify(createDto)
+      });
+      await loadMyChats(true);
+      setIsNewChatOpen(false);
+      setIsGroupMode(false);
+      setSelectedParticipants([]);
+      setNewGroupName("");
+      setNewGroupDescription("");
+      setNewGroupImageFile(null);
+    } catch (err: any) {
+      toast.error('Failed to create group: ' + err.message);
+    }
   };
 
   // Room Lock State
-  const handleUpdateGroup = () => {
+  const handleUpdateGroup = async () => {
     if (!editingGroupId || !newGroupName.trim()) return;
 
-    const participants: ChatParticipantDto[] = [
-      {
-        personId: userProfile.id,
-        fullName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        profileImageUrl: userProfile.getPersonDetailsDto.imageUrl,
-        isAdmin: true,
-        isOnline: true
-      },
-      ...selectedParticipants.map(id => {
-        const p = (allUsers || []).find(u => u.id === id);
-        return {
-          personId: id,
-          fullName: p ? `${p.getPersonDetailsDto.firstName} ${p.getPersonDetailsDto.lastName}` : 'Unknown',
-          profileImageUrl: p?.getPersonDetailsDto.imageUrl,
-          isAdmin: false,
-          isOnline: !(p?.disabled)
-        };
-      })
-    ];
+    try {
+      let params = new URLSearchParams();
+      params.append('ChatId', editingGroupId.toString());
+      params.append('Name', newGroupName);
+      if (newGroupDescription) params.append('Description', newGroupDescription);
 
-    setChats(prev => prev.map(chat => 
-      chat.id === editingGroupId 
-        ? { 
-            ...chat, 
-            name: newGroupName, 
-            description: newGroupDescription, 
-            imageUrl: newGroupImageUrl || chat.imageUrl,
-            participants: participants,
-            roomId: newGroupRoom === "none" ? undefined : parseInt(newGroupRoom),
-            sectionId: newGroupSection ? parseInt(newGroupSection) : undefined
-          } 
-        : chat
-    ));
-    setIsEditGroupOpen(false);
-    setEditingGroupId(null);
+      const formData = new FormData();
+      formData.append('ChatId', editingGroupId.toString());
+      formData.append('Name', newGroupName);
+      if (newGroupDescription) formData.append('Description', newGroupDescription);
+
+      if (newGroupImageFile) {
+        formData.append('ImageUrl', newGroupImageFile);
+      } else {
+        formData.append('ImageUrl', '');
+      }
+
+      await apiFetch<any>(`/Chat/UpdateGroupChat?${params.toString()}`, {
+        method: 'PUT',
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      await loadMyChats(true);
+      setIsEditGroupOpen(false);
+      setEditingGroupId(null);
+      setNewGroupImageFile(null);
+    } catch (err: any) {
+      toast.error('Failed to update group: ' + err.message);
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    if (!editingGroupId) return;
+    try {
+      await apiFetch<any>(`/Chat/DeleteChat?chatId=${editingGroupId}`, { method: 'PUT' });
+      await loadMyChats(true);
+      if (activeChatId === editingGroupId) {
+        setActiveChatId(null);
+      }
+      setIsDeleteChatModalOpen(false);
+      setIsEditGroupOpen(false);
+      setIsViewGroupOpen(false);
+      setEditingGroupId(null);
+      toast.success('Chat deleted successfully');
+    } catch (err: any) {
+      toast.error('Failed to delete chat: ' + err.message);
+    }
+  };
+
+  React.useEffect(() => {
+    if (activeChatId) {
+      const cacheKey = `messages_cache_${activeChatId}`;
+      const cachedMessagesStr = localStorage.getItem(cacheKey);
+      let cachedMessages: MessageDto[] = [];
+      if (cachedMessagesStr) {
+        try {
+          cachedMessages = JSON.parse(cachedMessagesStr);
+        } catch (e) {
+          console.error('Failed to parse message cache:', e);
+        }
+      }
+
+      const hasCached = cachedMessages.length > 0;
+      if (hasCached) {
+        setChatMessages(prev => {
+          const hasMessages = prev.some(m => m.chatId === activeChatId);
+          if (!hasMessages) {
+            const others = prev.filter(m => m.chatId !== activeChatId);
+            return [...others, ...cachedMessages];
+          }
+          return prev;
+        });
+      } else {
+        setIsPagingLoading(true);
+      }
+
+      apiFetch<MessageDto[]>(`/Message/GetChatMessages?chatId=${activeChatId}&page=1&pageSize=100`, { method: 'GET' })
+        .then(messages => {
+          const fetchedMessages = messages || [];
+          localStorage.setItem(cacheKey, JSON.stringify(fetchedMessages));
+
+          setChatMessages(prev => {
+            const others = prev.filter(m => m.chatId !== activeChatId);
+            const currentForChat = prev.filter(m => m.chatId === activeChatId);
+            if (JSON.stringify(currentForChat) !== JSON.stringify(fetchedMessages)) {
+              return [...others, ...fetchedMessages];
+            }
+            return prev;
+          });
+          setChatCurrentPages(prev => ({ ...prev, [activeChatId]: 1 }));
+        })
+        .catch(err => {
+          if (!hasCached) {
+            toast.error("Failed to load messages: " + err.message);
+          } else {
+            console.warn("Silent messages update failed:", err);
+          }
+        })
+        .finally(() => {
+          setIsPagingLoading(false);
+        });
+    }
+  }, [activeChatId]);
+
+  const loadMoreMessages = async () => {
+    if (activeChatId === null || isPagingLoading) return;
+    
+    setIsPagingLoading(true);
+    const currentPage = chatCurrentPages[activeChatId] || 1;
+    const nextPage = currentPage + 1;
+
+    try {
+      const historicalMessages = await apiFetch<MessageDto[]>(`/Message/GetChatMessages?chatId=${activeChatId}&page=${nextPage}&pageSize=100`, { method: 'GET' });
+      if (historicalMessages && historicalMessages.length > 0) {
+        setChatMessages(prev => [...historicalMessages, ...prev]);
+        setChatCurrentPages(prev => ({ ...prev, [activeChatId]: nextPage }));
+      } else {
+        toast.info("No more older messages found.");
+      }
+    } catch (err: any) {
+      toast.error('Failed to load older messages: ' + err.message);
+    } finally {
+      setIsPagingLoading(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -2070,7 +2833,9 @@ export default function App() {
         const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) setExternals(res.data); });
         const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => { if (res && res.data) setHardwares(res.data); });
         const p10 = apiFetch('/Person/GetAllPersons', { method: 'POST' }).then((res: any) => { if (res && res.data) setAllUsers(res.data); });
-        const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' }).then((res: any) => { if (res && res.data) setContactCategories(res.data); });
+        const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
+          .catch(() => setContactCategories([]));
         const p12 = apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setContacts(res.data); });
         await Promise.all([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12]);
         setRefreshProgress(100);
@@ -2120,30 +2885,33 @@ export default function App() {
   const handleUpdateProfile = async () => {
     if (!userProfile) return;
     
-    const updateData = {
+    const requestBody = {
       id: userProfile.id,
       cameraIds: userProfile.cameraIds || [],
       updatePersonDetailsDto: {
-        firstName: userProfile.getPersonDetailsDto.firstName,
-        lastName: userProfile.getPersonDetailsDto.lastName,
-        gender: userProfile.getPersonDetailsDto.gender,
-        imageUrl: userProfile.getPersonDetailsDto.imageUrl || null
+        firstName: userProfile.getPersonDetailsDto.firstName || '',
+        lastName: userProfile.getPersonDetailsDto.lastName || '',
+        imageUrl: profileImageFile ? (userProfile.getPersonDetailsDto.imageUrl || '') : null
       },
       updateUserDto: {
         id: userProfile.getUserDto.id,
-        userName: userProfile.getUserDto.userName,
-        role: userProfile.getUserDto.role
+        userName: userProfile.getUserDto.userName || '',
+        role: userProfile.getUserDto.role ?? 0
       }
     };
 
     try {
       await apiFetch('/Person/UpdatePerson', {
         method: 'PUT',
-        body: JSON.stringify(updateData)
+        body: JSON.stringify(requestBody),
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
       
       addLogEntry('Profile Sync', 'Updated profile identity');
       toast.success('Profile updated successfully');
+      setProfileImageFile(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update profile');
     }
@@ -2449,24 +3217,10 @@ export default function App() {
     requestAuth(async () => {
       if (!newSectionName.trim()) return;
       try {
-        const payload = {
-          sectionName: newSectionName,
-          isHidden: newSectionIsHidden ? true : false
-        };
-        const response: any = await apiFetch('/Section/CreateSection', {
-          method: 'POST',
-          body: JSON.stringify(payload)
+        const url = `/Section/CreateSection?SectionName=${encodeURIComponent(newSectionName)}&IsHidden=${newSectionIsHidden ? 'true' : 'false'}`;
+        await apiFetch(url, {
+          method: 'POST'
         });
-        if (response && response.data) {
-          setSections((prev: any) => [...prev, mapSection(response.data)]);
-        } else {
-          setSections((prev: any) => [...prev, {
-            id: (newSectionName || '').toLowerCase().replace(/\s+/g, '-'),
-            name: newSectionName,
-            type: newSectionType,
-            isHidden: newSectionIsHidden
-          }]);
-        }
         setNewSectionName('');
         setNewSectionType('general');
         setNewSectionIsHidden(false);
@@ -2810,14 +3564,21 @@ export default function App() {
       if (editingDevice && editingDevice.id) {
         let isSuccess = true;
         const rawId = getRawId(editingDevice.id);
+        const rRaw = editingDevice.room;
+        const sRaw = editingDevice.section;
+        const parsedR = (rRaw && rRaw !== 'none' && rRaw !== '') ? parseInt(rRaw.toString(), 10) : null;
+        const finalRoomId = isNaN(parsedR as any) ? null : parsedR;
+        const parsedS = (sRaw && sRaw !== 'none' && sRaw !== '') ? parseInt(sRaw.toString(), 10) : null;
+        const finalSectionId = isNaN(parsedS as any) ? null : parsedS;
+
         try {
           if (editingDevice.type === 'camera') {
             await apiFetch('/Camera/UpdateCamera', {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(rawId) || 0,
-                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
-                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
+                roomId: finalRoomId,
+                sectionId: finalSectionId,
                 isHidden: false,
                 cameraName: editingDevice.name,
                 isActive: true
@@ -2828,8 +3589,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(rawId) || 0,
-                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
-                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
+                roomId: finalRoomId,
+                sectionId: finalSectionId,
                 isHidden: false,
                 applianceName: editingDevice.name,
                 applianceType: parseInt(editingDevice.applianceType?.toString() || '1'),
@@ -2841,8 +3602,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(rawId) || 0,
-                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
-                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
+                roomId: finalRoomId,
+                sectionId: finalSectionId,
                 isHidden: false,
                 windowName: editingDevice.name,
                 isOpen: editingDevice.status === 'open' || editingDevice.status === 'open-locked',
@@ -2857,8 +3618,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(rawId) || 0,
-                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
-                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
+                roomId: finalRoomId,
+                sectionId: finalSectionId,
                 isHidden: false,
                 doorName: editingDevice.name,
                 doorType: parseInt(editingDevice.doorType?.toString() || '1'),
@@ -2874,8 +3635,8 @@ export default function App() {
               method: 'PUT',
               body: JSON.stringify({
                 id: Number(rawId) || 0,
-                roomId: editingDevice.room  && editingDevice.room  !== 'none' ? parseInt(editingDevice.room) : null,
-                sectionId: editingDevice.section  && editingDevice.section  !== 'none' ? parseInt(editingDevice.section) : null,
+                roomId: finalRoomId,
+                sectionId: finalSectionId,
                 isHidden: false,
                 lightName: editingDevice.name,
                 brightnessLevel: editingDevice.value || 0,
@@ -2890,8 +3651,8 @@ export default function App() {
         }
 
         if (isSuccess) {
-          const finalRoom = editingDevice.room === 'none' ? '' : (editingDevice.room || '');
-          const finalSection = editingDevice.section === 'none' ? '' : (editingDevice.section || '');
+          const finalRoom = (finalRoomId !== null) ? finalRoomId.toString() : '';
+          const finalSection = (finalSectionId !== null) ? finalSectionId.toString() : '';
           const processedEditingDevice = {
             ...editingDevice,
             room: finalRoom,
@@ -2903,27 +3664,27 @@ export default function App() {
             setCameras(prev => prev.map(c => c.id.toString() === rawId ? {
               ...c,
               cameraName: editingDevice.name || c.cameraName,
-              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
-              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
+              roomId: finalRoomId,
+              sectionId: finalSectionId
             } : c));
           }
           if (editingDevice.type === 'appliance') {
             setAppliances(prev => prev.map(a => a.id.toString() === rawId ? {
               ...a,
               applianceName: editingDevice.name || a.applianceName,
-              applianceType: appNamesDetailList?.applianceType?.find((t: any) => t.id.toString() === editingDevice.applianceType?.toString())?.name || a.applianceType,
-              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
-              roomName: (editingDevice.room && editingDevice.room !== 'none') ? (rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name : undefined,
-              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null,
-              sectionName: (editingDevice.section && editingDevice.section !== 'none') ? (sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name : undefined
+              applianceType: (appNamesDetailList?.applianceType || []).find((t: any) => t.id.toString() === editingDevice.applianceType?.toString())?.name || a.applianceType,
+              roomId: finalRoomId,
+              roomName: finalRoomId !== null ? (rooms || []).find(r => r.id.toString() === finalRoomId.toString())?.name : undefined,
+              sectionId: finalSectionId,
+              sectionName: finalSectionId !== null ? (sections || []).find(s => s.id.toString() === finalSectionId.toString())?.name : undefined
             } : a));
           }
           if (editingDevice.type === 'window') {
             setWindows(prev => prev.map(w => w.id.toString() === rawId ? {
               ...w,
               windowName: editingDevice.name || w.windowName,
-              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
-              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
+              roomId: finalRoomId,
+              sectionId: finalSectionId
             } : w));
           }
           if (editingDevice.type === 'light') {
@@ -2932,8 +3693,8 @@ export default function App() {
               lightName: editingDevice.name || l.lightName,
               brightnessLevel: editingDevice.value || l.brightnessLevel,
               isActive: editingDevice.status === 'on',
-              roomId: (editingDevice.room && editingDevice.room !== 'none') ? parseInt(editingDevice.room) : null,
-              sectionId: (editingDevice.section && editingDevice.section !== 'none') ? parseInt(editingDevice.section) : null
+              roomId: finalRoomId,
+              sectionId: finalSectionId
             } : l));
           }
           setIsEditDeviceOpen(false);
@@ -2953,6 +3714,10 @@ export default function App() {
     requestAuth(async () => {
       if (editingRoom && editingRoom.id) {
         try {
+          const sRaw = editingRoom.section;
+          const parsedS = (sRaw && sRaw !== 'none' && sRaw !== '') ? parseInt(sRaw.toString(), 10) : null;
+          const finalSectionId = isNaN(parsedS as any) ? null : parsedS;
+
           await apiFetch('/Room/UpdateRoom', {
             method: 'PUT',
             body: JSON.stringify({
@@ -2960,7 +3725,7 @@ export default function App() {
               roomName: editingRoom.name,
               icon: editingRoom.icon || 'Sofa',
               personId: userProfile?.id || 0,
-              sectionId: editingRoom.section  && editingRoom.section  !== 'none' ? parseInt(editingRoom.section as string) : null,
+              sectionId: finalSectionId,
               isHidden: editingRoom.isHidden || false
             })
           });
@@ -3033,14 +3798,12 @@ export default function App() {
             streamPath: newDevice.streamPath || '',
             port: newDevice.port ? parseInt(newDevice.port.toString()) : 80
           };
-          const res: any = await apiFetch('/Camera/CreateCamera', {
+          await apiFetch('/Camera/CreateCamera', {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          if (res && res.data) {
-            setCameras(prev => [...prev, res.data]);
-          }
-          toast.success('Camera added successfully'); setIsAddDeviceOpen(false);
+          toast.success('Camera added successfully'); 
+          setIsAddDeviceOpen(false);
         } else if (inferredType === 'appliance') {
           const appType = newDevice.applianceType || 1;
           const payload = {
@@ -3050,14 +3813,12 @@ export default function App() {
             applianceName: newDevice.name,
             applianceType: appType
           };
-          const res: any = await apiFetch('/Appliance/CreateAppliance', {
+          await apiFetch('/Appliance/CreateAppliance', {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          if (res && res.data) {
-            setAppliances(prev => [...prev, res.data]);
-          }
-          toast.success('Appliance added successfully'); setIsAddDeviceOpen(false);
+          toast.success('Appliance added successfully'); 
+          setIsAddDeviceOpen(false);
         } else if (inferredType === 'door') {
           const payload = {
             roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
@@ -3071,91 +3832,68 @@ export default function App() {
             lockedBy: userProfile?.id || 0,
             unlockedBy: 0
           };
-          const res: any = await apiFetch('/Door/CreateDoor', {
+          await apiFetch('/Door/CreateDoor', {
             method: 'POST', 
             body: JSON.stringify(payload)
           });
-          if (res && res.data) {
-            setDoors(prev => [...prev, res.data]);
-          }
-          toast.success('Door added successfully'); setIsAddDeviceOpen(false);
+          toast.success('Door added successfully'); 
+          setIsAddDeviceOpen(false);
         } else if (inferredType === 'window') {
-        const payload = {
-          roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-          sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
-          isHidden: true,
-          windowName: newDevice.name,
-          windowId: Math.random().toString(36).substring(2, 9),
-          isOpen: false,
-          isLocked: true,
-          openedBy: 0,
-          lockedBy: userProfile?.id || 0,
-          unlockedBy: 0
-        };
-        const res: any = await apiFetch('/Window/CreateWindow', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-        if (res && res.data) {
-          setWindows(prev => [...prev, res.data]);
-        }
-        toast.success('Window added successfully'); setIsAddDeviceOpen(false);
-      } else if (inferredType === 'light') {
-        const payload = {
-          roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-          sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
-          isHidden: true,
-          lightName: newDevice.name,
-          brightnessLevel: 0
-        };
-        const res: any = await apiFetch('/Light/CreateLight', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-        if (res && res.data) {
-          setLights(prev => [...prev, res.data]);
-          const l = res.data;
-          const rId = (l.roomId ?? l.RoomId ?? '').toString();
-          const sId = (l.sectionId ?? l.SectionId ?? '').toString();
-          setDevices(prev => {
-            const devId = `light-${l.id}`;
-            if (prev.some(d => d.id === devId)) return prev;
-            return [...prev, {
-              id: devId,
-              name: l.lightName || l.name,
-              type: 'light',
-              status: (l.isActive || l.IsActive) ? 'on' : 'off',
-              value: l.brightnessLevel || 0,
-              room: rId,
-              section: sId,
-              powerUsage: 0
-            } as Device];
+          const payload = {
+            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            isHidden: true,
+            windowName: newDevice.name,
+            windowId: Math.random().toString(36).substring(2, 9),
+            isOpen: false,
+            isLocked: true,
+            openedBy: 0,
+            lockedBy: userProfile?.id || 0,
+            unlockedBy: 0
+          };
+          await apiFetch('/Window/CreateWindow', {
+            method: 'POST',
+            body: JSON.stringify(payload)
           });
+          toast.success('Window added successfully'); 
+          setIsAddDeviceOpen(false);
+        } else if (inferredType === 'light') {
+          const payload = {
+            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
+            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            isHidden: true,
+            lightName: newDevice.name,
+            brightnessLevel: 0
+          };
+          await apiFetch('/Light/CreateLight', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+          toast.success('Light added successfully'); 
+          setIsAddDeviceOpen(false);
+        } else {
+          // Fallback for other generic types mock locally
+          const numericId = Math.floor(Math.random() * 9000) + 1000;
+          const device: Device = {
+            id: Math.random().toString(36).substring(2, 9),
+            name: newDevice.name,
+            type: inferredType as any,
+            room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
+            section: newDevice.section || undefined,
+            status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : 'off',
+            value: inferredType === 'light' ? 0 : undefined,
+            doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
+            powerUsage: 0
+          };
+          setDevices(prev => [...prev, device]);
+          toast.success('Device added locally');
         }
-        toast.success('Light added successfully'); setIsAddDeviceOpen(false);
-      } else {
-        // Fallback for other generic types mock locally
-        const numericId = Math.floor(Math.random() * 9000) + 1000;
-        const device: Device = {
-          id: Math.random().toString(36).substring(2, 9),
-          name: newDevice.name,
-          type: inferredType as any,
-          room: (newDevice.room === 'none' || !newDevice.room) ? undefined : newDevice.room,
-          section: newDevice.section || undefined,
-          status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : 'off',
-          value: inferredType === 'light' ? 0 : undefined,
-          doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
-          powerUsage: 0
-        };
-        setDevices(prev => [...prev, device]);
-        toast.success('Device added locally');
+        
+        setIsAddDeviceOpen(false);
+        setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 1, applianceType: 1 });
+      } catch (err: any) {
+        toast.error(err.message || 'Error occurred while creating the device');
       }
-      
-      setIsAddDeviceOpen(false);
-      setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 1, applianceType: 1 });
-    } catch (err: any) {
-      toast.error(err.message || 'Error occurred while creating the device');
-    }
     });
   };
 
@@ -3164,7 +3902,7 @@ export default function App() {
       if (!newRoom.name) return;
 
       try {
-        const response: any = await apiFetch('/Room/CreateRoom', {
+        await apiFetch('/Room/CreateRoom', {
           method: 'POST',
           body: JSON.stringify({
             roomName: newRoom.name,
@@ -3175,18 +3913,9 @@ export default function App() {
           })
         });
 
-        if (response && response.data) {
-          const room = response.data;
-          setRooms((prev: any) => [...prev, {
-            ...room,
-            name: room.roomName || room.name,
-            section: room.sectionId?.toString() || room.sectionName || room.section || '',
-            icon: room.icon || 'Sofa'
-          }]);
-          setIsAddRoomOpen(false);
-          setNewRoom({ name: '', section: '', icon: 'Sofa' });
-          toast.success("Room created successfully");
-        }
+        setIsAddRoomOpen(false);
+        setNewRoom({ name: '', section: '', icon: 'Sofa' });
+        toast.success("Room created successfully");
       } catch (err: any) {
         console.error("Failed to create room", err);
         toast.error(`Failed to create room: ${err.message}`);
@@ -3579,17 +4308,26 @@ export default function App() {
               </h2>
               <Card className="divide-y overflow-hidden">
                 {logs && logs.length > 0 ? (
-                  logs.slice(0, 3).map(log => (
-                    <div key={log.id} className="p-4 flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
-                        <img src={log.getPersonDto?.getPersonDetailsDto?.imageUrl || undefined} alt={`${log.getPersonDto?.getPersonDetailsDto?.firstName} avatar`} className="h-full w-full object-cover" />
+                  logs.slice(0, 3).map(log => {
+                    const details = log.getPersonDto?.getPersonDetailsDto;
+                    const imageUrl = details?.imageUrl;
+                    const firstName = details?.firstName || 'System';
+                    return (
+                      <div key={log.id} className="p-4 flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center border">
+                          {imageUrl ? (
+                            <img src={getFullImageUrl(imageUrl)} alt={`${firstName} avatar`} className="h-full w-full object-cover" />
+                          ) : (
+                            <UserIcon className="h-4 w-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm truncate font-medium"><span className="font-semibold text-foreground">{firstName}</span>: {log.logDetails}</p>
+                          <p className="text-xs text-muted-foreground">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate font-medium"><span className="font-semibold">{log.getPersonDto?.getPersonDetailsDto?.firstName}</span>: {log.logDetails}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="p-8">
                     <NoItems icon={ClipboardList} message="No recent activity logs." />
@@ -3840,7 +4578,7 @@ export default function App() {
               {displayedLogs.length > 0 ? (displayedLogs || []).map(log => {
                 const details = log.getPersonDto?.getPersonDetailsDto;
                 const userFullName = details ? `${details.firstName} ${details.lastName}` : 'System';
-                const avatar = details?.imageUrl || 'https://picsum.photos/seed/system/100/100';
+                const imageUrl = details?.imageUrl;
 
                 return (
                   <div 
@@ -3852,10 +4590,12 @@ export default function App() {
                     }}
                   >
                     <div className="flex items-center gap-4 min-w-0">
-                      <div className="h-10 w-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border border-primary/10">
-                        {avatar ? (
-                          <img src={avatar} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
-                        ) : null}
+                      <div className="h-10 w-10 rounded-full overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center border border-primary/10">
+                        {imageUrl ? (
+                          <img src={getFullImageUrl(imageUrl)} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                        ) : (
+                          <UserIcon className="h-5 w-5 text-slate-400" />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1 text-left">
                         <p className="text-sm font-medium leading-none text-foreground flex items-center gap-2 flex-wrap text-left">
@@ -4030,55 +4770,62 @@ export default function App() {
           </div>
 
           {contactView === 'overview' ? (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <Card className="p-6">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 items-start">
+              <Card className={cn("p-6 md:col-span-1 h-fit transition-all duration-300", (!contactCategories || contactCategories.length === 0) && "max-h-[240px]")}>
                 <h3 className="text-lg font-bold mb-4">Categories</h3>
                 <div className="space-y-2">
-                  {(contactCategories || []).map(cat => {
-                    const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
-                    return (
-                      <div key={cat.id} className="group relative">
-                        <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                          <div className="flex items-center gap-3">
-                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                              <CategoryIcon className="h-4 w-4" />
+                  {contactCategories && contactCategories.length > 0 ? (
+                    contactCategories.map(cat => {
+                      const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
+                      return (
+                        <div key={cat.id} className="group relative">
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                                <CategoryIcon className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold">{cat.name}</p>
+                                {cat.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</p>}
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-bold">{cat.name}</p>
-                              {cat.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</p>}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="h-5">{contacts.filter(c => c.getContactCategoryDto.id === cat.id).length}</Badge>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                                onClick={() => {
-                                  setEditingCategory(cat);
-                                  setNewCategoryName(cat.name);
-                                  setNewCategoryDescription(cat.description || '');
-                                  setNewCategoryIcon(cat.icon || 'UserCircle');
-                                  setIsEditCategoryOpen(true);
-                                }}
-                              >
-                                <Edit3 className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => handleDeleteCategory(cat.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary" className="h-5">{contacts.filter(c => c.getContactCategoryDto.id === cat.id).length}</Badge>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={() => {
+                                    setEditingCategory(cat);
+                                    setNewCategoryName(cat.name);
+                                    setNewCategoryDescription(cat.description || '');
+                                    setNewCategoryIcon(cat.icon || 'UserCircle');
+                                    setIsEditCategoryOpen(true);
+                                  }}
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => handleDeleteCategory(cat.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  ) : (
+                    <div className="py-6 px-4 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center gap-1">
+                      <p className="text-slate-500 font-medium text-sm">No contact categories found</p>
+                      <p className="text-slate-400 text-xs">Create a custom category to group your contacts.</p>
+                    </div>
+                  )}
                 </div>
                 <Button variant="outline" className="w-full mt-4" size="sm" onClick={() => setIsAddCategoryOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" /> Add Category
@@ -4709,7 +5456,7 @@ export default function App() {
               <div className="bg-muted/30 border-l p-8 flex flex-col items-center text-center space-y-6 order-1 md:order-2">
                 <div className="relative group">
                   <div className="h-40 w-40 rounded-3xl overflow-hidden border-8 border-background shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
-                    <img src={userProfile.getPersonDetailsDto.imageUrl || undefined} alt={`${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`} className="h-full w-full object-cover" />
+                    <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt={`${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`} className="h-full w-full object-cover" />
                   </div>
                   <button 
                     className="absolute -bottom-2 -right-2 rounded-2xl bg-primary p-3 text-primary-foreground shadow-xl hover:scale-110 transition-transform"
@@ -6744,7 +7491,9 @@ export default function App() {
                     const payload = {
                       id: Number(editingSection.id),
                       sectionName: editingSection.name || '',
-                      isHidden: editingSection.isHidden ? true : false
+                      SectionName: editingSection.name || '',
+                      isHidden: editingSection.isHidden ? true : false,
+                      IsHidden: editingSection.isHidden ? true : false
                     };
                     await apiFetch('/Section/UpdateSection', { method: 'PUT', body: JSON.stringify(payload) });
                     setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden }) : s));
@@ -8150,9 +8899,12 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room (Section Level)</SelectItem>
-                    {(rooms || []).map(r => (
-                      <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
-                    ))}
+                    {(rooms || [])
+                      .filter(r => !editingDevice.section || r.section?.toString() === editingDevice.section?.toString())
+                      .map(r => (
+                        <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                      ))
+                    }
                   </SelectContent>
                 </Select>
               </div>
@@ -8162,13 +8914,18 @@ export default function App() {
                   Section
                 </Label>
                 <Select 
-                  value={editingDevice.section || ''} 
-                  onValueChange={(v) => setEditingDevice({ ...editingDevice, section: v })}
+                  value={editingDevice.section || 'none'} 
+                  onValueChange={(v) => setEditingDevice({ 
+                    ...editingDevice, 
+                    section: v === 'none' ? undefined : v,
+                    room: undefined 
+                  })}
                 >
                   <SelectTrigger id="edit-device-section">
                     <SelectValue placeholder="Select section" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">No Section</SelectItem>
                     {(sections || []).map(s => (
                       <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                     ))}
@@ -8558,6 +9315,22 @@ export default function App() {
         onClose={() => setIsCropperOpen(false)}
         imageSrc={cropImageSrc}
         onCropComplete={handleCropComplete}
+      />
+      
+      <ImageCropperModal
+        isOpen={isGroupImageCropperOpen}
+        onClose={() => {
+          setIsGroupImageCropperOpen(false);
+          setTempGroupImageUrl("");
+        }}
+        imageSrc={tempGroupImageUrl}
+        onCropComplete={async (base64Str) => {
+          const file = base64ToFile(base64Str, 'group-image.jpg');
+          setNewGroupImageFile(file);
+          setNewGroupImageUrl(base64Str);
+          setIsGroupImageCropperOpen(false);
+          setTempGroupImageUrl("");
+        }}
       />
 
       {/* Hardware Detail Modal */}
@@ -10688,23 +11461,29 @@ export default function App() {
           </DialogHeader>
           <div className="space-y-4 pt-[3px] pb-4">
             <div className="grid gap-2">
-              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
+              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 text-slate-400" />
+                Action Name
+              </Label>
               <Input 
                 id="actionName" 
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200"
+                className="rounded-none h-11 border-slate-200"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Description</Label>
+              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-slate-400" />
+                Description
+              </Label>
               <Input 
                 id="description" 
                 placeholder="Describe what this action does..." 
                 value={actionForm.description}
                 onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200"
+                className="rounded-none h-11 border-slate-200"
               />
             </div>
           </div>
@@ -10715,37 +11494,14 @@ export default function App() {
                 if (!actionForm.actionName) return;
                 requestAuth(async () => {
                   try {
-                    const res: any = await apiFetch('/Action/CreateAction', { 
+                    await apiFetch('/Action/CreateAction', { 
                       method: 'POST', 
                       body: JSON.stringify({ 
                         ActionName: actionForm.actionName, 
                         Description: actionForm.description || '' 
                       }) 
                     });
-                    if (res && res.data) {
-                      setActions(prev => [...prev, res.data]);
-                      toast.success('Action created successfully!');
-                    } else {
-                      const newAction: GetActionDto = {
-                        id: actions.length + 1,
-                        actionId: `ACT-00${actions.length + 1}`,
-                        actionName: actionForm.actionName,
-                        actionDescription: actionForm.description,
-                        actionActive: true,
-                        getActionStepDtos: [],
-                        createdBy: 1,
-                        createdByName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                        createdOn: new Date().toISOString(),
-                        lastModifiedBy: 1,
-                        lastModifiedByName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                        lastModifiedOn: new Date().toISOString(),
-                        isDeleted: false,
-                        personId: 1,
-                        peronName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                        deletedBy: 0
-                      };
-                      setActions(prev => [...prev, newAction]);
-                    }
+                    toast.success('Action created successfully!');
                     setIsAddActionOpen(false);
                     setActionForm({ actionName: '', description: '', personId: 1 });
                   } catch (err: any) {
@@ -11203,7 +11959,7 @@ export default function App() {
                         className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 rounded-3xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0 group"
                       >
                         <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white overflow-hidden bg-slate-100 group-hover:scale-105 transition-transform">
-                          <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                         </div>
                         <span className="font-semibold text-lg text-slate-800">{user.getPersonDetailsDto.firstName}</span>
                         <span className="text-xs text-slate-500 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
@@ -11220,8 +11976,12 @@ export default function App() {
             <div className="p-5 bg-[#f0f2f5] shrink-0 border-b space-y-4 w-full" style={{ borderColor: "#060101" }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white">
-                    <img src={userProfile.getPersonDetailsDto.imageUrl || undefined} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                  <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white shrink-0">
+                    {userProfile?.getPersonDetailsDto?.imageUrl ? (
+                      <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <UserIcon className="h-5 w-5 text-slate-500" />
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-bold tracking-tight text-[#111b21]">Chats</h2>
@@ -11256,7 +12016,7 @@ export default function App() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input 
-                   placeholder="Search or start new chat" 
+                  placeholder="Search chats" 
                   className="pl-10 h-10 bg-inherit border-none rounded-none text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black"
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
@@ -11265,10 +12025,18 @@ export default function App() {
             </div>
 
             <ScrollArea className="flex-1 bg-white">
-              <div className="divide-y divide-slate-50 w-full">
-                {(chats || []).map((chat) => {
-                    const lastMsg = chat.lastMessage;
+              <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+                <div className="divide-y divide-slate-50 w-full">
+                  {(chats || [])
+                    .filter(c => !chatSearchQuery || (c.name || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                    .map((chat) => {
+                    const chatMsgs = chatMessages.filter(m => m.chatId === chat.id);
+                    const lastMsg = chatMsgs.length > 0 ? chatMsgs[chatMsgs.length - 1] : chat.lastMessage;
                     const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
+                    
+                    const activeChatTypers = typingUsers[chat.id] || {};
+                    const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
+                    const isTypingInChat = typers.length > 0;
                     
                     return (
                       <button 
@@ -11285,14 +12053,18 @@ export default function App() {
                       >
                         <div className="relative shrink-0 flex items-center">
                           <div className={cn(
-                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100",
+                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100 text-lg font-bold text-slate-600",
                             activeChatId === chat.id ? "bg-primary/10" : "bg-slate-50"
                           )}>
-                            {chat.imageUrl ? (
-                              <img src={chat.imageUrl || undefined} alt={chat.name} className="h-full w-full object-cover" />
-                            ) : (
-                              chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <UserIcon className="h-6 w-6 text-slate-400" />
-                            )}
+                            {(() => {
+                              const displayImageUrl = getChatDisplayImageUrl(chat);
+                              const displayInitial = getChatDisplayInitial(chat);
+                              
+                              if (displayImageUrl) {
+                                return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(chat)} className="h-full w-full object-cover" />;
+                              }
+                              return chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <span>{displayInitial}</span>;
+                            })()}
                           </div>
                           {isOnline && (
                             <span className="absolute bottom-2 right-0 h-3.5 w-3.5 bg-[#25d366] border-[3px] border-white rounded-full" />
@@ -11300,7 +12072,7 @@ export default function App() {
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
                           <div className="flex justify-between items-center mb-0.5">
-                            <span className="font-semibold text-[16px] text-[#111b21] truncate">{chat.name || 'Private Chat'}</span>
+                            <span className="font-semibold text-[16px] text-[#111b21] truncate">{getChatDisplayName(chat)}</span>
                             <span className={cn(
                               "text-[11px] font-medium tracking-tight px-1",
                               chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781]"
@@ -11310,10 +12082,18 @@ export default function App() {
                           </div>
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1 min-w-0">
-                              {lastMsg && lastMsg.senderPersonId === userProfile.id && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
-                              <p className="text-[14px] text-[#667781] truncate leading-relaxed">
-                                {lastMsg ? lastMsg.content : (chat.description || 'No messages yet')}
-                              </p>
+                              {isTypingInChat ? (
+                                <p className="text-[14px] text-[#25d366] font-semibold truncate leading-relaxed animate-pulse">
+                                  {typers[0].name} typing...
+                                </p>
+                              ) : (
+                                <>
+                                  {lastMsg && lastMsg.senderPersonId === userProfile.id && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
+                                  <p className="text-[14px] text-[#667781] truncate leading-relaxed">
+                                    {lastMsg ? (lastMsg.isDeleted ? 'This message was deleted' : lastMsg.content) : 'No messages yet'}
+                                  </p>
+                                </>
+                              )}
                             </div>
                             {chat.unreadCount > 0 && (
                               <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm">
@@ -11325,12 +12105,13 @@ export default function App() {
                       </button>
                     );
                   })}
-              </div>
+                </div>
+              </PullToRefresh>
             </ScrollArea>
           </div>
 
-          {/* Chat Box (Proportional 70%) */}
-          <div className="w-[70%] flex flex-col bg-[#efeae2] relative overflow-hidden shrink-0">
+          {/* Chat Box (Dynamic Width) */}
+          <div className="flex flex-col bg-[#efeae2] relative overflow-hidden flex-1 h-full transition-all duration-300">
             {activeChatId ? (
               <>
                 {(() => {
@@ -11342,12 +12123,16 @@ export default function App() {
                     <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
                       <div className="flex items-center gap-3">
                         <div className="relative">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200">
-                            {chat.imageUrl ? (
-                              <img src={chat.imageUrl || undefined} alt={chat.name} className="h-full w-full object-cover" />
-                            ) : (
-                              chat.isGroup ? <Users className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />
-                            )}
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200 text-lg font-bold">
+                            {(() => {
+                              const displayImageUrl = getChatDisplayImageUrl(chat);
+                              const displayInitial = getChatDisplayInitial(chat);
+                              
+                              if (displayImageUrl) {
+                                return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(chat)} className="h-full w-full object-cover" />;
+                              }
+                              return chat.isGroup ? <Users className="h-5 w-5" /> : <span>{displayInitial}</span>;
+                            })()}
                           </div>
                           {isOnline && (
                             <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-[#f0f2f5] rounded-full" />
@@ -11355,12 +12140,37 @@ export default function App() {
                         </div>
                         <div>
                           <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px]">
-                            {chat.name || 'Private Chat'}
+                            {getChatDisplayName(chat)}
                           </h3>
                           <div className="flex items-center gap-1.5 ">
-                            <span className="text-[12px] text-[#667781] font-medium leading-none">
-                              {isOnline ? 'Online • Active now' : 'Offline'}
-                            </span>
+                            {(() => {
+                              const activeChatTypers = typingUsers[chat.id] || {};
+                              const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
+                              if (typers.length > 0) {
+                                return (
+                                  <span className="text-[12px] text-emerald-600 font-bold leading-none flex items-center gap-1 animate-pulse">
+                                    <span className="relative flex h-1.5 w-1.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                    </span>
+                                    {typers[0].name} is typing...
+                                  </span>
+                                );
+                              }
+                              if (chat.isGroup) {
+                                const memberNames = getGroupMemberNames(chat);
+                                return (
+                                  <span className="text-[12px] text-[#667781] font-medium leading-none truncate max-w-[280px]">
+                                    {memberNames || 'No members'}
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="text-[12px] text-[#667781] font-medium leading-none">
+                                  {isOnline ? 'Online • Active now' : 'Offline'}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -11378,11 +12188,11 @@ export default function App() {
                               setNewGroupRoom(chat.roomId?.toString() || "none");
                               setNewGroupSection(chat.sectionId?.toString() || "");
                               setSelectedParticipants((chat.participants || []).map(p => p.personId).filter(id => id !== userProfile.id));
-                              setIsEditGroupOpen(true);
+                              setIsViewGroupOpen(true);
                             }}
-                            title="Group Settings"
+                            title="View Group Details"
                           >
-                            <Settings2 className="h-5 w-5" />
+                            <Info className="h-5 w-5" />
                           </Button>
                         )}
                         {isChatSearchVisible && (
@@ -11395,8 +12205,8 @@ export default function App() {
                             <Input 
                               placeholder="Search messages..." 
                               className="h-8 pl-8 text-xs bg-white border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
-                              value={chatSearchQuery}
-                              onChange={(e) => setChatSearchQuery(e.target.value)}
+                              value={messageSearchQuery}
+                              onChange={(e) => setMessageSearchQuery(e.target.value)}
                             />
                           </motion.div>
                         )}
@@ -11404,7 +12214,12 @@ export default function App() {
                           variant="ghost" 
                           size="icon" 
                           className={cn("rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50", isChatSearchVisible && "bg-slate-200 text-primary")}
-                          onClick={() => setIsChatSearchVisible(!isChatSearchVisible)}
+                          onClick={() => {
+                            setIsChatSearchVisible(!isChatSearchVisible);
+                            if (isChatSearchVisible) {
+                              setMessageSearchQuery("");
+                            }
+                          }}
                         >
                           <Search className="h-5 w-5" />
                         </Button>
@@ -11423,13 +12238,32 @@ export default function App() {
                   );
                 })()}
 
-                <div className="flex-1 relative overflow-hidden bg-[#efeae2]">
+                <div ref={chatBoxMessagesContainerRef} className="flex-1 relative overflow-hidden bg-[#efeae2]">
                   {/* WhatsApp background pattern */}
                   <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat z-0" />
                   
-                  <ScrollArea className="h-full w-full chat-scroll-viewport">
+                  {/* Sticky Floating Date Label (WhatsApp style) */}
+                  {activeFloatingDate && (
+                    <div className="absolute top-4 left-0 right-0 flex justify-center z-30 pointer-events-none transition-all duration-200">
+                      <span className="bg-white shadow-[0_1.5px_2px_rgba(0,0,0,0.15)] px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider border border-slate-200/50">
+                        {activeFloatingDate}
+                      </span>
+                    </div>
+                  )}
+
+                  <div 
+                    ref={chatScrollRef}
+                    onScroll={handleChatScroll}
+                    className="h-full w-full overflow-y-auto chat-scroll-viewport relative no-scrollbar"
+                  >
                     <div className="p-6 md:px-12 xl:px-24 relative z-10 flex flex-col min-h-full">
-                      <div className="flex justify-center mb-8 sticky top-0 z-30 pt-2">
+                      {selectedMessageId !== null && (
+                        <div 
+                          className="absolute inset-0 bg-black/40 backdrop-blur-[1.5px] z-30 rounded-3xl transition-all cursor-pointer"
+                          onClick={() => setSelectedMessageId(null)}
+                        />
+                      )}
+                      <div className="flex justify-center mb-8 relative z-20 pt-2">
                         <div className="bg-[#fff9c2] border border-[#e8df8a] shadow-sm px-4 py-1.5 rounded-lg flex items-center gap-2 max-w-[80%] mx-auto">
                           <Lock className="h-3 w-3 text-[#54656f]" />
                           <span className="text-[11px] font-medium text-[#54656f] leading-relaxed text-center">Messages are end-to-end encrypted. No one outside of this chat can read or listen to them. Click to learn more.</span>
@@ -11440,7 +12274,7 @@ export default function App() {
                         {(() => {
                            const currentMessages = chatMessages.filter(m => 
                             m.chatId === activeChatId && 
-                            (!chatSearchQuery || m.content?.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                            (!messageSearchQuery || m.content?.toLowerCase().includes(messageSearchQuery.toLowerCase()))).sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime()
                           );
 
                           if (currentMessages.length === 0) {
@@ -11453,171 +12287,430 @@ export default function App() {
 
                           return (
                             <>
-                              <div className="flex justify-center my-6">
-                                <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">Today</span>
-                              </div>
-                              {(currentMessages || []).map((msg, idx) => {
-                                const isMe = msg.senderPersonId === userProfile.id;
-                                return (
-                                  <motion.div 
+                              <PullToRefresh onRefresh={async () => { await loadMoreMessages(); }} pullingContent={<div className="text-center p-4 text-xs font-bold text-[#54656f] uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull to load older messages</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Loading...</div>}>
+
+                              {(() => {
+                                const groupedMessages: { label: string; messages: MessageDto[] }[] = [];
+                                (currentMessages || []).forEach(msg => {
+                                  const label = getMessageDateLabel(new Date(msg.sentAt));
+                                  const lastGroup = groupedMessages[groupedMessages.length - 1];
+                                  if (lastGroup && lastGroup.label === label) {
+                                    lastGroup.messages.push(msg);
+                                  } else {
+                                    groupedMessages.push({ label, messages: [msg] });
+                                  }
+                                });
+
+                                return groupedMessages.map((group) => (
+                                  <div key={group.label} data-date-group={group.label} className="w-full space-y-4">
+                                    <div className="flex justify-center my-6">
+                                      <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">{group.label}</span>
+                                    </div>
+                                    {group.messages.map((msg, idx) => {
+                                      const isMe = msg.senderPersonId === userProfile.id;
+                                      const isTextType = !msg.type || msg.type === MessageType.Text || String(msg.type) === "1" || String(msg.type).toLowerCase() === "text" || !msg.attachments || msg.attachments.length === 0;
+                                      const isImageType = (msg.type === MessageType.Image || String(msg.type) === "2" || String(msg.type).toLowerCase() === "image") && msg.attachments && msg.attachments.length > 0;
+                                      const isFileType = (msg.type === MessageType.File || String(msg.type) === "4" || String(msg.type).toLowerCase() === "file") && msg.attachments && msg.attachments.length > 0;
+                                      const isVideoType = (msg.type === MessageType.Video || String(msg.type) === "3" || String(msg.type).toLowerCase() === "video") && msg.attachments && msg.attachments.length > 0;
+                                      const isAudioType = (msg.type === MessageType.Audio || String(msg.type) === "7" || String(msg.type).toLowerCase() === "audio") && msg.attachments && msg.attachments.length > 0;
+                                      return (
+                                        <motion.div 
+                                          initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                                          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
+                                          drag="x"
+                                          dragConstraints={{ left: 0, right: 0 }}
+                                          dragElastic={{ left: isMe ? 0.6 : 0, right: isMe ? 0 : 0.6 }}
+                                          onDragEnd={(_, info) => {
+                                            if (isMe && info.offset.x < -50) {
+                                              setReplyingTo(msg);
+                                            } else if (!isMe && info.offset.x > 50) {
+                                              setReplyingTo(msg);
+                                            }
+                                          }}
+                                          key={msg.id || idx} 
+                                          className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start", selectedMessageId === msg.id ? "z-50 relative" : "")}
+                                        >
+                                          <div 
+                                            className={cn(
+                                              "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all",
+                                              isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12",
+                                              selectedMessageId === msg.id ? "shadow-2xl scale-[1.02]" : ""
+                                            )}
+                                            onTouchStart={(e) => {
+                                              const target = e.currentTarget;
+                                              longPressTimeout.current = setTimeout(() => {
+                                                handleLongPress(target);
+                                                setSelectedMessageId(msg.id);
+                                              }, 600);
+                                            }}
+                                            onTouchEnd={() => clearTimeout(longPressTimeout.current)}
+                                            onTouchMove={() => clearTimeout(longPressTimeout.current)}
+                                            onMouseDown={(e) => {
+                                              const target = e.currentTarget;
+                                              longPressTimeout.current = setTimeout(() => {
+                                                handleLongPress(target);
+                                                setSelectedMessageId(msg.id);
+                                              }, 600);
+                                            }}
+                                            onMouseUp={() => clearTimeout(longPressTimeout.current)}
+                                            onMouseLeave={() => clearTimeout(longPressTimeout.current)}
+                                          >
+                                            {!isMe && (
+                                              <div className="px-1 mb-1">
+                                                <span className="text-xs font-bold text-primary tracking-tight">{getMessageSenderName(msg)}</span>
+                                              </div>
+                                            )}
+
+                                            <div className="px-1 py-0.5">
+                                              {msg.replyToId && (
+                                                <div className="mb-2 p-2 bg-black/5 rounded-lg border-l-4 border-primary text-[13px] bg-white/40">
+                                                  {(() => {
+                                                    const repliedMsg = (chatMessages || []).find(m => m.id === msg.replyToId);
+                                                    return repliedMsg ? (
+                                                      <>
+                                                        <p className="font-bold text-primary text-[11px] mb-0.5">{getMessageSenderName(repliedMsg)}</p>
+                                                        <p className="truncate text-slate-500 italic">
+                                                          {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type]}]`}
+                                                        </p>
+                                                      </>
+                                                    ) : (
+                                                      <p className="text-slate-400 italic">Original message unavailable</p>
+                                                    );
+                                                  })()}
+                                                </div>
+                                              )}
+                                              {isTextType && (
+                                                <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.content}</p>
+                                              )}
+                                              {isImageType && (
+                                                <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
+                                                  <div className={cn(
+                                                    "grid gap-0.5 rounded-md overflow-hidden",
+                                                    msg.attachments.length === 1 ? "grid-cols-1" : 
+                                                    msg.attachments.length === 2 ? "grid-cols-2" : 
+                                                    "grid-cols-2"
+                                                  )}>
+                                                    {msg.attachments.map((att, idx) => (
+                                                      <img 
+                                                        key={idx}
+                                                        src={att.filePath || undefined} 
+                                                        alt="uploaded" 
+                                                        className={cn(
+                                                          "w-full h-auto object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm",
+                                                          msg.attachments.length > 1 ? "aspect-square" : "max-h-[400px]"
+                                                        )}
+                                                        onClick={() => {
+                                                          setPreviewMediaUrl(att.filePath);
+                                                          setIsPreviewModalOpen(true);
+                                                        }}
+                                                        referrerPolicy="no-referrer"
+                                                      />
+                                                    ))}
+                                                  </div>
+                                                  {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
+                                                </div>
+                                              )}
+                                              {isFileType && (
+                                                <div className="space-y-1">
+                                                  {msg.attachments.map((att, idx) => (
+                                                    <div key={idx} className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
+                                                      <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
+                                                        <FileText className="h-7 w-7 text-white" />
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
+                                                        <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
+                                                          {att.contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(att.fileSize / 1024 / 1024).toFixed(1)} MB
+                                                        </p>
+                                                      </div>
+                                                      <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
+                                                        <Download className="h-4 w-4" />
+                                                      </Button>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
+                                              {isVideoType && (
+                                                <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
+                                                  {msg.attachments.map((att, idx) => (
+                                                    <video 
+                                                      key={idx}
+                                                      src={att.filePath || undefined} 
+                                                      controls 
+                                                      className="w-full rounded-md shadow-sm max-h-[300px] object-cover" 
+                                                    />
+                                                  ))}
+                                                  {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
+                                                </div>
+                                              )}
+                                              {isAudioType && (
+                                                <div className="space-y-1 p-2 bg-black/5 rounded-xl border border-black/5 min-w-[280px]">
+                                                  {msg.attachments.map((att, idx) => (
+                                                    <div key={idx} className="flex items-center gap-3">
+                                                      <div className="h-10 w-10 rounded-full bg-emerald-500 flex items-center justify-center text-white shrink-0">
+                                                        <Volume2 className="h-5 w-5" />
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                        <audio src={att.filePath || undefined} controls className="w-full h-8 scale-90 origin-left" />
+                                                        <p className="text-[10px] text-[#667781] px-1 truncate">{att.fileName}</p>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                  {msg.content && <p className="px-1 pt-1 text-[13px] text-[#111b21]">{msg.content}</p>}
+                                                </div>
+                                              )}
+                                              
+                                              <div className="flex items-center justify-end gap-1 mt-1 shrink-0 select-none whitespace-nowrap">
+                                                <span className="text-[10px] text-[#667781] font-medium uppercase tracking-tighter whitespace-nowrap shrink-0">
+                                                  {format(new Date(msg.sentAt), 'HH:mm')}
+                                                </span>
+                                                {isMe && (() => {
+                                                  if ((msg as any).status === 'failed') {
+                                                    return <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0 animate-pulse" />;
+                                                  }
+                                                  if ((msg as any).status === 'sending') {
+                                                    return <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0 animate-pulse" />;
+                                                  }
+                                                  return <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb] shrink-0" />;
+                                                })()}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </motion.div>
+                                      );
+                                    })}
+                                  </div>
+                                ));
+                              })()}
+
+                              {/* Active Typers Bubble inside Chat Box, pushing the last message upward */}
+                              {(() => {
+                                const activeChatTypers = typingUsers[activeChatId!] || {};
+                                const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
+                                return typers.map((typer, tIdx) => (
+                                  <motion.div
+                                    key={`typer-bubble-${tIdx}`}
                                     initial={{ opacity: 0, y: 15, scale: 0.95 }}
                                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
-                                    drag="x"
-                                    dragConstraints={{ left: -50, right: 50 }}
-                                    onDragEnd={(_, info) => {
-                                      if (Math.abs(info.offset.x) > 40) {
-                                        setReplyingTo(msg);
-                                      }
-                                    }}
-                                    key={(msg.id ?? msg.Id) || idx} 
-                                    className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start")}
+                                    className="flex w-full mb-1 justify-start"
                                   >
-                                    <div className={cn(
-                                      "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all",
-                                      isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12"
-                                    )}>
-                                      {/* Action Buttons on Hover */}
-                                      <div className={cn(
-                                        "absolute opacity-0 group-hover/msg:opacity-100 transition-all duration-200 z-50 flex items-center gap-1",
-                                        isMe ? "right-1 -top-8" : "left-1 -top-8"
-                                      )}>
-                                        <Button 
-                                          variant="ghost" 
-                                          size="icon"
-                                          onClick={() => setReplyingTo(msg)}
-                                          className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600 p-0"
-                                        >
-                                          <Reply className="h-3.5 w-3.5" />
-                                        </Button>
-                                        
-                                        {isMe && (
-                                          <>
-                                            <Button 
-                                              variant="ghost" 
-                                              size="icon"
-                                              onClick={() => {
-                                                if (msg.content) {
-                                                  navigator.clipboard.writeText(msg.content);
-                                                  toast({
-                                                    title: "Copied",
-                                                    description: "Message copied to clipboard",
-                                                  });
-                                                }
-                                              }}
-                                              className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-600 p-0"
-                                            >
-                                              <Copy className="h-3.5 w-3.5" />
-                                            </Button>
-                                            <Button 
-                                              variant="ghost" 
-                                              size="icon"
-                                              onClick={() => setMessageToDelete(msg)}
-                                              className="h-7 w-7 rounded-full bg-white/90 shadow-sm border border-slate-200 hover:bg-red-50 text-red-500 p-0"
-                                            >
-                                              <Trash2 className="h-3.5 w-3.5" />
-                                            </Button>
-                                          </>
-                                        )}
-                                      </div>
-
-                                      {!isMe && (
-                                        <div className="px-1 mb-1">
-                                          <span className="text-xs font-bold text-primary tracking-tight">{msg.senderName}</span>
-                                        </div>
-                                      )}
-
-                                      <div className="px-1 py-0.5">
-                                        {msg.replyToId && (
-                                          <div className="mb-2 p-2 bg-black/5 rounded-lg border-l-4 border-primary text-[13px] bg-white/40">
-                                            {(() => {
-                                              const repliedMsg = (chatMessages || []).find(m => m.id === msg.replyToId);
-                                              return repliedMsg ? (
-                                                <>
-                                                  <p className="font-bold text-primary text-[11px] mb-0.5">{repliedMsg.senderName}</p>
-                                                  <p className="truncate text-slate-500 italic">
-                                                    {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type]}]`}
-                                                  </p>
-                                                </>
-                                              ) : (
-                                                <p className="text-slate-400 italic">Original message unavailable</p>
-                                              );
-                                            })()}
-                                          </div>
-                                        )}
-                                        {msg.type === MessageType.Text && (
-                                          <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.content}</p>
-                                        )}
-                                        {msg.type === MessageType.Image && msg.attachments && msg.attachments.length > 0 && (
-                                          <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
-                                            <div className={cn(
-                                              "grid gap-0.5 rounded-md overflow-hidden",
-                                              msg.attachments.length === 1 ? "grid-cols-1" : 
-                                              msg.attachments.length === 2 ? "grid-cols-2" : 
-                                              "grid-cols-2"
-                                            )}>
-                                              {msg.attachments.map((att, idx) => (
-                                                <img 
-                                                  key={idx}
-                                                  src={att.filePath || undefined} 
-                                                  alt="uploaded" 
-                                                  className={cn(
-                                                    "w-full h-auto object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm",
-                                                    msg.attachments.length > 1 ? "aspect-square" : "max-h-[400px]"
-                                                  )}
-                                                  onClick={() => {
-                                                    setPreviewMediaUrl(att.filePath);
-                                                    setIsPreviewModalOpen(true);
-                                                  }}
-                                                  referrerPolicy="no-referrer"
-                                                />
-                                              ))}
-                                            </div>
-                                            {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
-                                          </div>
-                                        )}
-                                        {msg.type === MessageType.File && msg.attachments && msg.attachments.length > 0 && (
-                                          <div className="space-y-1">
-                                            {msg.attachments.map((att, idx) => (
-                                              <div key={idx} className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
-                                                <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
-                                                  <FileText className="h-7 w-7 text-white" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
-                                                  <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
-                                                    {att.contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(att.fileSize / 1024 / 1024).toFixed(1)} MB
-                                                  </p>
-                                                </div>
-                                                <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
-                                                  <Download className="h-4 w-4" />
-                                                </Button>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                        
-                                        <div className="flex items-center justify-end gap-1 mt-1">
-                                          <span className="text-[10px] text-[#667781] font-medium uppercase tracking-tighter">
-                                            {format(new Date(msg.sentAt), 'HH:mm')}
-                                          </span>
-                                          {isMe && <CheckCheck className="h-3 w-3 text-[#53bdeb]" />}
-                                        </div>
+                                    <div className="bg-white rounded-xl rounded-tl-none mr-12 p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] max-w-[80%] flex flex-col">
+                                      <span className="text-xs font-bold text-primary mb-1">{typer.name}</span>
+                                      <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-sm">
+                                        <span>typing</span>
+                                        <span className="flex gap-0.5 items-end h-3 pl-1">
+                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce" />
+                                        </span>
                                       </div>
                                     </div>
                                   </motion.div>
-                                );
-                              })}
+                                ));
+                              })()}
+
+                              </PullToRefresh>
                             </>
                           );
                         })()}
                         <div ref={chatEndRef} />
                       </div>
                     </div>
-                  </ScrollArea>
+                  </div>
                   
                   {/* Bottom Scroll Mask */}
-                  <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#efeae2] to-transparent z-10 pointer-events-none" />
+                  {selectedMessageId === null && (
+                    <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#efeae2] to-transparent z-10 pointer-events-none" />
+                  )}
+
+                  {/* Restrictive Context Menu Dropdown & Backdrop */}
+                  {selectedMessageId !== null && selectedMessageRect && (() => {
+                    const msg = chatMessages.find(m => m.id === selectedMessageId);
+                    if (!msg) return null;
+                    
+                    const isMe = msg.senderPersonId === userProfile.id;
+                    const isFailed = (msg as any).status === 'failed';
+                    
+                    const containerRect = chatBoxMessagesContainerRef.current?.getBoundingClientRect();
+                    if (!containerRect) return null;
+                    
+                    // Convert message bounding box coordinates to container relative coords
+                    const relativeLeft = selectedMessageRect.left - containerRect.left;
+                    const relativeTop = selectedMessageRect.top - containerRect.top;
+                    
+                    const dropdownWidth = 224; // w-56 is 224px
+                    const dropdownHeight = isFailed ? 150 : (isMe && msg.type === MessageType.Text ? 245 : 210);
+                    
+                    const spaceBelow = containerRect.height - (relativeTop + selectedMessageRect.height);
+                    const spaceAbove = relativeTop;
+                    
+                    // Decide vertical alignment direction (above/below message bubble)
+                    const positionY = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove) ? 'below' : 'above';
+                    
+                    const spaceOnRightOfLeftEdge = containerRect.width - relativeLeft;
+                    const spaceOnLeftOfRightEdge = relativeLeft + selectedMessageRect.width;
+                    
+                    let targetLeft = relativeLeft;
+                    if (isMe) {
+                      // Align right edge of options with right edge of message sent by the user at all times
+                      targetLeft = relativeLeft + selectedMessageRect.width - dropdownWidth;
+                    } else {
+                      if (spaceOnRightOfLeftEdge < dropdownWidth && spaceOnLeftOfRightEdge >= dropdownWidth) {
+                        // Align with right side of the bubble
+                        targetLeft = relativeLeft + selectedMessageRect.width - dropdownWidth;
+                      }
+                    }
+                    
+                    // Keep horizontally bound inside messages area with safe padding, prioritizing user's alignment
+                    targetLeft = Math.max(16, Math.min(containerRect.width - dropdownWidth - 16, targetLeft));
+                    
+                    let targetTop = 0;
+                    if (positionY === 'below') {
+                      targetTop = relativeTop + selectedMessageRect.height + 8;
+                    } else {
+                      targetTop = relativeTop - dropdownHeight - 8;
+                    }
+                    
+                    return (
+                      <>
+                        {/* Backdrop overlay restrictive to the container */}
+                        <div 
+                          className="absolute inset-0 bg-transparent z-[9998] transition-all"
+                          onClick={() => setSelectedMessageId(null)}
+                        />
+                        
+                        {/* Dropdown Options container */}
+                        <div 
+                          style={{
+                            position: 'absolute',
+                            top: `${targetTop}px`,
+                            left: `${targetLeft}px`,
+                            width: `${dropdownWidth}px`,
+                          }}
+                          className="bg-[#fcfcfc] border border-slate-200/80 rounded-2xl flex flex-col overflow-hidden shadow-2xl z-[9999] animate-in fade-in-50 zoom-in-95 duration-100"
+                        >
+                          {isFailed ? (
+                            <>
+                              <button 
+                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-bold text-emerald-600 animate-pulse" 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setSelectedMessageId(null);
+                                  const resendDto: SendMessageDto = {
+                                    chatId: msg.chatId,
+                                    content: msg.content || "",
+                                    type: msg.type,
+                                    attachments: msg.attachments || []
+                                  };
+                                  handleSendMessage(resendDto, msg.id);
+                                }}
+                              >
+                                <span>Resend</span> <RefreshCw className="h-4.5 w-4.5 text-emerald-600 animate-spin" />
+                              </button>
+                              
+                              {msg.content && (
+                                <button 
+                                  className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
+                                  onClick={(e) => { 
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(msg.content!); 
+                                    toast.success('Copied to clipboard');
+                                    setSelectedMessageId(null); 
+                                  }}
+                                >
+                                  <span>Copy</span> <Copy className="h-4.5 w-4.5 opacity-70 text-slate-500" />
+                                </button>
+                              )}
+                              
+                              <button 
+                                className="flex items-center justify-between p-3.5 text-red-500 hover:bg-red-500/5 transition-colors text-sm font-bold" 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setSelectedMessageId(null);
+                                  setChatMessages(prev => prev.filter(m => m.id !== msg.id));
+                                }}
+                              >
+                                <span>Delete</span> <Trash2 className="h-4.5 w-4.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button 
+                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setReplyingTo(msg); 
+                                  setSelectedMessageId(null); 
+                                }}
+                              >
+                                <span>Reply</span> <Reply className="h-4.5 w-4.5 opacity-70 text-slate-500" />
+                              </button>
+                              
+                              <button 
+                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setForwardingMessage(msg);
+                                  setIsForwardModalOpen(true);
+                                  setSelectedMessageId(null); 
+                                }}
+                              >
+                                <span>Forward</span> <Forward className="h-4.5 w-4.5 opacity-70 text-slate-500" />
+                              </button>
+                              
+                              <button 
+                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
+                                onClick={(e) => { 
+                                  e.stopPropagation();
+                                  if (msg.content) {
+                                    navigator.clipboard.writeText(msg.content); 
+                                    toast.success('Copied to clipboard');
+                                  }
+                                  setSelectedMessageId(null); 
+                                }}
+                              >
+                                <span>Copy</span> <Copy className="h-4.5 w-4.5 opacity-70 text-slate-500" />
+                              </button>
+                              
+                              {isMe && msg.type === MessageType.Text && (
+                                <button 
+                                  className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setMessageToEdit(msg);
+                                    setEditMessageContent(msg.content || "");
+                                    setSelectedMessageId(null); 
+                                  }}
+                                >
+                                  <span>Edit</span> <Edit2 className="h-4.5 w-4.5 opacity-70 text-slate-500" />
+                                </button>
+                              )}
+                              
+                              <button 
+                                className={cn(
+                                  "flex items-center justify-between p-3.5 transition-colors text-sm font-bold",
+                                  isMe ? "text-red-500 hover:bg-red-500/5" : "text-slate-400 cursor-not-allowed"
+                                )} 
+                                disabled={!isMe}
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setSelectedMessageId(null);
+                                  if (isMe) {
+                                    setMessageToDelete(msg); 
+                                  } else {
+                                    toast.error("You cannot delete a message sent by another participant.");
+                                  }
+                                }}
+                              >
+                                <span>Delete</span> <Trash2 className="h-4.5 w-4.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <footer className="p-3.5 bg-[#f0f2f5] border-t shrink-0 z-50">
@@ -11734,7 +12827,14 @@ export default function App() {
                           placeholder="Type a message" 
                           className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] text-black"
                           value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
+                          onChange={(e) => {
+                            setChatInput(e.target.value);
+                            const now = Date.now();
+                            if (now - (window as any).lastTypingSentTime > 5000 || !(window as any).lastTypingSentTime) {
+                              (window as any).lastTypingSentTime = now;
+                              apiFetch(`/Message/TypingIndicator?chatId=${activeChatId}`, { method: 'POST' }).catch(() => {});
+                            }
+                          }}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                         />
                       )}
@@ -11758,7 +12858,7 @@ export default function App() {
                         </Button>
                       ) : chatInput.trim() ? (
                         <Button 
-                          onClick={handleSendMessage}
+                          onClick={() => handleSendMessage()}
                           className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
                         >
                           <Send className="h-7 w-7 fill-current" />
@@ -11880,12 +12980,209 @@ export default function App() {
               </div>
             )}
           </div>
-            </>
+
+                      </>
           )}
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isEditGroupOpen} onOpenChange={(open) => {
+            <Dialog open={isViewGroupOpen} onOpenChange={setIsViewGroupOpen}>
+        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
+          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
+            <div className="p-5 flex flex-row items-center justify-between w-full">
+              <div className="flex items-center gap-3 text-left">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                  <Info className="h-5 w-5" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                    Group Details
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
+                    View description and members
+                  </DialogDescription>
+                </div>
+              </div>
+              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
+                <X className="h-5 w-5" />
+              </DialogClose>
+            </div>
+          </DialogHeader>
+
+          {/* Scrollable Container split 40:60 */}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Left Column (40%) */}
+            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 bg-white">
+              <div className="space-y-4">
+                <div className="flex justify-center">
+                  <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm shrink-0">
+                    {newGroupImageUrl ? (
+                      <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
+                    ) : (
+                      <Users className="h-10 w-10 text-slate-300" />
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2 text-center">
+                  <h3 className="text-xl font-bold text-slate-900 leading-tight">{newGroupName}</h3>
+                  {newGroupDescription ? (
+                    <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">{newGroupDescription}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No description provided</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Edit and Delete Buttons */}
+              <div className="flex flex-row gap-2 mt-auto">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1 h-10 gap-1.5 rounded-xl border border-black bg-white text-black hover:bg-slate-50 font-bold"
+                  onClick={() => {
+                    setIsViewGroupOpen(false);
+                    setIsEditGroupOpen(true);
+                  }}
+                >
+                  <Edit2 className="h-4 w-4 text-black" />
+                  <span>Edit</span>
+                </Button>
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-10 gap-1.5 rounded-xl border border-red-500 bg-white text-red-500 hover:bg-red-50 font-bold" 
+                  onClick={() => {
+                    setIsViewGroupOpen(false);
+                    setIsDeleteChatModalOpen(true);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-red-500" />
+                  <span>Delete Chat</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Right Column (60%) */}
+            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+              <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                <div className="p-6">
+                  {(() => {
+                    const currentChat = chats.find(c => c.id === activeChatId || c.id === editingGroupId);
+                    const participants = currentChat?.participants || [];
+                    const personIdNames = appNamesDetailList?.personIdNames || [];
+                    
+                    let mappedParticipants = participants.map(p => {
+                      const matchedName = personIdNames.find((pn: any) => pn.id === p.personId);
+                      const matchedUser = allUsers.find(u => u.id === p.personId);
+                      const isOnline = matchedName?.isOnline ?? matchedUser?.isOnline ?? p.isOnline;
+                      const role = matchedUser?.getUserDto?.roleName || 'Member';
+                      
+                      return {
+                        id: p.personId,
+                        name: matchedName?.name || p.fullName || (matchedUser?.getPersonDetailsDto?.firstName ? `${matchedUser?.getPersonDetailsDto?.firstName} ${matchedUser?.getPersonDetailsDto?.lastName}` : 'Group Member'),
+                        imageUrl: matchedName?.imageUrl || p.profileImageUrl || matchedUser?.getPersonDetailsDto?.imageUrl || '',
+                        isOnline,
+                        role,
+                        isAdmin: p.isAdmin,
+                        isMe: p.personId === userProfile?.id
+                      };
+                    });
+
+                    const isMeInGroup = participants.some(p => p.personId === userProfile?.id);
+                    if (isMeInGroup && !mappedParticipants.some(m => m.id === userProfile?.id) && userProfile) {
+                      mappedParticipants.unshift({
+                        id: userProfile.id,
+                        name: userProfile.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
+                        imageUrl: userProfile.getPersonDetailsDto?.imageUrl || '',
+                        isOnline: true,
+                        role: userProfile.getUserDto?.roleName || 'Owner',
+                        isAdmin: true,
+                        isMe: true
+                      });
+                    }
+
+                    mappedParticipants.sort((a, b) => {
+                      if (a.isMe) return -1;
+                      if (b.isMe) return 1;
+                      return (b.isAdmin ? 1 : 0) - (a.isAdmin ? 1 : 0);
+                    });
+
+                    return (
+                      <>
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Members</h4>
+                          <Badge variant="secondary" className="rounded-full bg-primary/10 text-primary border-none font-bold">
+                            {mappedParticipants.length} members
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          {mappedParticipants.map((member) => (
+                            <div 
+                              key={member.id} 
+                              onClick={() => {
+                                if (member.id !== userProfile?.id) {
+                                  startDirectChat({ id: member.id } as any);
+                                  setIsViewGroupOpen(false);
+                                }
+                              }}
+                              className={cn(
+                                "p-4 flex flex-col items-center text-center bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-all relative gap-2",
+                                member.id !== userProfile?.id ? "cursor-pointer" : ""
+                              )}
+                            >
+                              {member.isAdmin && (
+                                <div className="absolute top-2.5 right-2.5">
+                                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 py-0 px-1.5 font-bold h-4 rounded-md shrink-0">
+                                    Admin
+                                  </Badge>
+                                </div>
+                              )}
+
+                              <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 relative shadow-inner">
+                                {member.imageUrl ? (
+                                  <img src={getFullImageUrl(member.imageUrl)} alt={member.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <UserIcon className="h-6 w-6 text-slate-400" />
+                                )}
+                                {member.isOnline && (
+                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                                )}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-bold text-sm text-slate-800 truncate px-1">
+                                  {member.id === userProfile?.id ? "You" : member.name}
+                                </h4>
+                                <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
+                                  {member.isOnline ? (
+                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                      Online
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                      Offline
+                                    </span>
+                                  )}
+                                  <span className="text-slate-400 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{member.role}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+<Dialog open={isEditGroupOpen} onOpenChange={(open) => {
         setIsEditGroupOpen(open);
         if (!open) {
           setEditingGroupId(null);
@@ -11895,131 +13192,290 @@ export default function App() {
           setNewGroupImageUrl("");
         }
       }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
-          <DialogHeader className="p-6 pb-2 mb-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Settings className="h-5 w-5 text-primary" />
-                <DialogTitle className="text-xl font-bold text-slate-900 mb-[3px]">
-                  Edit Group Details
-                </DialogTitle>
-              </div>
-            </div>
-            <DialogDescription className="pl-7 text-[13px] leading-tight">
-              Update group name, image and manage participants.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="px-8 py-4 space-y-6 bg-white max-h-[400px] overflow-y-auto pt-0">
-            <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
-              <div className="relative group">
-                <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
-                  {newGroupImageUrl ? (
-                    <img src={newGroupImageUrl || undefined} alt="Group" className="h-full w-full object-cover" />
-                  ) : (
-                    <ImageIcon className="h-8 w-8 text-slate-300" />
-                  )}
+        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
+          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
+            <div className="p-5 flex flex-row items-center justify-between w-full">
+              <div className="flex items-center gap-3 text-left">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                  <Settings className="h-5 w-5" />
                 </div>
-                <Button 
-                  size="icon" 
-                  variant="secondary" 
-                  className="absolute -bottom-2 -right-2 h-7 w-7 rounded-full shadow-lg border border-white"
-                  onClick={() => {
-                    const url = prompt("Enter Group Image URL:");
-                    if (url) setNewGroupImageUrl(url);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+                <div>
+                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                    Edit Group Details
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
+                    Update group settings and members
+                  </DialogDescription>
+                </div>
               </div>
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
+                <X className="h-5 w-5" />
+              </DialogClose>
+            </div>
+          </DialogHeader>
+
+          {/* Scrollable Container split 40:60 */}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Left Column (40%) */}
+            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 bg-white overflow-y-auto no-scrollbar shrink-0">
+              <div className="space-y-4">
+                {/* Group Image Photo Selector */}
+                <div className="flex flex-col items-center gap-4">
+                  <div 
+                    className="relative group cursor-pointer"
+                    onClick={() => groupImageInputRef.current?.click()}
+                  >
+                    <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors relative">
+                      {newGroupImageUrl ? (
+                        <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
+                          <Camera className="h-8 w-8 mb-1" />
+                          <span className="text-[9px] font-bold uppercase tracking-widest">Add Photo</span>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-full">
+                        <Camera className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="w-full space-y-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                      <Input 
+                        placeholder="e.g., Family Hub" 
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
                   <Input 
-                    placeholder="e.g., Family Hub" 
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    className="bg-white border-slate-200 rounded-xl h-10 text-sm"
+                    placeholder="What is this group about?" 
+                    value={newGroupDescription}
+                    onChange={(e) => setNewGroupDescription(e.target.value)}
+                    className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="space-y-1.5 pt-1">
-              <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
-              <Input 
-                placeholder="What is this group about?" 
-                value={newGroupDescription}
-                onChange={(e) => setNewGroupDescription(e.target.value)}
-                className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-            </div>
-
-          </div>
-
-          <div className="p-4 bg-slate-50 flex items-center justify-between border-b">
-             <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Manage Participants</Label>
-             <Badge variant="secondary" className="rounded-full">{selectedParticipants.length} selected</Badge>
-          </div>
-
-          <ScrollArea className="h-[240px] bg-white">
-            <div className="p-4 space-y-4">
-              {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
-                const isSelected = selectedParticipants.includes(user.id);
-                return (
-                  <div
-                    key={user.id}
-                    className={cn(
-                      "w-full p-4 flex items-center gap-4 rounded-xl transition-all border",
-                      isSelected ? "bg-primary/5 border-primary/20 shadow-sm" : "bg-white border-transparent hover:bg-slate-50"
-                    )}
-                  >
-                    <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-100 shrink-0">
-                      <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+            {/* Right Column (60%) */}
+            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+              <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                <div className="p-6 space-y-6">
+                  {/* Manage Members */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Manage Members</Label>
+                      <Badge variant="secondary" className="rounded-full bg-primary/10 text-primary border-none font-bold">
+                        {selectedParticipants.length} members
+                      </Badge>
                     </div>
-                    <div className="flex-1 text-left">
-                      <h4 className="font-bold text-sm text-slate-800">
-                        {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                      </h4>
-                      <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
-                        {user.getUserDto.roleName}
-                      </p>
+
+                    {/* Current Members list with Delete Icon */}
+                    <div className="space-y-2.5">
+                      {(() => {
+                        const currentChat = chats.find(c => c.id === editingGroupId);
+                        const isMeInGroup = currentChat?.participants?.some(p => p.personId === userProfile?.id) ?? true;
+                        
+                        const currentMembers = allUsers.filter(u => selectedParticipants.includes(u.id));
+                        const listToRender: any[] = [];
+                        
+                        if (isMeInGroup && userProfile) {
+                          listToRender.push({
+                            id: userProfile.id,
+                            firstName: userProfile.getPersonDetailsDto?.firstName || 'You',
+                            lastName: userProfile.getPersonDetailsDto?.lastName || '',
+                            imageUrl: userProfile.getPersonDetailsDto?.imageUrl || '',
+                            isOnline: true,
+                            roleName: userProfile.getUserDto?.roleName || 'Owner',
+                            isMe: true
+                          });
+                        }
+                        
+                        currentMembers.forEach(user => {
+                          const pInfo = currentChat?.participants?.find(p => p.personId === user.id);
+                          const isOnline = pInfo?.isOnline ?? user.isOnline;
+                          listToRender.push({
+                            id: user.id,
+                            firstName: user.getPersonDetailsDto?.firstName,
+                            lastName: user.getPersonDetailsDto?.lastName,
+                            imageUrl: user.getPersonDetailsDto?.imageUrl,
+                            isOnline,
+                            roleName: user.getUserDto?.roleName || 'Member',
+                            isMe: false
+                          });
+                        });
+
+                        if (listToRender.length === 0) {
+                          return <p className="text-xs text-slate-400 italic py-2 text-center">No other members in this group</p>;
+                        }
+
+                        return listToRender.map((member) => {
+                          return (
+                            <div 
+                              key={member.id} 
+                              className="w-full p-3 flex items-center gap-4 bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-colors"
+                            >
+                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
+                                {member.imageUrl ? (
+                                  <img src={getFullImageUrl(member.imageUrl)} alt={member.firstName} className="h-full w-full object-cover" />
+                                ) : (
+                                  <UserIcon className="h-5 w-5 text-slate-400" />
+                                )}
+                                {member.isOnline && (
+                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                                )}
+                              </div>
+                              <div className="flex-1 text-left min-w-0">
+                                <h4 className="font-bold text-sm text-slate-800 truncate">
+                                  {member.isMe ? "You" : `${member.firstName} ${member.lastName}`}
+                                </h4>
+                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
+                                  {member.isOnline ? (
+                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                      Online
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                      Offline
+                                    </span>
+                                  )}
+                                  <span className="text-slate-300">•</span>
+                                  <span className="text-slate-400 font-semibold">{member.roleName || 'Member'}</span>
+                                </div>
+                              </div>
+                              {!member.isMe && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-8 w-8 text-destructive hover:bg-destructive/10 rounded-full shrink-0"
+                                  onClick={async () => {
+                                    try {
+                                      await apiFetch<any>(`/Chat/RemoveParticipant?chatId=${editingGroupId}&recipientId=${member.id}`, { 
+                                        method: 'PUT'
+                                      });
+                                      setSelectedParticipants(prev => prev.filter(id => id !== member.id));
+                                      await loadMyChats(true);
+                                      toast.success(`${member.firstName} removed from group`);
+                                    } catch (err: any) {
+                                      toast.error(`Failed to remove: ${err.message}`);
+                                    }
+                                  }}
+                                  title="Remove member"
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className={cn(
-                        "h-8 px-3 rounded-lg text-xs font-bold transition-all",
-                        isSelected ? "text-destructive hover:bg-destructive/10 bg-destructive/5" : "text-primary hover:bg-primary/10 bg-primary/5"
-                      )}
-                      onClick={() => {
-                        setSelectedParticipants(prev => 
-                          isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
-                        );
-                      }}
-                    >
-                      {isSelected ? (
-                        <>
-                          <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                          Remove
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-3.5 w-3.5 mr-1.5" />
-                          Add
-                        </>
-                      )}
-                    </Button>
                   </div>
-                );
-              })}
-            </div>
-          </ScrollArea>
 
-          <div className="p-6 border-t bg-slate-50">
+                  {/* Add Members Section */}
+                  <div className="pt-4 border-t border-slate-100 space-y-4">
+                    <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Add Members</Label>
+                    <div className="space-y-2.5">
+                      {(() => {
+                        const addableUsers = allUsers.filter(u => u.id !== userProfile.id && !selectedParticipants.includes(u.id));
+                        
+                        if (addableUsers.length === 0) {
+                          return <p className="text-xs text-slate-400 italic py-2 text-center">All contacts are already members</p>;
+                        }
+
+                        return addableUsers.map((user) => {
+                          const currentChat = chats.find(c => c.id === editingGroupId);
+                          const pInfo = currentChat?.participants?.find(p => p.personId === user.id);
+                          const isOnline = user.id === userProfile.id ? true : pInfo?.isOnline;
+                          
+                          return (
+                            <div 
+                              key={user.id} 
+                              className="w-full p-3 flex items-center gap-4 bg-white hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all shadow-sm"
+                            >
+                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
+                                {user.getPersonDetailsDto.imageUrl ? (
+                                  <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                                ) : (
+                                  <UserIcon className="h-5 w-5 text-slate-400" />
+                                )}
+                                {isOnline && (
+                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                                )}
+                              </div>
+                              <div className="flex-1 text-left min-w-0">
+                                <h4 className="font-bold text-sm text-slate-800 truncate">
+                                  {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                                </h4>
+                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
+                                  {isOnline ? (
+                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                      Online
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                      Offline
+                                    </span>
+                                  )}
+                                  <span className="text-slate-300">•</span>
+                                  <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
+                                </div>
+                              </div>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-primary hover:bg-primary/10 rounded-full shrink-0"
+                                onClick={async () => {
+                                  try {
+                                    const addDto = { personIds: [user.id] };
+                                    await apiFetch<any>(`/Chat/AddParticipants?chatId=${editingGroupId}`, {
+                                      method: 'POST',
+                                      body: JSON.stringify(addDto),
+                                      headers: { 'Content-Type': 'application/json' }
+                                    }).catch(() => {
+                                      return apiFetch<any>(`/Chat/AddParticipant?chatId=${editingGroupId}&recipientId=${user.id}`, { 
+                                        method: 'PUT' 
+                                      });
+                                    });
+                                    setSelectedParticipants(prev => [...prev, user.id]);
+                                    await loadMyChats(true);
+                                    toast.success(`${user.getPersonDetailsDto.firstName} added to group`);
+                                  } catch (err: any) {
+                                    toast.error(`Failed to add: ${err.message}`);
+                                  }
+                                }}
+                                title="Add member"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+
+          <div className="p-4 border-t bg-slate-50 shrink-0 flex justify-end">
              <Button 
-              className="w-full bg-primary text-primary-foreground" 
+              className="bg-primary text-primary-foreground font-bold rounded-xl h-11 px-6 shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all" 
               onClick={handleUpdateGroup}
-              disabled={!newGroupName.trim() || selectedParticipants.length === 0}
+              disabled={!newGroupName.trim()}
              >
                <CheckCheck className="mr-2 h-4 w-4" />
                Save Changes
@@ -12027,6 +13483,144 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isDeleteChatModalOpen} onOpenChange={setIsDeleteChatModalOpen}>
+        <DialogContent showCloseButton={false} className="max-w-md p-6 overflow-hidden rounded-2xl border border-black shadow-2xl bg-white flex flex-col gap-5">
+          <DialogHeader className="p-0 border-none bg-transparent -mt-0 -mx-0 mb-0 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-600 shrink-0 mb-4 shadow-sm">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-lg font-bold text-slate-900 leading-tight">
+              Delete "{newGroupName}"?
+            </DialogTitle>
+            <DialogDescription className="text-sm text-slate-500 mt-2 leading-relaxed font-sans">
+              Are you sure you want to delete this chat? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="p-0 border-none bg-transparent -mb-0 -mx-0 flex flex-row items-center justify-end gap-3 shrink-0 sm:justify-end mt-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsDeleteChatModalOpen(false)}
+              className="px-5 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 font-semibold"
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={handleDeleteChat}
+              className="px-5 h-10 rounded-xl font-semibold shadow-sm bg-slate-100 hover:bg-slate-200 text-black border border-slate-300 active:scale-95 transition-all"
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isForwardModalOpen} onOpenChange={(open) => {
+        setIsForwardModalOpen(open);
+        if (!open) {
+          setForwardingMessage(null);
+          setForwardSearchQuery("");
+        }
+      }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+          <DialogHeader className="p-6 pb-2 mb-0">
+            <div className="flex items-center gap-2">
+              <Forward className="h-5 w-5 text-primary animate-pulse" />
+              <DialogTitle className="text-xl font-bold text-slate-900 mb-[3px]">
+                Forward Message
+              </DialogTitle>
+            </div>
+            <DialogDescription className="pl-7 text-[13px] leading-tight">
+              Select a chat to forward this message to.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-6 py-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input 
+                placeholder="Search chats..." 
+                className="pl-10 h-10 bg-slate-50 border-none rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black"
+                value={forwardSearchQuery}
+                onChange={(e) => setForwardSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <ScrollArea className="h-[280px] bg-white border-t mt-4">
+            <div className="p-4 space-y-2">
+              {(() => {
+                const filtered = (chats || [])
+                  .filter(c => c.id !== activeChatId)
+                  .filter(c => !forwardSearchQuery || (c.name || '').toLowerCase().includes(forwardSearchQuery.toLowerCase()));
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-slate-400 text-sm">
+                      No other chats available.
+                    </div>
+                  );
+                }
+
+                return filtered.map((chat) => {
+                  const otherParticipant = !chat.isGroup ? chat.participants.find(p => p.personId !== userProfile.id) : null;
+                  const displayImageUrl = chat.isGroup ? chat.imageUrl : (otherParticipant?.profileImageUrl || chat.imageUrl);
+                  const displayInitial = chat.name ? chat.name.charAt(0).toUpperCase() : (otherParticipant?.fullName ? otherParticipant.fullName.charAt(0).toUpperCase() : 'U');
+
+                  return (
+                    <button
+                      key={chat.id}
+                      onClick={() => handleForwardMessage(chat.id)}
+                      className="w-full p-3 flex items-center gap-4 rounded-xl hover:bg-slate-50 transition-all text-left group border border-transparent hover:border-slate-100"
+                    >
+                      <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-50 shrink-0 text-slate-600 font-bold">
+                        {displayImageUrl ? (
+                          <img src={getFullImageUrl(displayImageUrl)} alt={chat.name} className="h-full w-full object-cover" />
+                        ) : (
+                          chat.isGroup ? <Users className="h-5 w-5 text-slate-400" /> : <span>{displayInitial}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-sm text-slate-800 truncate group-hover:text-primary transition-colors">
+                          {chat.name || 'Private Chat'}
+                        </h4>
+                        <p className="text-xs text-slate-500 truncate mt-0.5">
+                          {chat.isGroup ? 'Group Chat' : 'Direct Message'}
+                        </p>
+                      </div>
+                      <Button size="sm" className="rounded-full px-4 h-8 text-xs font-bold shadow-sm">
+                        Send
+                      </Button>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </ScrollArea>
+          
+          <div className="p-4 bg-slate-50 border-t flex justify-end">
+            <Button variant="outline" className="rounded-full px-6 text-xs font-bold" onClick={() => setIsForwardModalOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <input 
+        type="file" 
+        ref={groupImageInputRef}
+        className="hidden" 
+        accept="image/*"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            setTempGroupImageUrl(URL.createObjectURL(file));
+            setIsGroupImageCropperOpen(true);
+            e.target.value = '';
+          }
+        }}
+      />
 
       <Dialog open={isNewChatOpen} onOpenChange={(open) => {
         setIsNewChatOpen(open);
@@ -12037,128 +13631,249 @@ export default function App() {
           setNewGroupDescription("");
         }
       }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white max-h-[90vh] flex flex-col">
-          <DialogHeader className="p-6 pb-2 mb-0 flex flex-row items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-[5px] bg-emerald-100 flex items-center justify-center text-emerald-600">
-                {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
+        <DialogContent 
+          showCloseButton={false} 
+          className={cn(
+            "p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col transition-all duration-300", 
+            isGroupMode 
+              ? "max-w-4xl w-[90vw] data-closed:animate-none data-closed:transition-none duration-0 transition-none" 
+              : "max-w-md w-[90vw]"
+          )}
+        >
+          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
+            <div className="p-5 flex flex-row items-center justify-between w-full">
+              <div className="flex items-center gap-3 text-left">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                  {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                    {isGroupMode ? "Create New Group" : "Start New Chat"}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
+                    {isGroupMode ? "Add members to the group" : "Select a person to start a chat"}
+                  </DialogDescription>
+                </div>
               </div>
-              <div>
-                <DialogTitle className="text-xl font-bold mb-[3px]">
-                  {isGroupMode ? "Create New Group" : "Start New Chat"}
-                </DialogTitle>
-                <DialogDescription className="text-slate-500 text-sm">
-                  {isGroupMode ? "Add participants to the group." : "Select a person to start a chat."}
-                </DialogDescription>
-              </div>
+              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
+                <X className="h-5 w-5" />
+              </DialogClose>
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-            {isGroupMode && (
-              <div className="px-6 py-4 space-y-4 bg-white border-b shrink-0 text-left">
-                <div className="grid grid-cols-[80px_1fr] gap-4 items-center">
-                  <div className="relative group">
-                    <div className="h-20 w-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
-                      {newGroupImageUrl ? (
-                        <img src={newGroupImageUrl || undefined} alt="Group" className="h-full w-full object-cover" />
-                      ) : (
-                        <ImageIcon className="h-8 w-8 text-slate-300" />
-                      )}
-                    </div>
-                    <Button 
-                      size="icon" 
-                      variant="secondary" 
-                      className="absolute -bottom-2 -right-2 h-7 w-7 rounded-full shadow-lg border border-white"
-                      onClick={() => {
-                        const url = prompt("Enter Group Image URL:");
-                        if (url) setNewGroupImageUrl(url);
-                      }}
+          <div className="flex-1 overflow-hidden flex min-h-0">
+            {isGroupMode ? (
+              <div className="flex flex-1 overflow-hidden min-h-0 w-full">
+                {/* Left Side: 40% */}
+                <div className="w-[40%] flex flex-col border-r border-slate-100 p-6 space-y-4 bg-white overflow-y-auto no-scrollbar text-left shrink-0">
+                  <div className="flex flex-col items-center gap-4">
+                    <div 
+                      className="relative group cursor-pointer"
+                      onClick={() => groupImageInputRef.current?.click()}
                     >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
-                      <Input 
-                        placeholder="e.g., Family Hub" 
-                        value={newGroupName}
-                        onChange={(e) => setNewGroupName(e.target.value)}
-                        className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-1.5 pt-1">
-                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
-                  <Input 
-                    placeholder="What is this group about?" 
-                    value={newGroupDescription}
-                    onChange={(e) => setNewGroupDescription(e.target.value)}
-                    className="bg-white border-slate-200 rounded-xl h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="p-4 bg-slate-50 border-b shrink-0">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input 
-                  placeholder={isGroupMode ? "Search participants..." : "Search people..."} 
-                  className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-0 focus-visible:ring-offset-0"
-                />
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1">
-              <div className="p-4 space-y-3">
-                {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
-                  const isSelected = selectedParticipants.includes(user.id);
-                  return (
-                    <button
-                      key={user.id}
-                      onClick={() => {
-                        if (isGroupMode) {
-                          setSelectedParticipants(prev => 
-                            isSelected ? prev.filter(id => id !== user.id) : [...prev, user.id]
-                          );
-                        } else {
-                          startDirectChat(user);
-                        }
-                      }}
-                      className={cn(
-                        "w-full p-4 flex items-center gap-4 rounded-xl transition-all group border text-left",
-                        isSelected ? "bg-primary/5 border-primary/20 shadow-sm" : "bg-white border-transparent hover:bg-slate-50"
-                      )}
-                    >
-                      <div className="h-12 w-12 rounded-full overflow-hidden border-2 border-white shadow-sm flex items-center justify-center bg-slate-100 shrink-0 relative">
-                        <img src={user.getPersonDetailsDto.firstName && user.getPersonDetailsDto.imageUrl ? user.getPersonDetailsDto.imageUrl : `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.getUserDto.userName}`} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                        {isGroupMode && isSelected && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-primary/60 transition-all">
-                            <Check className="h-6 w-6 text-white" />
+                      <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors">
+                        {newGroupImageUrl ? (
+                          <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
+                            <Camera className="h-8 w-8 mb-1" />
+                            <span className="text-[9px] font-bold uppercase tracking-widest">Add Photo</span>
                           </div>
                         )}
                       </div>
-                      <div className="flex-1 text-left">
-                        <h4 className="font-bold text-slate-800 group-hover:text-primary transition-colors">
-                          {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                        </h4>
-                        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
-                          {user.getUserDto.roleName} • {user.disabled ? 'Offline' : 'Available'}
-                        </p>
+                    </div>
+                    <div className="w-full space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                        <Input 
+                          placeholder="e.g., Family Hub" 
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                        />
                       </div>
-                      {!isGroupMode && (
-                        <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                          <ChevronRight className="h-5 w-5" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 pt-1">
+                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
+                    <Input 
+                      placeholder="What is this group about?" 
+                      value={newGroupDescription}
+                      onChange={(e) => setNewGroupDescription(e.target.value)}
+                      className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                    />
+                  </div>
+                </div>
+
+                {/* Right Side: 60% */}
+                <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+                  <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                    <div className="p-6">
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1">Select Members</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        {(() => {
+                          const loggedInMember = {
+                            id: userProfile?.id,
+                            name: `${userProfile?.getPersonDetailsDto?.firstName} ${userProfile?.getPersonDetailsDto?.lastName} (You)`,
+                            imageUrl: userProfile?.getPersonDetailsDto?.imageUrl || '',
+                            isOnline: true,
+                            role: userProfile?.getUserDto?.roleName || 'Owner'
+                          };
+
+                          const otherMembers = (appNamesDetailList?.personIdNames || [])
+                            .filter((item: any) => item.id !== userProfile?.id)
+                            .map((item: any) => {
+                              const u = (allUsers || []).find(user => user.id === item.id);
+                              return {
+                                id: item.id,
+                                name: item.name,
+                                imageUrl: item.imageUrl,
+                                isOnline: item.isOnline ?? (u ? (u.isOnline ?? !u.disabled) : false),
+                                role: u?.getUserDto?.roleName || 'Member'
+                              };
+                            });
+
+                          const allCreatableMembers = [loggedInMember, ...otherMembers];
+
+                          return allCreatableMembers.map((item: any) => {
+                            const isMe = item.id === userProfile?.id;
+                            const isSelected = isMe || selectedParticipants.includes(item.id);
+                            
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                disabled={isMe}
+                                onClick={() => {
+                                  setSelectedParticipants(prev => 
+                                    isSelected ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                                  );
+                                }}
+                                className={cn(
+                                  "flex flex-col items-center text-center p-4 rounded-2xl border transition-all bg-white shadow-sm relative gap-2 cursor-pointer w-full",
+                                  isMe ? "cursor-default border-emerald-500 bg-emerald-50/25 ring-2 ring-emerald-500/10" : "hover:border-emerald-200 hover:bg-slate-50/50",
+                                  (!isMe && isSelected) ? "border-emerald-500 bg-emerald-50/25 ring-2 ring-emerald-500/10" : (!isMe ? "border-slate-100" : "")
+                                )}
+                              >
+                                {/* Checkbox badge on top-right */}
+                                <div className="absolute top-2.5 right-2.5">
+                                  <div className={cn(
+                                    "h-5 w-5 rounded-full border flex items-center justify-center transition-all",
+                                    isSelected 
+                                      ? "bg-emerald-600 border-emerald-600 text-white" 
+                                      : "border-slate-300 bg-white"
+                                  )}>
+                                    {isSelected && <Check className="h-3 w-3 stroke-[3.5]" />}
+                                  </div>
+                                </div>
+
+                                {/* Profile Picture */}
+                                <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 relative shadow-inner">
+                                  {item.imageUrl ? (
+                                    <img src={getFullImageUrl(item.imageUrl)} alt={item.name} className="h-full w-full object-cover" />
+                                  ) : (
+                                    <UserIcon className="h-6 w-6 text-slate-400" />
+                                  )}
+                                  {item.isOnline && (
+                                    <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                                  )}
+                                </div>
+
+                                {/* Name & Status */}
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-bold text-sm text-slate-800 truncate px-1">
+                                    {item.name}
+                                  </h4>
+                                  <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
+                                    {item.isOnline ? (
+                                      <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                        <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                        Online
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                        <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                        Offline
+                                      </span>
+                                    )}
+                                    <span className="text-slate-400 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{item.role}</span>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  </ScrollArea>
+                </div>
               </div>
-            </ScrollArea>
+            ) : (
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0 w-full">
+                <div className="p-4 bg-slate-50 border-b shrink-0">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input 
+                      placeholder="Search people..." 
+                      className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-0 focus-visible:ring-offset-0"
+                    />
+                  </div>
+                </div>
+
+                <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                  <div className="p-4">
+                    <div className="space-y-3">
+                      {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
+                        const isOnline = user.isOnline ?? !user.disabled;
+                        return (
+                          <button
+                            key={user.id}
+                            onClick={() => startDirectChat(user)}
+                            className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 bg-white hover:bg-slate-50 text-left shadow-sm group"
+                          >
+                            <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative shadow-inner">
+                              {user.getPersonDetailsDto.imageUrl ? (
+                                <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                              ) : (
+                                <UserIcon className="h-5 w-5 text-slate-400" />
+                              )}
+                              {isOnline && (
+                                <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0 text-left">
+                              <h4 className="font-bold text-sm text-slate-800 truncate">
+                                {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                              </h4>
+                              <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
+                                {isOnline ? (
+                                  <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                    Online
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                    Offline
+                                  </span>
+                                )}
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
+                              </div>
+                            </div>
+
+                            <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all ml-auto">
+                              <ChevronRight className="h-5 w-5 text-slate-400" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
           </div>
 
           <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0">
@@ -12166,9 +13881,9 @@ export default function App() {
                <Button 
                 className="flex-1 rounded-xl h-10 font-bold shadow-sm" 
                 onClick={handleCreateGroup}
-                disabled={!newGroupName.trim() || selectedParticipants.length === 0}
+                disabled={!newGroupName.trim()}
                >
-                 Create Group ({selectedParticipants.length})
+                 Create Group ({selectedParticipants.length + 1})
                 </Button>
              )}
           </div>
@@ -12276,6 +13991,40 @@ export default function App() {
                </div>
             )}
           </div>
+
+          {uploadPreviewFiles.length > 0 && (() => {
+            const file = uploadPreviewFiles[uploadPreviewActiveIndex];
+            if (!file) return null;
+            let mappedType = MessageType.File;
+            if (file.type.startsWith('image/')) mappedType = MessageType.Image;
+            else if (file.type.startsWith('video/')) mappedType = MessageType.Video;
+            else if (file.type.startsWith('audio/')) mappedType = MessageType.Audio;
+
+            return (
+              <div className="hidden mx-4 my-2 p-3 bg-white border border-slate-200 rounded-xl shadow-sm text-[12px] space-y-1 text-slate-600 shrink-0 text-left">
+                <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px] text-primary flex items-center gap-1.5">
+                  <Cpu className="h-3.5 w-3.5 animate-pulse text-primary" />
+                  Auto-Filled DTO (MessageAttachmentDto)
+                </p>
+                <div className="grid grid-cols-[100px_1fr] gap-x-2 gap-y-0.5 font-mono text-[11px]">
+                  <span className="text-slate-400 font-semibold">FileName:</span>
+                  <span className="text-slate-700 truncate">{file.name}</span>
+                  <span className="text-slate-400 font-semibold">ContentType:</span>
+                  <span className="text-slate-700">{file.type || 'unknown'}</span>
+                  <span className="text-slate-400 font-semibold">FileSize:</span>
+                  <span className="text-slate-700">{(file.size / 1024).toFixed(1)} KB ({file.size} B)</span>
+                  <span className="text-slate-400 font-semibold">MessageType:</span>
+                  <span className="text-emerald-600 font-bold">{MessageType[mappedType]} ({mappedType})</span>
+                  {(mappedType === MessageType.Image || mappedType === MessageType.Video) && (
+                    <>
+                      <span className="text-slate-400 font-semibold">Thumbnail:</span>
+                      <span className="text-primary truncate">/thumbnails/{(mappedType === MessageType.Image ? 'img_' : 'vid_') + file.name}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="bg-[#f0f2f5] p-3 flex items-center gap-2 border-t shrink-0">
             <Input 
@@ -12467,14 +14216,17 @@ export default function App() {
               Cancel
             </Button>
             <Button 
-               onClick={() => {
+               onClick={async () => {
                  if (messageToDelete) {
-                   setChatMessages(prev => prev.filter(m => m.id !== messageToDelete.id));
-                   setMessageToDelete(null);
-                   toast({
-                     title: "Deleted",
-                     description: "Message removed successfully",
-                   });
+                   try {
+                     await apiFetch<any>(`/Message/DeleteMessage?messageId=${messageToDelete.id}`, { method: 'POST' });
+                     setChatMessages(prev => prev.filter(m => m.id !== messageToDelete.id));
+                     toast.success("Message removed successfully");
+                   } catch (err: any) {
+                     toast.error("Failed to delete message: " + err.message);
+                   } finally {
+                     setMessageToDelete(null);
+                   }
                  }
                }}
                className="h-11 px-8 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold flex items-center gap-2"
@@ -12482,6 +14234,59 @@ export default function App() {
               <Trash2 className="h-4 w-4" />
               Delete
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={messageToEdit !== null} onOpenChange={(open) => !open && setMessageToEdit(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Edit Message</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input 
+              value={editMessageContent}
+              onChange={(e) => setEditMessageContent(e.target.value)}
+              className="bg-white border-slate-200"
+              autoFocus
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter' && messageToEdit) {
+                  try {
+                    await apiFetch<any>('/Message/EditMessage', {
+                      method: 'POST',
+                      body: JSON.stringify({ messageId: messageToEdit.id, content: editMessageContent })
+                    });
+                    setChatMessages(prev => prev.map(m => m.id === messageToEdit.id ? { ...m, content: editMessageContent, isEdited: true } : m));
+                    toast.success("Message edited successfully");
+                  } catch (err: any) {
+                    toast.error("Failed to edit message: " + err.message);
+                  } finally {
+                    setMessageToEdit(null);
+                  }
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMessageToEdit(null)}>Cancel</Button>
+            <Button 
+              onClick={async () => {
+                if (messageToEdit) {
+                  try {
+                    await apiFetch<any>('/Message/EditMessage', {
+                      method: 'POST',
+                      body: JSON.stringify({ messageId: messageToEdit.id, content: editMessageContent })
+                    });
+                    setChatMessages(prev => prev.map(m => m.id === messageToEdit.id ? { ...m, content: editMessageContent, isEdited: true } : m));
+                    toast.success("Message edited successfully");
+                  } catch (err: any) {
+                    toast.error("Failed to edit message: " + err.message);
+                  } finally {
+                    setMessageToEdit(null);
+                  }
+                }
+              }}
+            >Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -12558,30 +14363,68 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none">
+      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none items-end">
         <AnimatePresence>
           {(chatPopups || []).map((popup) => {
             const sender = (allUsers || []).find(u => u.id === popup.senderPersonId);
+            const chat = (chats || []).find(c => c.id === popup.chatId);
+            const isGroup = chat?.isGroup || false;
+
+            const displayProfileImg = isGroup 
+              ? (chat?.imageUrl || popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl)
+              : (popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl);
+
+            const displayName = isGroup
+              ? (chat?.name || "Group Chat")
+              : (popup.senderName || (sender ? `${sender.getPersonDetailsDto.firstName} ${sender.getPersonDetailsDto.lastName}` : "Unknown"));
+
+            const displayInitial = displayName ? displayName.charAt(0).toUpperCase() : 'U';
+            const messageContent = popup.content || popup.text || (popup.audioUrl ? '🎤 Voice Message' : (popup.attachments && popup.attachments.length > 0) ? '📎 Attachment' : 'New Message');
+            const isTooLong = messageContent.length > 60;
+            const displayMsg = isTooLong ? messageContent.substring(0, 57) + '...' : messageContent;
+
             return (
-            <motion.div
-              key={popup.id}
-              initial={{ opacity: 0, y: 50, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="bg-white rounded-[9px] shadow-2xl p-4 w-[300px] pointer-events-auto border border-black cursor-pointer hover:bg-slate-50 transition-colors"
-              onClick={() => setIsChatModalOpen(true)}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <div className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 text-sm font-bold shrink-0">
-                  {sender?.getPersonDetailsDto.firstName[0] || 'U'}
+              <motion.div
+                key={popup.id}
+                initial={{ scaleX: 0, opacity: 0 }}
+                animate={{ 
+                  scaleX: 1, 
+                  opacity: 1,
+                  transition: { duration: 0.5, ease: "easeOut" }
+                }}
+                exit={{ 
+                  scaleX: 0, 
+                  opacity: 0,
+                  transition: { duration: 0.9, ease: "easeInOut" }
+                }}
+                style={{ originX: 0.5 }}
+                className="bg-white/95 backdrop-blur-sm rounded-full shadow-lg p-3 pl-3 pr-6 w-auto max-w-[85vw] md:max-w-[30%] min-w-[260px] pointer-events-auto border-2 border-zinc-300 cursor-pointer hover:bg-slate-50 transition-colors flex gap-3.5 items-center"
+                onClick={() => {
+                  setActiveChatId(popup.chatId);
+                  setIsChatModalOpen(true);
+                }}
+              >
+                <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-700 font-bold shrink-0 overflow-hidden">
+                  {displayProfileImg ? (
+                    <img 
+                      src={getFullImageUrl(displayProfileImg)} 
+                      alt={displayName} 
+                      className="h-full w-full object-cover rounded-full"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="text-sm font-semibold">{displayInitial}</span>
+                  )}
                 </div>
-                <div className="flex-1 overflow-hidden">
-                  <p className="text-sm font-bold truncate">{sender?.getPersonDetailsDto.firstName} {sender?.getPersonDetailsDto.lastName}</p>
+                <div className="flex-1 min-w-0 text-left flex flex-col justify-center">
+                  <p className="text-sm font-bold text-slate-800 truncate leading-tight">{displayName}</p>
+                  <p className="text-xs text-slate-500 font-normal truncate leading-tight mt-0.5">
+                    {isGroup ? `${popup.senderName}: ${displayMsg}` : displayMsg}
+                  </p>
                 </div>
-              </div>
-              <p className="text-sm text-slate-600 line-clamp-2 break-words">{popup.text || (popup.audioUrl ? '🎤 Voice Message' : popup.images?.length ? '🖼️ Media' : 'File Attached')}</p>
-            </motion.div>
-          )})}
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
 

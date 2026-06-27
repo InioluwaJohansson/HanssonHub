@@ -37,6 +37,21 @@ import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile, Room, Section } from '../types';
+import { API_BASE_URL } from '../config';
+
+const getFullImageUrl = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const cleanUrl = url.startsWith('/') ? url.slice(1) : url;
+  const baseDomain = API_BASE_URL.replace(/\/Home_Security$/, '').replace(/\/$/, '');
+  
+  if (cleanUrl.startsWith('storage/')) {
+    return `${baseDomain}/${cleanUrl}`;
+  }
+  return `${baseDomain}/storage/${cleanUrl}`;
+};
 
 export type NavView = 
   | 'dashboard' 
@@ -209,7 +224,11 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           title={isCollapsed ? "Profile" : undefined}
         >
           <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
-            <img src={userProfile.getPersonDetailsDto.imageUrl} alt="Profile" className="h-full w-full object-cover" />
+            {userProfile?.getPersonDetailsDto?.imageUrl ? (
+              <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Profile" className="h-full w-full object-cover" />
+            ) : (
+              <User className="h-4 w-4 text-muted-foreground" />
+            )}
           </div>
           {!isCollapsed && (
             <div className="flex flex-col text-left">
