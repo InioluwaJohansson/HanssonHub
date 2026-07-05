@@ -94,9 +94,10 @@ const iconMap: Record<string, any> = {
 export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile, isCollapsed }: SidebarProps) {
   const [isFacilitiesOpen, setIsFacilitiesOpen] = React.useState(false);
 
-  const firstName = userProfile.getPersonDetailsDto.firstName;
-  const lastName = userProfile.getPersonDetailsDto.lastName;
-  const roleName = userProfile.getUserDto.roleName;
+  const firstName = userProfile?.getPersonDetailsDto?.firstName || '';
+  const lastName = userProfile?.getPersonDetailsDto?.lastName || '';
+  const firstInitial = (firstName || userProfile?.getUserDto?.userName || 'U').charAt(0).toUpperCase();
+  const roleName = userProfile?.getUserDto?.roleName || '';
 
   const hasMultipleRooms = rooms.length > 1;
 
@@ -105,14 +106,21 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
     { id: 'user-room', label: `${firstName}'s Room(s)`, icon: HomeIcon },
   ];
 
+  const userRoleNum = userProfile?.getUserDto?.role;
+  const userRoleNameLower = roleName.toLowerCase();
+  const isOwner = userRoleNum === 1 || userRoleNameLower === 'owner';
+  const isRelativeOrVisitor = ['relative', 'visitor'].includes(userRoleNameLower);
+  const canSeeActions = userRoleNum === 1 || userRoleNum === 2 || userRoleNum === 3 || 
+                        ['owner', 'wife', 'child'].includes(userRoleNameLower);
+
   const facilityItems = [
     { id: 'facilities', label: 'Overview', icon: Layers },
-    { id: 'facility-actions', label: 'Actions', icon: Zap },
+    ...(canSeeActions ? [{ id: 'facility-actions', label: 'Actions', icon: Zap }] : []),
     { id: 'facility-appliances', label: 'Appliances', icon: Power },
     { id: 'facility-cameras', label: 'Cameras', icon: Camera },
     { id: 'facility-doors', label: 'Doors', icon: Lock },
     { id: 'facility-externals', label: 'Externals', icon: Radio },
-    { id: 'facility-hardware', label: 'Hardware', icon: Cpu },
+    ...(isOwner ? [{ id: 'facility-hardware', label: 'Hardware', icon: Cpu }] : []),
     { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
@@ -148,53 +156,64 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
             ))}
 
             {/* Facilities Collapsible */}
-            <div className="space-y-1">
-              <button
-                onClick={() => setIsFacilitiesOpen(!isFacilitiesOpen)}
-                className={cn(
-                  "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                  isCollapsed && "justify-center px-0"
-                )}
-                title={isCollapsed ? "Facilities" : undefined}
-              >
-                <Settings2 className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
-                {!isCollapsed && <span className="flex-1 text-left">Facilities</span>}
-                {!isCollapsed && <ChevronRight className={cn("h-4 w-4 transition-transform", isFacilitiesOpen && "rotate-90")} />}
-              </button>
-              
-              <AnimatePresence initial={false}>
-                {isFacilitiesOpen && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className={cn("overflow-hidden space-y-1", !isCollapsed ? "pl-4" : "flex flex-col items-center py-2")}
-                  >
-                    {facilityItems.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() => onViewChange(item.id)}
-                        className={cn(
-                          "group flex w-full items-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground",
-                          activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
-                          !isCollapsed ? "px-3 py-1.5 text-xs font-medium" : "justify-center p-2"
-                        )}
-                        title={isCollapsed ? item.label : undefined}
-                      >
-                        <item.icon className={cn(!isCollapsed ? "mr-2 h-3.5 w-3.5" : "h-4 w-4")} />
-                        {!isCollapsed && item.label}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {!isRelativeOrVisitor && (
+              <div className="space-y-1">
+                <button
+                  onClick={() => setIsFacilitiesOpen(!isFacilitiesOpen)}
+                  className={cn(
+                    "group flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                    isCollapsed && "justify-center px-0"
+                  )}
+                  title={isCollapsed ? "Facilities" : undefined}
+                >
+                  <Settings2 className={cn("h-4 w-4", !isCollapsed && "mr-2")} />
+                  {!isCollapsed && <span className="flex-1 text-left">Facilities</span>}
+                  {!isCollapsed && <ChevronRight className={cn("h-4 w-4 transition-transform", isFacilitiesOpen && "rotate-90")} />}
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {isFacilitiesOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className={cn("overflow-hidden space-y-1", !isCollapsed ? "pl-4" : "flex flex-col items-center py-2")}
+                    >
+                      {facilityItems.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => onViewChange(item.id)}
+                          className={cn(
+                            "group flex w-full items-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground",
+                            activeView === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                            !isCollapsed ? "px-3 py-1.5 text-xs font-medium" : "justify-center p-2"
+                          )}
+                          title={isCollapsed ? item.label : undefined}
+                        >
+                          <item.icon className={cn(!isCollapsed ? "mr-2 h-3.5 w-3.5" : "h-4 w-4")} />
+                          {!isCollapsed && item.label}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
 
             {[
               { id: 'contacts', label: 'Contacts', icon: Contact },
               { id: 'all-users', label: 'All Users', icon: UserCircle },
               { id: 'logs', label: 'Logs', icon: ClipboardList },
-            ].map((item) => (
+            ].filter((item) => {
+              if (isRelativeOrVisitor) {
+                return false;
+              }
+              if (item.id === 'all-users' || item.id === 'logs') {
+                const role = userProfile?.getUserDto?.roleName;
+                return role === 'Owner' || role === 'Wife';
+              }
+              return true;
+            }).map((item) => (
               <button
                 key={item.id}
                 onClick={() => onViewChange(item.id)}
@@ -223,11 +242,11 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           )}
           title={isCollapsed ? "Profile" : undefined}
         >
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden shrink-0 font-bold text-primary text-sm">
             {userProfile?.getPersonDetailsDto?.imageUrl ? (
               <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Profile" className="h-full w-full object-cover" />
             ) : (
-              <User className="h-4 w-4 text-muted-foreground" />
+              firstInitial
             )}
           </div>
           {!isCollapsed && (

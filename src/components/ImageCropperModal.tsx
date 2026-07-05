@@ -74,11 +74,11 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl h-[600px] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center"><Scissors className="w-5 h-5 mr-2" />Crop Image</DialogTitle>
         </DialogHeader>
-        <div className="flex justify-center items-center w-full h-[50vh] overflow-hidden bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+        <div className="flex-1 flex justify-center items-center w-full overflow-hidden bg-slate-50/50 p-3 rounded-xl border border-slate-100">
           {imageSrc && (
             <ReactCrop
               crop={crop}
@@ -92,7 +92,7 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
                 alt="Crop me"
                 src={imageSrc}
                 onLoad={onImageLoad}
-                style={{ maxHeight: '45vh', maxWidth: '100%', objectFit: 'contain' }}
+                style={{ maxHeight: '380px', maxWidth: '100%', objectFit: 'contain' }}
                 className="block mx-auto"
               />
             </ReactCrop>

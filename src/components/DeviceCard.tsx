@@ -24,7 +24,8 @@ import {
   Trash2,
   Edit3,
   AppWindow as WindowIcon,
-  Maximize2
+  Maximize2,
+  Radio
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
@@ -67,6 +68,8 @@ const getIcon = (device: Device) => {
       return <Power className={cn("h-5 w-5 transition-colors", color)} />;
     case 'camera':
       return <Camera className={cn("h-5 w-5 transition-colors", color)} />;
+    case 'external' as any:
+      return <Radio className={cn("h-5 w-5 transition-colors", color)} />;
     case 'speaker':
       return <Tv className={cn("h-5 w-5 transition-colors", color)} />;
     default:
@@ -234,7 +237,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
             )}
           </div>
             
-            {device.value !== undefined && isActive && device.type !== 'door' && device.type !== 'window' && !isSummary && (
+            {device.value !== undefined && isActive && device.type === 'light' && !isSummary && (
               <div className="pt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <div className="flex items-center gap-1">

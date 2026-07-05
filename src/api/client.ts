@@ -56,7 +56,7 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
     finalHeaders['Authorization'] = `Bearer ${token}`;
   }
   if (body instanceof FormData) {
-    delete finalHeaders['Content-Type'];
+    finalHeaders['Content-Type'] = undefined;
   }
   console.log(body);
   window.dispatchEvent(new CustomEvent('api-fetch-start'));

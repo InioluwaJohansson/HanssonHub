@@ -781,13 +781,11 @@ export interface GetRecordingDto {
 }
 
 export enum MessageType {
-  Text = 1,
-  Image,
-  Video,
-  File,
-  Location,
-  Contact,
-  Audio
+  Text = 0,
+  Image = 1,
+  Video = 2,
+  Audio = 3,
+  File = 4,
 }
 
 export interface CreateDirectChatDto {
@@ -816,18 +814,20 @@ export interface RemoveParticipantDto {
 }
 
 export interface MessageAttachmentDto {
-  fileName: string;
-  filePath: string;
-  contentType: string;
-  fileSize: number;
+  fileName?: string;
+  filePath?: string;
+  contentType?: string;
+  fileSize?: number;
   thumbnailPath?: string;
+  type?: MessageType;
 }
 
 export interface SendMessageDto {
-  chatId: number;
+  chatId?: number;
   content?: string;
-  type: MessageType;
-  attachments: MessageAttachmentDto[];
+  type?: MessageType;
+  attachments?: MessageAttachmentDto[];
+  replyToMessageId?: number;
 }
 
 export interface EditMessageDto {
@@ -852,6 +852,7 @@ export interface MessageDto {
   sentAt: string; // ISO string
   attachments: MessageAttachmentDto[];
   replyToId?: number;
+  replyTo?: MessageDto;
 }
 
 export interface ChatParticipantDto {
@@ -860,6 +861,7 @@ export interface ChatParticipantDto {
   profileImageUrl?: string;
   isAdmin: boolean;
   isOnline: boolean;
+  lastReadAt?: string; // ISO string
 }
 
 export interface ChatDto {

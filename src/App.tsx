@@ -128,7 +128,7 @@ import {
   Unlock,
   Camera,
   Plus,
-  Play,
+  Tag,
   Film,
   Sun,
   Home as HomeIcon,
@@ -199,6 +199,8 @@ import {
   MessageSquarePlus,
   XCircle,
   Pause,
+  Play,
+  Square,
   Reply,
   Forward,
   CornerUpLeft,
@@ -222,12 +224,16 @@ import {
   Terminal,
   Volume2,
   Code2,
-  UserMinus
+  UserMinus,
+  ChevronDown,
+  Ban
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
 import { cn } from '@/lib/utils';
 import { LoginScreen } from './components/LoginScreen';
+import { RememberedUsersManager } from './utils/rememberedUsers';
+import { RecordingWaveform } from './components/RecordingWaveform';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
 import { initSignalR } from './lib/signalR';
@@ -290,10 +296,12 @@ const dataURLtoFile = (dataurl: string, filename: string): File => {
 
 const getFullImageUrl = (url: string | null | undefined): string | undefined => {
   if (!url) return undefined;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
-    return url;
+  // Normalize backslashes to forward slashes first
+  const normalizedUrl = url.replace(/\\/g, '/');
+  if (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://') || normalizedUrl.startsWith('data:')) {
+    return normalizedUrl;
   }
-  const cleanUrl = url.startsWith('/') ? url.slice(1) : url;
+  const cleanUrl = normalizedUrl.startsWith('/') ? normalizedUrl.slice(1) : normalizedUrl;
   const baseDomain = API_BASE_URL.replace(/\/Home_Security$/, '').replace(/\/$/, '');
   
   if (cleanUrl.startsWith('storage/')) {
@@ -379,6 +387,47 @@ const mapSection = (s: any): Section => {
   } as Section;
 };
 
+const getProp = (obj: any, propName: string) => {
+  if (!obj) return undefined;
+  const lowerProp = propName.toLowerCase();
+  for (const key of Object.keys(obj)) {
+    if (key.toLowerCase() === lowerProp) {
+      return obj[key];
+    }
+  }
+  return undefined;
+};
+
+const resolveSectionId = (sectionVal: any, sectionsList: Section[]): number | null => {
+  if (sectionVal === undefined || sectionVal === null || sectionVal === '' || sectionVal === 'none' || sectionVal === '0') return null;
+  const parsed = parseInt(sectionVal.toString(), 10);
+  if (!isNaN(parsed)) {
+    if ((sectionsList || []).some(s => s.id.toString() === parsed.toString() || (s as any).sectionId?.toString() === parsed.toString())) {
+      return parsed;
+    }
+  }
+  const matchedSection = (sectionsList || []).find(s => s.name.toLowerCase() === sectionVal.toString().toLowerCase() || (s as any).sectionName?.toLowerCase() === sectionVal.toString().toLowerCase());
+  if (matchedSection) {
+    return parseInt(((matchedSection as any).sectionId ?? matchedSection.id).toString(), 10);
+  }
+  return null;
+};
+
+const resolveRoomId = (roomVal: any, roomsList: Room[]): number | null => {
+  if (roomVal === undefined || roomVal === null || roomVal === '' || roomVal === 'none' || roomVal === '0') return null;
+  const parsed = parseInt(roomVal.toString(), 10);
+  if (!isNaN(parsed)) {
+    if ((roomsList || []).some(r => r.id.toString() === parsed.toString())) {
+      return parsed;
+    }
+  }
+  const matchedRoom = (roomsList || []).find(r => r.name.toLowerCase() === roomVal.toString().toLowerCase() || (r as any).roomName?.toLowerCase() === roomVal.toString().toLowerCase());
+  if (matchedRoom) {
+    return parseInt(matchedRoom.id.toString(), 10);
+  }
+  return null;
+};
+
 const base64ToFile = (base64: string, filename: string): File => {
   const arr = base64.split(',');
   const mime = arr[0].match(/:(.*?);/)![1];
@@ -389,6 +438,836 @@ const base64ToFile = (base64: string, filename: string): File => {
     u8arr[n] = bstr.charCodeAt(n);
   }
   return new File([u8arr], filename, { type: mime });
+};
+
+const mapFrontendTypeToBackend = (frontType: any): number => {
+  if (frontType === undefined || frontType === null) return 0;
+  if (frontType === 1 || frontType === 2 || frontType === 3 || frontType === 4) {
+    return frontType;
+  }
+  if (frontType === MessageType.Text) return 0;
+  if (frontType === MessageType.Image) return 1;
+  if (frontType === MessageType.Video) return 2;
+  if (frontType === MessageType.Audio) return 3;
+  if (frontType === MessageType.File) return 4;
+  return 0;
+};
+
+const normalizeMessage = (msg: any): MessageDto => {
+  if (!msg) return msg;
+  const chatIdValue = msg.chatId ?? msg.ChatId;
+  const senderPersonIdValue = msg.senderPersonId ?? msg.SenderPersonId;
+  const contentValue = msg.content ?? msg.Content;
+  const isEditedValue = msg.isEdited ?? msg.IsEdited ?? false;
+  const isDeletedValue = msg.isDeleted ?? msg.IsDeleted ?? false;
+  const sentAtValue = msg.sentAt ?? msg.SentAt;
+  const idValue = msg.id ?? msg.Id;
+  
+  let rawType = msg.type !== undefined ? msg.type : msg.Type;
+  if (rawType === undefined) rawType = 0;
+  
+  let mappedType = MessageType.Text;
+  
+  // Backend MessageType enum:
+  // Image = 1, Video = 2, Audio = 3, File = 4
+  
+  if (typeof rawType === 'string') {
+    const lower = rawType.toLowerCase();
+    if (lower === 'image') mappedType = MessageType.Image;
+    else if (lower === 'video') mappedType = MessageType.Video;
+    else if (lower === 'audio') mappedType = MessageType.Audio;
+    else if (lower === 'file') mappedType = MessageType.File;
+    else mappedType = MessageType.Text;
+  } else {
+    // Number from backend
+    if (rawType === 1) mappedType = MessageType.Image;
+    else if (rawType === 2) mappedType = MessageType.Video;
+    else if (rawType === 3) mappedType = MessageType.Audio;
+    else if (rawType === 4) mappedType = MessageType.File;
+    else if (rawType === 7) mappedType = MessageType.Audio; // frontend Audio is 7
+    else if (rawType === MessageType.Image) mappedType = MessageType.Image;
+    else if (rawType === MessageType.Video) mappedType = MessageType.Video;
+    else if (rawType === MessageType.Audio) mappedType = MessageType.Audio;
+    else if (rawType === MessageType.File) mappedType = MessageType.File;
+    else mappedType = MessageType.Text;
+  }
+
+  // Normalize attachments
+  const rawAtts = msg.attachments ?? msg.Attachments ?? [];
+  const normalizedAtts = rawAtts.map((att: any) => {
+    let rawAttType = att.type !== undefined ? att.type : att.Type;
+    let mappedAttType = MessageType.File; // Default to file for attachment if not specified
+
+    const rawContentType = att.contentType ?? att.ContentType ?? '';
+    const lowerContentType = rawContentType.toLowerCase();
+    
+    if (rawAttType !== undefined) {
+      if (typeof rawAttType === 'string') {
+        const lower = rawAttType.toLowerCase();
+        if (lower === 'image') mappedAttType = MessageType.Image;
+        else if (lower === 'video') mappedAttType = MessageType.Video;
+        else if (lower === 'audio') mappedAttType = MessageType.Audio;
+        else if (lower === 'file') mappedAttType = MessageType.File;
+      } else {
+        if (rawAttType === 0) mappedAttType = MessageType.Text;
+        else if (rawAttType === 1) mappedAttType = MessageType.Image;
+        else if (rawAttType === 2) mappedAttType = MessageType.Video;
+        else if (rawAttType === 3) mappedAttType = MessageType.Audio;
+        else if (rawAttType === 4) mappedAttType = MessageType.File;
+        else if (rawAttType === MessageType.Image) mappedAttType = MessageType.Image;
+        else if (rawAttType === MessageType.Video) mappedAttType = MessageType.Video;
+        else if (rawAttType === MessageType.Audio) mappedAttType = MessageType.Audio;
+        else if (rawAttType === MessageType.File) mappedAttType = MessageType.File;
+      }
+    } else if (rawContentType) {
+      if (lowerContentType.includes('image') || lowerContentType === 'jpg' || lowerContentType === 'png' || lowerContentType === 'gif') {
+        mappedAttType = MessageType.Image;
+      } else if (lowerContentType.includes('video') || lowerContentType === 'mp4') {
+        mappedAttType = MessageType.Video;
+      } else if (lowerContentType.includes('audio') || lowerContentType === 'webm' || lowerContentType === 'mp3') {
+        mappedAttType = MessageType.Audio;
+      }
+    } else {
+      // Check extension of fileName as a robust fallback
+      const fileName = (att.fileName ?? att.FileName ?? '').toLowerCase();
+      if (/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName)) {
+        mappedAttType = MessageType.Image;
+      } else if (/\.(mp4|webm|ogg|mov|avi|mkv)$/i.test(fileName)) {
+        mappedAttType = MessageType.Video;
+      } else if (/\.(mp3|wav|ogg|webm|m4a|aac)$/i.test(fileName)) {
+        mappedAttType = MessageType.Audio;
+      }
+    }
+
+    return {
+      id: att.id ?? att.Id,
+      messageId: att.messageId ?? att.MessageId,
+      fileName: att.fileName ?? att.FileName ?? '',
+      filePath: att.filePath ?? att.FilePath ?? '',
+      contentType: rawContentType,
+      fileSize: att.fileSize ?? att.FileSize ?? 0,
+      thumbnailPath: att.thumbnailPath ?? att.ThumbnailPath ?? '',
+      createdAt: att.createdAt ?? att.CreatedAt,
+      type: mappedAttType,
+    };
+  });
+
+  return {
+    ...msg,
+    id: idValue,
+    chatId: chatIdValue,
+    senderPersonId: senderPersonIdValue,
+    content: contentValue,
+    type: mappedType,
+    isEdited: isEditedValue,
+    isDeleted: isDeletedValue,
+    sentAt: sentAtValue,
+    attachments: normalizedAtts,
+    senderName: msg.senderName ?? msg.SenderName,
+    senderProfileImage: msg.senderProfileImage ?? msg.SenderProfileImage,
+    replyTo: (() => {
+      const nested = msg.replyTo ?? msg.ReplyTo ?? msg.replyToMessage ?? msg.ReplyToMessage;
+      return nested ? normalizeMessage(nested) : undefined;
+    })(),
+    replyToId: (() => {
+      let replyToIdValue = msg.replyToId ?? msg.ReplyToId ?? msg.replyToMessageId ?? msg.ReplyToMessageId ?? msg.referenceId ?? msg.ReferenceId;
+      if (!replyToIdValue) {
+        const nested = msg.replyTo ?? msg.ReplyTo ?? msg.replyToMessage ?? msg.ReplyToMessage;
+        if (nested) {
+          replyToIdValue = nested.id ?? nested.Id;
+        }
+      }
+      if (replyToIdValue !== undefined && replyToIdValue !== null && replyToIdValue !== 0 && replyToIdValue !== '0') {
+        return replyToIdValue;
+      }
+      return undefined;
+    })()
+  };
+};
+
+const buildMessageFormData = (sendDto: SendMessageDto): FormData => {
+  console.log("=== DIAGNOSTIC: Send Message DTO ===");
+  console.log(JSON.stringify(sendDto, null, 2));
+
+  const formData = new FormData();
+  const chatIdValue = sendDto.chatId ?? 0;
+  const contentValue = sendDto.content ?? '';
+  const typeValue = mapFrontendTypeToBackend(sendDto.type ?? MessageType.Text);
+  const replyToIdValue = sendDto.replyToMessageId ?? 0;
+
+  // Append only camelCase (lowercase first letter) parameters to avoid duplicates
+  formData.append('chatId', chatIdValue.toString());
+  formData.append('content', contentValue);
+  formData.append('type', typeValue.toString());
+  formData.append('replyToMessageId', replyToIdValue.toString());
+  if (replyToIdValue) {
+    formData.append('replyToId', replyToIdValue.toString());
+  }
+  
+  const atts = sendDto.attachments ?? [];
+  
+  atts.forEach((att: any, index: number) => {
+    const fileName = att.fileName || att.FileName || "";
+    const rawFilePath = att.filePath || att.FilePath || "";
+    const contentType = att.contentType || att.ContentType || "";
+    const fileSize = att.fileSize || att.FileSize || 0;
+    const thumbnailPath = att.thumbnailPath || att.ThumbnailPath || "";
+    
+    let fileToUpload: any = rawFilePath;
+    if (typeof rawFilePath === 'string' && rawFilePath.startsWith('data:')) {
+      fileToUpload = base64ToFile(rawFilePath, fileName);
+    } else if (typeof rawFilePath === 'string') {
+      // If filePath is just a local URL or string, send a dummy file with correct content type to satisfy IFormFile
+      fileToUpload = new File([""], fileName, { type: contentType || 'application/octet-stream' });
+    }
+    
+    // Determine attachment type using updated MessageType backend mapping
+    let mappedType = 4; // Default to File
+    const rawType = att.type !== undefined ? att.type : (att.Type !== undefined ? att.Type : sendDto.type);
+    
+    if (rawType === MessageType.Image || rawType === 1 || String(rawType).toLowerCase() === 'image') {
+      mappedType = 1;
+    } else if (rawType === MessageType.Video || rawType === 2 || String(rawType).toLowerCase() === 'video') {
+      mappedType = 2;
+    } else if (rawType === MessageType.Audio || rawType === 3 || String(rawType).toLowerCase() === 'audio') {
+      mappedType = 3;
+    } else if (rawType === MessageType.File || rawType === 4 || String(rawType).toLowerCase() === 'file') {
+      mappedType = 4;
+    }
+
+    // Append standard C# model binding index notation with lowercase "attachments" prefix and PascalCase nested properties
+    formData.append(`attachments[${index}].FileName`, fileName);
+    formData.append(`attachments[${index}].FilePath`, fileToUpload);
+    formData.append(`attachments[${index}].Type`, mappedType.toString());
+    formData.append(`attachments[${index}].FileSize`, fileSize.toString());
+    formData.append(`attachments[${index}].ThumbnailPath`, thumbnailPath);
+  });
+
+  // Diagnostic logging of all form-data keys/values
+  console.log("=== DIAGNOSTIC: FormData keys & values ===");
+  formData.forEach((value, key) => {
+    if (typeof value === 'string' && value.length > 250) {
+      console.log(`- ${key}: [String starting with ${value.substring(0, 80)}... (Total length: ${value.length})]`);
+    } else if (value instanceof File) {
+      console.log(`- ${key}: [File Name: ${value.name}, Type: ${value.type}, Size: ${value.size}]`);
+    } else {
+      console.log(`- ${key}:`, value);
+    }
+  });
+  console.log("=========================================");
+
+  return formData;
+};
+
+const formatLastMessageAttachmentsText = (attachments: any[]): string => {
+  if (!attachments || attachments.length === 0) return '';
+  
+  let imageCount = 0;
+  let videoCount = 0;
+  let audioCount = 0;
+  let fileCount = 0;
+  
+  attachments.forEach(att => {
+    const rawType = att.type;
+    // Normalize attachment type checking
+    if (rawType === MessageType.Image || rawType === 1 || String(rawType).toLowerCase() === 'image') {
+      imageCount++;
+    } else if (rawType === MessageType.Video || rawType === 2 || String(rawType).toLowerCase() === 'video') {
+      videoCount++;
+    } else if (rawType === MessageType.Audio || rawType === 3 || String(rawType).toLowerCase() === 'audio') {
+      audioCount++;
+    } else {
+      fileCount++;
+    }
+  });
+
+  const total = attachments.length;
+  if (imageCount === total) {
+    return imageCount === 1 ? '📷 Image' : `📷 ${imageCount} images`;
+  }
+  if (videoCount === total) {
+    return videoCount === 1 ? '🎥 Video' : `🎥 ${videoCount} videos`;
+  }
+  if (audioCount === total) {
+    return audioCount === 1 ? '🎙️ Voice note' : `🎙️ ${audioCount} voice notes`;
+  }
+  if (fileCount === total) {
+    if (fileCount === 1) {
+      const name = attachments[0].fileName || 'File';
+      return `📄 ${name}`;
+    }
+    return `📄 ${fileCount} files`;
+  }
+
+  // Mixed or fallback
+  return `📎 ${total} attachments`;
+};
+
+const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: string) => {
+  e.stopPropagation();
+  e.preventDefault();
+  try {
+    if (url.startsWith('data:')) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName || 'download';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error('Failed to download file directly, falling back to window.open', err);
+    window.open(url, '_blank');
+  }
+};
+
+const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick: (url: string, isVideo: boolean) => void }) => {
+  const totalCount = media.length;
+  if (totalCount === 0) return null;
+
+  if (totalCount === 1) {
+    const att = media[0];
+    const fullUrl = getFullImageUrl(att.filePath) || "";
+    const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
+    if (isVideo) {
+      return (
+        <div className="rounded-lg overflow-hidden max-w-full">
+          <video 
+            src={fullUrl} 
+            controls 
+            className="w-full rounded-md shadow-sm max-h-[300px] object-cover bg-black/5" 
+          />
+        </div>
+      );
+    } else {
+      return (
+        <div className="rounded-lg overflow-hidden max-w-full">
+          <img 
+            src={fullUrl} 
+            alt={att.fileName || "Image"} 
+            className="w-full h-auto max-h-[300px] object-cover rounded-md hover:opacity-95 transition-opacity cursor-pointer shadow-sm bg-black/5"
+            onClick={() => onMediaClick(fullUrl, false)}
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      );
+    }
+  }
+
+  // 2 files
+  if (totalCount === 2) {
+    return (
+      <div className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden max-w-[320px] w-full aspect-[4/3] bg-transparent border border-black/5 p-0.5">
+        {media.map((att, idx) => {
+          const fullUrl = getFullImageUrl(att.filePath) || "";
+          const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
+          return (
+            <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+              {isVideo ? (
+                <div className="relative w-full h-full">
+                  <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                    <Play className="h-6 w-6 text-white fill-white" />
+                  </div>
+                </div>
+              ) : (
+                <img src={fullUrl} className="w-full h-full object-cover hover:scale-102 transition-transform duration-200" referrerPolicy="no-referrer" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // 3 files (2 up, 1 below)
+  if (totalCount === 3) {
+    return (
+      <div className="flex flex-col gap-1 rounded-xl overflow-hidden max-w-[320px] w-full aspect-[4/3] bg-transparent border border-black/5 p-0.5">
+        {/* Top row: 2 files */}
+        <div className="grid grid-cols-2 gap-1 flex-1">
+          {media.slice(0, 2).map((att, idx) => {
+            const fullUrl = getFullImageUrl(att.filePath) || "";
+            const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
+            return (
+              <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+                {isVideo ? (
+                  <div className="relative w-full h-full">
+                    <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                      <Play className="h-6 w-6 text-white fill-white" />
+                    </div>
+                  </div>
+                ) : (
+                  <img src={fullUrl} className="w-full h-full object-cover hover:scale-102 transition-transform duration-200" referrerPolicy="no-referrer" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* Bottom row: 1 file */}
+        {(() => {
+          const att = media[2];
+          const fullUrl = getFullImageUrl(att.filePath) || "";
+          const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
+          return (
+            <div className="relative w-full h-[48%] overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+              {isVideo ? (
+                <div className="relative w-full h-full">
+                  <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                    <Play className="h-6 w-6 text-white fill-white" />
+                  </div>
+                </div>
+              ) : (
+                <img src={fullUrl} className="w-full h-full object-cover hover:scale-102 transition-transform duration-200" referrerPolicy="no-referrer" />
+              )}
+            </div>
+          );
+        })()}
+      </div>
+    );
+  }
+
+  // 4 or more files (2x2 grid, with overlay on the 4th item if remaining)
+  const displayMedia = media.slice(0, 4);
+  const remainingCount = totalCount - 4;
+
+  return (
+    <div className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden max-w-[320px] w-full aspect-square bg-transparent border border-black/5 p-0.5">
+      {displayMedia.map((att, idx) => {
+        const fullUrl = getFullImageUrl(att.filePath) || "";
+        const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
+        const isLastItem = idx === 3;
+        return (
+          <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+            {isVideo ? (
+              <div className="relative w-full h-full">
+                <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <Play className="h-6 w-6 text-white fill-white" />
+                </div>
+              </div>
+            ) : (
+              <img src={fullUrl} className="w-full h-full object-cover hover:scale-102 transition-transform duration-200" referrerPolicy="no-referrer" />
+            )}
+            
+            {isLastItem && remainingCount > 0 && (
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center text-white font-bold text-lg select-none">
+                +{remainingCount + 1}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const CircularProgress = ({ progress }: { progress: number }) => {
+  const radius = 16;
+  const stroke = 3;
+  const normalizedRadius = radius - stroke * 2;
+  const circumference = normalizedRadius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (Math.max(0, Math.min(100, progress)) / 100) * circumference;
+
+  return (
+    <div className="relative flex items-center justify-center h-10 w-10 shrink-0 select-none">
+      <svg className="transform -rotate-90 h-10 w-10">
+        <circle
+          className="text-slate-200/50"
+          strokeWidth={stroke}
+          stroke="currentColor"
+          fill="transparent"
+          r={normalizedRadius}
+          cx="20"
+          cy="20"
+        />
+        <circle
+          className="text-[#00a884] transition-all duration-300 ease-out"
+          strokeWidth={stroke}
+          strokeDasharray={circumference + ' ' + circumference}
+          style={{ strokeDashoffset }}
+          strokeLinecap="round"
+          stroke="currentColor"
+          fill="transparent"
+          r={normalizedRadius}
+          cx="20"
+          cy="20"
+        />
+      </svg>
+      <span className="absolute text-[9px] font-bold text-[#00a884]">{Math.round(progress)}%</span>
+    </div>
+  );
+};
+
+const CustomAudioPlayer = ({ 
+  src, 
+  fileName,
+  isSending = false,
+  progress = 0
+}: { 
+  src: string; 
+  fileName: string;
+  isSending?: boolean;
+  progress?: number;
+}) => {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
+  const [playbackRate, setPlaybackRate] = React.useState(1);
+
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlaybackRate(1);
+    audio.playbackRate = 1;
+    audio.volume = 1.0; // Max volume
+    audio.preload = "auto";
+    if (!isSending && src) {
+      audio.load(); // Auto download immediately
+    }
+  }, [src, isSending]);
+
+  const handlePlayPause = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      if (currentlyPlayingAudioRef.current && currentlyPlayingAudioRef.current !== audio) {
+        currentlyPlayingAudioRef.current.pause();
+      }
+      
+      currentlyPlayingAudioRef.current = audio;
+      
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => {
+        console.error("Audio playback failed:", err);
+      });
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration || 0);
+    }
+  };
+
+  const handleAudioEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const cycleSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    let nextRate = 1;
+    if (playbackRate === 1) nextRate = 1.5;
+    else if (playbackRate === 1.5) nextRate = 2;
+    else nextRate = 1;
+
+    setPlaybackRate(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+    }
+  };
+
+  const formatTime = (secs: number) => {
+    if (isNaN(secs) || !isFinite(secs)) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const barsCount = 35;
+  const heights = React.useMemo(() => {
+    const result: number[] = [];
+    let hash = 0;
+    for (let i = 0; i < src.length; i++) {
+      hash = src.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    for (let i = 0; i < barsCount; i++) {
+      const val = Math.abs(Math.sin(hash + i) * 70) + 25;
+      result.push(Math.round(val));
+    }
+    return result;
+  }, [src]);
+
+  return (
+    <div 
+      className="flex flex-col p-1 bg-transparent min-w-[280px] w-full max-w-[320px] select-none"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <audio 
+        ref={audioRef} 
+        src={src} 
+        onTimeUpdate={handleTimeUpdate} 
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleAudioEnded}
+        onPause={() => setIsPlaying(false)}
+        preload="auto"
+      />
+      
+      <div className="flex items-center gap-3">
+        {/* Play/Pause Button or Upload Progress */}
+        {isSending ? (
+          <CircularProgress progress={progress} />
+        ) : (
+          <button 
+            onClick={handlePlayPause}
+            className="h-10 w-10 rounded-full bg-[#00a884] hover:bg-[#008f72] flex items-center justify-center text-white shrink-0 shadow-sm transition-all active:scale-95 cursor-pointer"
+          >
+            {isPlaying ? (
+              <Pause className="h-5 w-5 fill-white text-white" />
+            ) : (
+              <Play className="h-5 w-5 fill-white text-white translate-x-[1px]" />
+            )}
+          </button>
+        )}
+
+        {/* Waveform & Duration Container */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          {/* Custom Waveform Slider */}
+          <div 
+            className="flex items-center gap-[3px] h-8 cursor-pointer select-none w-full"
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const fraction = Math.max(0, Math.min(1, clickX / rect.width));
+              const newTime = fraction * duration;
+              setCurrentTime(newTime);
+              if (audioRef.current) {
+                audioRef.current.currentTime = newTime;
+              }
+            }}
+          >
+            {heights.map((h, i) => {
+              const isPlayed = (i / barsCount) <= (duration ? (currentTime / duration) : 0);
+              return (
+                <div 
+                  key={i}
+                  style={{ height: `${h}%` }}
+                  className={cn(
+                    "w-[3px] rounded-full transition-colors duration-150 origin-center shrink-0",
+                    isPlayed ? "bg-[#00a884]" : "bg-slate-300"
+                  )}
+                />
+              );
+            })}
+          </div>
+
+          {/* Time Display beneath slider at the right */}
+          <div className="flex justify-end text-[10px] text-[#667781] mt-0.5 font-medium px-0.5">
+            <span>
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+          </div>
+        </div>
+
+        {/* Speed Modifier Badge */}
+        <button 
+          onClick={cycleSpeed}
+          className="px-2.5 py-1 text-[11px] font-black text-[#00a884] bg-emerald-50 hover:bg-emerald-100 rounded-full transition-colors border border-emerald-100/70 shrink-0 min-w-[42px] text-center shadow-2xs"
+        >
+          {playbackRate}x
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AUDIO_URLS = {
+  TYPING: "https://actions.google.com/sounds/v1/alarms/beep_short.ogg",
+  RECORDING: "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg",
+  SENT: "https://actions.google.com/sounds/v1/alarms/phone_beep.ogg",
+  RECEIVED: "https://actions.google.com/sounds/v1/alarms/tick_tock.ogg",
+};
+
+const currentlyPlayingAudioRef = { current: null as HTMLAudioElement | null };
+
+const playAudio = (url: string) => {
+  const audio = new Audio(url);
+  audio.play().catch(e => console.error("Audio playback failed", e));
+};
+
+const playTripleKeystrokeSynth = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const playClick = (time: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(120, time);
+      osc.frequency.exponentialRampToValueAtTime(10, time + 0.05);
+      
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(1000, time);
+      
+      gain.gain.setValueAtTime(0.04, time);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+      
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(time);
+      osc.stop(time + 0.06);
+    };
+    const now = ctx.currentTime;
+    playClick(now);
+    playClick(now + 0.1);
+    playClick(now + 0.2);
+  } catch (e) {
+    console.error("Triple keystroke playback failed", e);
+  }
+};
+
+const playWhatsappRecordChirp = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(580, now);
+    osc1.frequency.exponentialRampToValueAtTime(620, now + 0.08);
+    gain1.gain.setValueAtTime(0.06, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.1);
+    
+    setTimeout(() => {
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(780, ctx.currentTime);
+      osc2.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.1);
+      gain2.gain.setValueAtTime(0.06, ctx.currentTime);
+      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start();
+      osc2.stop(ctx.currentTime + 0.12);
+    }, 70);
+  } catch (e) {
+    console.error("Whatsapp record sound failed", e);
+  }
+};
+
+const playImessageSentSynth = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.25);
+    
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    
+    const bufferSize = ctx.sampleRate * 0.3;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(400, now);
+    filter.frequency.exponentialRampToValueAtTime(2500, now + 0.25);
+    
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.03, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    
+    noise.start(now);
+    noise.stop(now + 0.3);
+  } catch (e) {
+    console.error("iMessage sent sound failed", e);
+  }
+};
+
+const playImessageReceivedSynth = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    const gain2 = ctx.createGain();
+    
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, now);
+    gain1.gain.setValueAtTime(0.08, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1320, now);
+    gain2.gain.setValueAtTime(0.04, now);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    
+    osc1.start(now);
+    osc1.stop(now + 0.3);
+    osc2.start(now);
+    osc2.stop(now + 0.2);
+  } catch (e) {
+    console.error("iMessage received sound failed", e);
+  }
 };
 
 export default function App() {
@@ -482,6 +1361,16 @@ export default function App() {
             section: sectionStr
           } as Device;
         }
+        if (type === 'external') {
+          return {
+            id: `external-${item.id}`,
+            name: item.externalName || item.name || "Unknown External",
+            type: 'external' as any,
+            status: item.isActive ? 'active' : 'inactive',
+            room: roomStr,
+            section: sectionStr
+          } as Device;
+        }
         return item;
       });
       return [...otherDevices, ...mappedNewDevices];
@@ -554,7 +1443,11 @@ export default function App() {
 
   React.useEffect(() => {
     const handleAuthExpired = () => {
+      const remembered = localStorage.getItem('remembered_users_list');
       localStorage.clear();
+      if (remembered) {
+        localStorage.setItem('remembered_users_list', remembered);
+      }
       fetchedViewsRef.current = {};
       setIsLoggedIn(false);
       setUserDto(null);
@@ -568,6 +1461,24 @@ export default function App() {
     return () => window.removeEventListener('auth-expired', handleAuthExpired);
   }, []);
 
+  React.useEffect(() => {
+    if (isLoggedIn && userProfile) {
+      const role = userProfile.getUserDto?.roleName;
+      const roleLower = role?.toLowerCase();
+      const isRelativeOrVisitor = roleLower === 'relative' || roleLower === 'visitor';
+
+      if (isRelativeOrVisitor) {
+        if (activeView === 'contacts' || activeView === 'all-users' || activeView === 'logs' || activeView === 'facilities' || activeView === 'facility-overview' || activeView.startsWith('facility-')) {
+          setActiveView('dashboard');
+        }
+      } else if (role && role !== 'Owner' && role !== 'Wife') {
+        if (activeView === 'logs' || activeView === 'all-users') {
+          setActiveView('dashboard');
+        }
+      }
+    }
+  }, [activeView, isLoggedIn, userProfile]);
+
   const handleLogout = () => {
     // const { homeSecurityConnection } = initSignalR();
     // if (homeSecurityConnection && activeChatId && homeSecurityConnection.state === "Connected") {
@@ -576,7 +1487,12 @@ export default function App() {
     //     .catch(err => console.error("Failed to leave chat on logout:", err));
     // }
 
+    const remembered = localStorage.getItem('remembered_users_list');
     localStorage.clear();
+    sessionStorage.clear();
+    if (remembered) {
+      localStorage.setItem('remembered_users_list', remembered);
+    }
     fetchedViewsRef.current = {};
     setIsLoggedIn(false);
     setUserDto(null);
@@ -599,32 +1515,7 @@ export default function App() {
     setLogs(prev => [newLog, ...prev]);
   }, [userProfile]);
 
-  // Infinite scroll dynamic loader context
-  React.useEffect(() => {
-    if (activeView !== 'logs') return;
-    if (visibleLogsCount >= logs.length) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !isPagingLoading) {
-        setIsPagingLoading(true);
-        setTimeout(() => {
-          setVisibleLogsCount(prev => prev + 50);
-          setIsPagingLoading(false);
-        }, 500);
-      }
-    }, { rootMargin: '120px' });
-
-    const currentRef = loaderRef.current;
-    if (currentRef) {
-      observer.observe(currentRef);
-    }
-
-    return () => {
-      if (currentRef) {
-        observer.unobserve(currentRef);
-      }
-    };
-  }, [activeView, visibleLogsCount, logs.length, isPagingLoading]);
+  // Infinite scroll dynamic loader handled via direct onScroll listener on the main content container.
 
   const [contacts, setContacts] = React.useState<ContactType[]>([]);
   const [contactCategories, setContactCategories] = React.useState<ContactCategory[]>([]);
@@ -815,6 +1706,25 @@ export default function App() {
     }));
   }, [allUsers, appliances, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
 
+  const isOwner = userProfile?.getUserDto?.role === 1 || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
+  const canSeeActions = isOwner || userProfile?.getUserDto?.role === 2 || userProfile?.getUserDto?.role === 3 || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
+
+  const getUserNameById = React.useCallback((userId: number | string | undefined | null) => {
+    if (!userId) return null;
+    const uIdNum = typeof userId === 'string' ? parseInt(userId) : userId;
+    const person = (appNamesDetailList?.personIdNames || []).find((p: any) => p.id === uIdNum);
+    if (person) return person.name;
+    const user = allUsers.find(u => u.id === uIdNum || u.getUserDto?.id === uIdNum || u.personId === uIdNum.toString());
+    if (user) return `${user.getPersonDetailsDto?.firstName} ${user.getPersonDetailsDto?.lastName}`;
+    return null;
+  }, [appNamesDetailList, allUsers]);
+
+  React.useEffect(() => {
+    if (activeView === 'facility-actions' && !canSeeActions && isLoggedIn) {
+      setActiveView('dashboard');
+    }
+  }, [activeView, canSeeActions, isLoggedIn]);
+
   const getUserDetailsById = React.useCallback((personId: number) => {
     const list = appNamesDetailList?.personIdNames || [];
     const found = list.find((u: any) => u.id === personId);
@@ -942,12 +1852,25 @@ export default function App() {
                 personId: res.data.personId || parseInt(storedPersonId)
               };
             });
+            // Store remembered user details
+            const pDetails = res.data.getPersonDetailsDto;
+            const uDto = res.data.getUserDto;
+            if (pDetails) {
+              const uName = uDto?.userName || localStorage.getItem('userName') || '';
+              if (uName) {
+                RememberedUsersManager.addUser({
+                  name: `${pDetails.firstName || ''} ${pDetails.lastName || ''}`.trim(),
+                  username: uName,
+                  imageUrl: pDetails.imageUrl || '',
+                });
+              }
+            }
           }
         })
         .catch(err => console.error("Failed to load user profile on preload", err));
 
       apiFetch('/External/GetAllExternals', { method: 'POST' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setExternals(res.data); } else { setExternals([]); } })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setExternals(res.data); syncDevicesFromFetchedType('external', res.data); } else { setExternals([]); syncDevicesFromFetchedType('external', []); } })
         .catch(() => setExternals([]));
 
       apiFetch('/Room/GetAllRooms', { method: 'POST' })
@@ -1243,18 +2166,20 @@ export default function App() {
           .then((res: any) => {
             if (res && res.data && Array.isArray(res.data)) {
               setExternals(res.data);
+              syncDevicesFromFetchedType('external', res.data);
             } else {
               setExternals([]);
+              syncDevicesFromFetchedType('external', []);
             }
           })
-          .catch(err => { console.error("Failed to load externals", err); setExternals([]); });
+          .catch(err => { console.error("Failed to load externals", err); setExternals([]); syncDevicesFromFetchedType('external', []); });
       }
     }
 
     // 15. Activity Logs Fetching
     if (activeView === 'logs') {
       const page = 1;
-      const pageSize = 100;
+      const pageSize = 5000;
       
       const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
         if (!dateVal) return '';
@@ -1356,6 +2281,7 @@ export default function App() {
   const [isDeleteContactOpen, setIsDeleteContactOpen] = React.useState(false);
   const [contactToDelete, setContactToDelete] = React.useState<ContactType | null>(null);
   const [editingContactId, setEditingContactId] = React.useState<number | null>(null);
+  const [isNewContactImageSelected, setIsNewContactImageSelected] = React.useState(false);
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [newCategoryDescription, setNewCategoryDescription] = React.useState('');
   const [newCategoryIcon, setNewCategoryIcon] = React.useState('UserCircle');
@@ -1408,6 +2334,7 @@ export default function App() {
   const handleCropComplete = (croppedImageUrl: string) => {
     if (cropTarget === 'contact') {
       setNewContact(prev => ({ ...prev, imageUrl: croppedImageUrl }));
+      setIsNewContactImageSelected(true);
     } else {
       setUserProfile(prev => ({ 
         ...prev, 
@@ -1517,6 +2444,36 @@ export default function App() {
   
   const [isPreviewModalOpen, setIsPreviewModalOpen] = React.useState(false);
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState("");
+  const [galleryMedia, setGalleryMedia] = React.useState<any[]>([]);
+  const [galleryIndex, setGalleryIndex] = React.useState<number>(0);
+  const [slideDirection, setSlideDirection] = React.useState<number>(1);
+  const touchStartX = React.useRef<number>(0);
+  const touchEndX = React.useRef<number>(0);
+  const mouseStartX = React.useRef<number>(0);
+
+  React.useEffect(() => {
+    if (!isPreviewModalOpen || galleryMedia.length <= 1) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" || e.key === "Left") {
+        if (galleryIndex > 0) {
+          setSlideDirection(-1);
+          setGalleryIndex(prev => prev - 1);
+        }
+      } else if (e.key === "ArrowRight" || e.key === "Right") {
+        if (galleryIndex < galleryMedia.length - 1) {
+          setSlideDirection(1);
+          setGalleryIndex(prev => prev + 1);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPreviewModalOpen, galleryIndex, galleryMedia.length]);
+
   const isChatModalOpenRef = React.useRef(isChatModalOpen);
   React.useEffect(() => {
     isChatModalOpenRef.current = isChatModalOpen;
@@ -1575,6 +2532,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = React.useState<MessageDto[]>([]);
   const chatScrollRef = React.useRef<HTMLDivElement>(null);
   const [activeFloatingDate, setActiveFloatingDate] = React.useState<string>("");
+  const [showScrollToBottom, setShowScrollToBottom] = React.useState<boolean>(false);
 
   const getMessageDateLabel = (date: Date) => {
     const today = new Date();
@@ -1593,6 +2551,10 @@ export default function App() {
   const handleChatScroll = () => {
     const container = chatScrollRef.current;
     if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 300);
 
     const groups = container.querySelectorAll('[data-date-group]');
     let currentActiveLabel = "";
@@ -1619,20 +2581,43 @@ export default function App() {
   const chatEndRef = React.useRef<HTMLDivElement>(null);
   const [isRecording, setIsRecording] = React.useState(false);
   const [recordingTime, setRecordingTime] = React.useState(0);
+  const [recordingState, setRecordingState] = React.useState<'inactive' | 'recording' | 'paused' | 'preview'>('inactive');
+  const [activeStream, setActiveStream] = React.useState<MediaStream | null>(null);
+  const [swipeX, setSwipeX] = React.useState(0);
+  const [playbackPreviewPlaying, setPlaybackPreviewPlaying] = React.useState(false);
+  const [playbackPreviewUrl, setPlaybackPreviewUrl] = React.useState<string | null>(null);
+  const playbackAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [uploadProgress, setUploadProgress] = React.useState<Record<number, number>>({});
+  const [highlightedMessageId, setHighlightedMessageId] = React.useState<number | null>(null);
+  const activeRecordingUsersRef = React.useRef<Record<string, boolean>>({});
+  const activeTypingUsersRef = React.useRef<Record<string, boolean>>({});
   const [playingAudioId, setPlayingAudioId] = React.useState<number | null>(null);
   const [playingProgress, setPlayingProgress] = React.useState(0);
   const [replyingTo, setReplyingTo] = React.useState<MessageDto | null>(null);
   const recordingTimerRef = React.useRef<any>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
+  const voiceNotePartsRef = React.useRef<Blob[]>([]);
+  const allMessagesMapRef = React.useRef<Map<string, MessageDto>>(new Map());
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const longPressTimeout = React.useRef<any>(null);
   const chatBoxMessagesContainerRef = React.useRef<HTMLDivElement>(null);
   const [activeChatId, setActiveChatId] = React.useState<number | null>(null);
+  const [activeChatUnreadCount, setActiveChatUnreadCount] = React.useState<number>(0);
   const activeChatIdRef = React.useRef<number | null>(null);
   React.useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  React.useEffect(() => {
+    if (chatMessages && chatMessages.length > 0) {
+      chatMessages.forEach(m => {
+        if (m && m.id) {
+          allMessagesMapRef.current.set(m.id.toString(), m);
+        }
+      });
+    }
+  }, [chatMessages]);
 
   const userProfileRef = React.useRef<any>(null);
   React.useEffect(() => {
@@ -1655,6 +2640,57 @@ export default function App() {
       width: rect.width,
       height: rect.height,
     });
+  };
+
+  const getMessageTickStatus = (msg: MessageDto, chat: ChatDto | undefined): 'blue' | 'double' | 'single' => {
+    if (!chat || !userProfile) return 'double';
+    
+    const recipients = (chat.participants || []).filter(p => {
+      const pId = p.personId ?? (p as any).PersonId;
+      return pId?.toString() !== userProfile.id?.toString();
+    });
+
+    if (recipients.length === 0) {
+      return 'double';
+    }
+
+    const sentTime = new Date(msg.sentAt).getTime();
+
+    if (chat.isGroup) {
+      const lastMsg = chatMessages.filter(m => m.chatId === chat.id).pop() || chat.lastMessage;
+      if (!lastMsg) {
+        return 'double';
+      }
+      const lastMsgSentTime = new Date(lastMsg.sentAt).getTime();
+      
+      const allRecipientsReadLastMsg = recipients.every(p => {
+        const readAtStr = p.lastReadAt ?? (p as any).LastReadAt;
+        if (!readAtStr) return false;
+        const readTime = new Date(readAtStr).getTime();
+        return readTime >= lastMsgSentTime;
+      });
+
+      if (allRecipientsReadLastMsg) {
+        return 'blue';
+      } else {
+        return 'double';
+      }
+    } else {
+      const recipient = recipients[0];
+      if (!recipient) {
+        return 'double';
+      }
+      const readAtStr = recipient.lastReadAt ?? (recipient as any).LastReadAt;
+      if (!readAtStr) {
+        return 'single';
+      }
+      const readTime = new Date(readAtStr).getTime();
+      if (readTime >= sentTime) {
+        return 'blue';
+      } else {
+        return 'double';
+      }
+    }
   };
 
   const fetchUnreadCountsForAllChats = async (loadedChats: ChatDto[]) => {
@@ -1717,15 +2753,13 @@ export default function App() {
 
   React.useEffect(() => {
     if (activeChatId) {
-      markChatAsRead(activeChatId);
+      const foundChat = chatsRef.current.find(c => c.id === activeChatId);
+      const unread = foundChat ? (foundChat.unreadCount || 0) : 0;
+      setActiveChatUnreadCount(unread);
 
-      // SignalR JoinChat group subscription
-      const conn = signalRConnectionRef.current;
-      if (conn && conn.state === "Connected") {
-        conn.invoke("JoinChat", activeChatId)
-          .then(() => console.log(`Joined SignalR chat group ${activeChatId}`))
-          .catch(err => console.error(`Failed to join SignalR chat group ${activeChatId}:`, err));
-      }
+      markChatAsRead(activeChatId);
+    } else {
+      setActiveChatUnreadCount(0);
     }
   }, [activeChatId]);
 
@@ -1735,7 +2769,11 @@ export default function App() {
     let cachedChats: ChatDto[] = [];
     if (cachedChatsStr) {
       try {
-        cachedChats = JSON.parse(cachedChatsStr);
+        const parsed = JSON.parse(cachedChatsStr);
+        cachedChats = (parsed || []).map((chat: any) => ({
+          ...chat,
+          lastMessage: chat.lastMessage ? normalizeMessage(chat.lastMessage) : undefined
+        }));
       } catch (e) {
         console.error('Failed to parse chats_cache:', e);
       }
@@ -1754,7 +2792,10 @@ export default function App() {
 
     try {
       const data = await apiFetch<ChatDto[]>('/Chat/GetMyChats', { method: 'GET' });
-      const fetchedChats = data || [];
+      const fetchedChats = (data || []).map(chat => ({
+        ...chat,
+        lastMessage: chat.lastMessage ? normalizeMessage(chat.lastMessage) : undefined
+      }));
       
       // Save cache
       localStorage.setItem('chats_cache', JSON.stringify(fetchedChats));
@@ -1809,21 +2850,31 @@ export default function App() {
   const [selectedParticipants, setSelectedParticipants] = React.useState<number[]>([]);
   const [newGroupName, setNewGroupName] = React.useState("");
   const [newGroupDescription, setNewGroupDescription] = React.useState("");
-  const [typingUsers, setTypingUsers] = React.useState<Record<number, Record<number, { name: string, isTyping: boolean }>>>({});
+  const [homeMemberSearchQuery, setHomeMemberSearchQuery] = React.useState("");
+  const [typingUsers, setTypingUsers] = React.useState<Record<number, Record<number, { name: string, isTyping: boolean, action: string }>>>({});
   const typingTimeoutsRef = React.useRef<Record<string, any>>({});
   const [chatCurrentPages, setChatCurrentPages] = React.useState<Record<number, number>>({});
   const [isChatPagingLoading, setIsChatPagingLoading] = React.useState(false);
   React.useEffect(() => {
-    if (isRecording) {
+    if (recordingState === 'recording') {
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
+        const now = Date.now();
+        if (now - (window as any).lastTypingSentTime > 4000 || !(window as any).lastTypingSentTime) {
+          (window as any).lastTypingSentTime = now;
+          if (activeChatId !== null) {
+            apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
+          }
+        }
       }, 1000);
     } else {
       clearInterval(recordingTimerRef.current);
-      setRecordingTime(0);
+      if (recordingState === 'inactive') {
+        setRecordingTime(0);
+      }
     }
     return () => clearInterval(recordingTimerRef.current);
-  }, [isRecording]);
+  }, [recordingState, activeChatId]);
 
   React.useEffect(() => {
     let interval: any;
@@ -1856,39 +2907,81 @@ export default function App() {
     const { homeSecurityConnection } = initSignalR();
     signalRConnectionRef.current = homeSecurityConnection;
 
-    if (homeSecurityConnection!.state === "Disconnected") {
-      homeSecurityConnection!.start().then(() => {
-        // Automatically invoke JoinChat if we already have an active chat when connecting
+    const token = localStorage.getItem('token');
+
+    const setupConnectionAndRoles = async () => {
+      if (homeSecurityConnection!.state === "Disconnected") {
+        try {
+          await homeSecurityConnection!.start();
+          console.log("SignalR Connection started");
+          if (token) {
+            await homeSecurityConnection!.invoke("AddPersonRole", token);
+            console.log("Successfully added person role on connect");
+            await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson", err));
+            console.log("Successfully added person on connect");
+          }
+          
+          // Automatically invoke JoinChat if we already have an active chat when connecting
+          const activeChatIdVal = activeChatIdRef.current;
+          if (activeChatIdVal && (homeSecurityConnection!.state as any) === "Connected") {
+            homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
+              .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal} on reconnect`))
+              .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
+          }
+          // Also automatically join all loaded chats so we get typing/messages correctly for everything
+          const allChatsVal = chatsRef.current || [];
+          if (allChatsVal.length > 0 && (homeSecurityConnection!.state as any) === "Connected") {
+            allChatsVal.forEach(chat => {
+              homeSecurityConnection!.invoke("JoinChat", chat.id)
+                .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
+            });
+          }
+        } catch (err) {
+          console.error("SignalR Connection Error: ", err);
+        }
+      } else if (homeSecurityConnection!.state === "Connected") {
+        if (token) {
+          try {
+            await homeSecurityConnection!.invoke("AddPersonRole", token);
+            console.log("Successfully added person role on existing connection");
+            await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson on existing connection", err));
+            console.log("Successfully added person on existing connection");
+          } catch (err) {
+            console.error("Failed to add person role on existing connection:", err);
+          }
+        }
         const activeChatIdVal = activeChatIdRef.current;
-        if (activeChatIdVal && homeSecurityConnection!.state === "Connected") {
+        if (activeChatIdVal) {
           homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
-            .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal} on reconnect`))
+            .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal}`))
             .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
         }
-        // Also automatically join all loaded chats so we get typing/messages correctly for everything
         const allChatsVal = chatsRef.current || [];
-        if (allChatsVal.length > 0 && homeSecurityConnection!.state === "Connected") {
+        if (allChatsVal.length > 0) {
           allChatsVal.forEach(chat => {
             homeSecurityConnection!.invoke("JoinChat", chat.id)
               .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
           });
         }
-      }).catch(err => console.error("SignalR Connection Error: ", err));
-    } else if (homeSecurityConnection!.state === "Connected") {
-      const activeChatIdVal = activeChatIdRef.current;
-      if (activeChatIdVal) {
-        homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
-          .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal}`))
-          .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
       }
-      const allChatsVal = chatsRef.current || [];
-      if (allChatsVal.length > 0) {
-        allChatsVal.forEach(chat => {
-          homeSecurityConnection!.invoke("JoinChat", chat.id)
-            .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
-        });
+    };
+
+    setupConnectionAndRoles();
+
+    homeSecurityConnection!.onreconnected(async (connectionId) => {
+      console.log("SignalR reconnected:", connectionId);
+      const reToken = localStorage.getItem('token');
+      if (reToken && homeSecurityConnection!.state === "Connected") {
+        try {
+          await homeSecurityConnection!.invoke("AddPersonRole", reToken);
+          console.log("Successfully re-added person role on reconnect");
+          await homeSecurityConnection!.invoke("AddPerson", reToken).catch(err => console.error("Failed AddPerson on reconnect", err));
+          console.log("Successfully re-added person on reconnect");
+        } catch (err) {
+          console.error("Failed to re-add person role on reconnect:", err);
+        }
       }
-    }
+    });
 
     const hsWrapper = homeSecurityConnection!;
     const hs = {
@@ -1905,29 +2998,44 @@ export default function App() {
         
         const mapToDevice = (item: any, existingDev?: Device): Device => {
           let st = 'off';
+          const isActiveVal = getProp(item, 'isActive');
+          const isOpenVal = getProp(item, 'isOpen');
+          const isLockedVal = getProp(item, 'isLocked');
+          
           if (type === 'door' || type === 'window') {
-            st = (item.isOpen || item.IsOpen) ? 'open' : (item.isLocked || item.IsLocked ? 'locked' : 'unlocked');
+            const isOpen = (isOpenVal !== undefined && isOpenVal !== null) ? (isOpenVal === true || isOpenVal === 'true') : 
+                           (existingDev ? (existingDev.status === 'open' || existingDev.status === 'open-locked') : false);
+            const isLocked = (isLockedVal !== undefined && isLockedVal !== null) ? (isLockedVal === true || isLockedVal === 'true') : 
+                             (existingDev ? (existingDev.status === 'locked' || existingDev.status === 'open-locked') : false);
+            if (isOpen && isLocked) st = 'open-locked';
+            else if (isOpen) st = 'open';
+            else if (isLocked) st = 'locked';
+            else st = 'unlocked';
           } else {
-            st = (item.isActive || item.IsActive) ? (type === 'camera' ? 'active' : 'on') : (type === 'camera' ? 'inactive' : 'off');
+            const isAct = (isActiveVal !== undefined && isActiveVal !== null) ? (isActiveVal === true || isActiveVal === 'true') : 
+                          (existingDev ? (existingDev.status === 'on' || existingDev.status === 'active') : false);
+            st = isAct ? (type === 'camera' ? 'active' : 'on') : (type === 'camera' ? 'inactive' : 'off');
           }
           
           const existRoom = existingDev?.room || '';
           const existSection = existingDev?.section || '';
-          const roomVal = item.roomId?.toString() || item.RoomId?.toString();
-          const sectionVal = item.sectionId?.toString() || item.SectionId?.toString();
+          const roomVal = getProp(item, 'roomId')?.toString();
+          const sectionVal = getProp(item, 'sectionId')?.toString();
           
-          const nameVal = item.applianceName || item.lightName || item.cameraName || item.doorName || item.windowName || item.name;
+          const nameVal = getProp(item, 'applianceName') || getProp(item, 'lightName') || getProp(item, 'cameraName') || getProp(item, 'doorName') || getProp(item, 'windowName') || getProp(item, 'name');
           const existName = existingDev?.name || 'Unknown';
+          const brightnessVal = getProp(item, 'brightnessLevel');
+          const appTypeVal = getProp(item, 'applianceType');
           
           return {
-            id: `${type}-${item.id ?? item.Id ?? id}`,
+            id: `${type}-${getProp(item, 'id') ?? id}`,
             name: nameVal || existName,
             type: type as DeviceType,
             status: st,
             room: (roomVal !== undefined && roomVal !== null && roomVal !== '') ? roomVal : existRoom,
             section: (sectionVal !== undefined && sectionVal !== null && sectionVal !== '') ? sectionVal : existSection,
-            value: type === 'light' ? (item.brightnessLevel !== undefined ? item.brightnessLevel : (item.BrightnessLevel !== undefined ? item.BrightnessLevel : (existingDev?.value ?? 0))) : undefined,
-            applianceType: item.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === item.applianceType)?.id || 1) : (existingDev?.applianceType)
+            value: type === 'light' ? (brightnessVal !== undefined ? brightnessVal : (existingDev?.value ?? 0)) : undefined,
+            applianceType: appTypeVal ? ((appNamesDetailList?.applianceType || []).find(t => t.name === appTypeVal)?.id || 1) : (existingDev?.applianceType)
           };
         };
 
@@ -1960,9 +3068,22 @@ export default function App() {
       });
       hs.on(`${t}Updated`, (data) => {
         const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
-        const dataId = data.id ?? data.Id;
+        const dataId = getProp(data, 'id');
         if (setter && dataId !== undefined && dataId !== null) {
-          setter(prev => prev.map(x => x.id.toString() === dataId.toString() ? { ...x, ...data } : x));
+          setter(prev => prev.map(x => {
+            if (x.id.toString() !== dataId.toString()) return x;
+            const merged = { ...x };
+            for (const key of Object.keys(data)) {
+              const existingKey = Object.keys(x).find(k => k.toLowerCase() === key.toLowerCase());
+              if (existingKey) {
+                (merged as any)[existingKey] = data[key];
+              } else {
+                const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+                (merged as any)[camelKey] = data[key];
+              }
+            }
+            return merged;
+          }));
         }
         updateSyncDevice(type, dataId, data, 'update');
       });
@@ -2051,7 +3172,13 @@ export default function App() {
       return [...prev, { ...data, id: dataId, actionName: (data.actionName ?? data.ActionName ?? data.name), actionDescription: (data.description ?? data.Description), actionActive: false, actionId: '', getActionStepDtos: [] }];
     }));
     hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => (a.id !== undefined && a.id !== null && (data.actionId ?? data.ActionId ?? data.id) !== undefined && (data.actionId ?? data.ActionId ?? data.id) !== null) && a.id.toString() === (data.actionId ?? data.ActionId ?? data.id).toString() ? { ...a, ...data } : a)));
-    hs.on("ActionActivationChanged", (data) => setActions(prev => prev.map(a => (a.id !== undefined && a.id !== null && (data.actionId ?? data.ActionId ?? data.id) !== undefined && (data.actionId ?? data.ActionId ?? data.id) !== null) && a.id.toString() === (data.actionId ?? data.ActionId ?? data.id).toString() ? { ...a, actionActive: (data.isActive ?? data.IsActive) } : a)));
+    hs.on("ActionActivationChanged", (data) => {
+      const actId = data.actionId ?? data.ActionId ?? data.id ?? data.Id;
+      const isActive = data.isActive ?? data.IsActive ?? data.actionActive ?? data.ActionActive;
+      if (actId !== undefined && actId !== null) {
+        setActions(prev => prev.map(a => a.id.toString() === actId.toString() ? { ...a, actionActive: !!isActive } : a));
+      }
+    });
     hs.on("ActionDeleted", (id) => {
       const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
       if (deletedId === undefined || deletedId === null) return;
@@ -2090,18 +3217,50 @@ export default function App() {
     });
 
     // --- Chat Events via homeSecurityConnection (hs) ---
-    hs.on("MessageSent", (msg: MessageDto) => {
+    const onMessageSent = (rawMsg: MessageDto) => {
+      const msg = normalizeMessage(rawMsg);
+      console.log("=== SIGNALR DIAGNOSTIC: MessageSent Received ===", msg);
+      
+      // Silently mark as read using GET as requested
+      apiFetch(`/Message/MarkAsRead?chatId=${msg.chatId}`, { method: 'GET', headers: { 'accept': '*/*' } }).catch(() => {});
+      
+      const profile = userProfileRef.current;
+      const isMe = msg.senderPersonId?.toString() === profile?.id?.toString();
+      
+      if (!isMe) {
+          playImessageReceivedSynth();
+          // Set sender online if offline
+          setAllUsers(prev => prev.map(u => u.id?.toString() === msg.senderPersonId?.toString() ? { ...u, isOnline: true } : u));
+      } else {
+          playImessageSentSynth();
+      }
+      
       setChatMessages(prev => {
-        if (prev.some(m => m.id === msg.id)) return prev;
+        const existingIndex = prev.findIndex(m => m.id === msg.id);
+        if (existingIndex !== -1) {
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            ...msg,
+            replyTo: msg.replyTo || next[existingIndex].replyTo,
+            replyToId: msg.replyToId || next[existingIndex].replyToId,
+            status: 'sent'
+          };
+          return next;
+        }
         
         // Optimistic reconciliation for messages sent by me
-        const profile = userProfileRef.current;
-        const isMe = msg.senderPersonId === profile?.id;
         if (isMe) {
           const optIndex = prev.findIndex(m => (m as any).status === 'sending' && m.chatId === msg.chatId && m.content === msg.content);
           if (optIndex !== -1) {
             const next = [...prev];
-            next[optIndex] = { ...msg, status: 'sent' };
+            next[optIndex] = { 
+              ...next[optIndex], 
+              ...msg, 
+              replyTo: msg.replyTo || next[optIndex].replyTo,
+              replyToId: msg.replyToId || next[optIndex].replyToId,
+              status: 'sent' 
+            };
             return next;
           }
         }
@@ -2109,14 +3268,12 @@ export default function App() {
         return [...prev, msg];
       });
 
-      const profile = userProfileRef.current;
       const activeChatIdVal = activeChatIdRef.current;
       const isChatOpen = isChatModalOpenRef.current;
-
-      const isMe = msg.senderPersonId === profile?.id;
+      
       if (!isMe) {
         // Show floating notification if chat modal is closed OR we're not on this chat
-        if (!isChatOpen || activeChatIdVal !== msg.chatId) {
+        if (!isChatOpen || activeChatIdVal?.toString() !== msg.chatId?.toString()) {
           setChatPopups(p => {
             if (p.some(m => m.id === msg.id)) return p;
             return [...p, msg];
@@ -2148,8 +3305,8 @@ export default function App() {
 
       // Update unread count and lastMessage
       setChats(prev => prev.map(c => {
-        if (c.id === msg.chatId) {
-          const shouldInc = !isMe && (!isChatOpen || activeChatIdVal !== msg.chatId);
+        if (c.id?.toString() === msg.chatId?.toString()) {
+          const shouldInc = !isMe && (!isChatOpen || activeChatIdVal?.toString() !== msg.chatId?.toString());
           return { 
             ...c, 
             unreadCount: shouldInc ? (c.unreadCount || 0) + 1 : c.unreadCount,
@@ -2158,10 +3315,17 @@ export default function App() {
         }
         return c;
       }));
-    });
+    };
+    
+    hs.on("MessageSent", onMessageSent);
+    hs.on("ReceiveMessage", onMessageSent);
+    hs.on("ReceiveMessageDto", onMessageSent);
+    hs.on("OnMessageSent", onMessageSent);
 
-    hs.on("MessageEdited", (msg: MessageDto) => {
-      setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+    hs.on("MessageEdited", (rawMsg: MessageDto) => {
+      const msg = normalizeMessage(rawMsg);
+      console.log("=== SIGNALR DIAGNOSTIC: MessageEdited Received ===", msg);
+      setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg, replyTo: msg.replyTo || m.replyTo, replyToId: msg.replyToId || m.replyToId } : m));
       setChats(prev => prev.map(c => c.id === msg.chatId && c.lastMessage?.id === msg.id ? { ...c, lastMessage: msg } : c));
     });
 
@@ -2178,19 +3342,66 @@ export default function App() {
       }));
     });
 
-    hs.on("UserTyping", (dto: any) => {
+    hs.on("UpdateChat", (arg1: any, arg2?: any, arg3?: any) => {
+      console.log("=== SIGNALR DIAGNOSTIC: UpdateChat Called ===", arg1, arg2, arg3);
+      let eventName = "";
+      let payload: any = null;
+      if (typeof arg1 === 'string') {
+        eventName = arg1;
+        payload = arg3 !== undefined ? arg3 : arg2;
+      } else {
+        payload = arg1;
+      }
+
+      if (eventName === "MessageDeleted" || (payload && (payload.messageId ?? payload.MessageId))) {
+        const cid = payload?.chatId ?? payload?.ChatId;
+        const mid = payload?.messageId ?? payload?.MessageId;
+        const isDel = payload?.isDeleted ?? payload?.IsDeleted ?? true;
+        
+        setChatMessages(prev => prev.map(m => m.id === mid ? { ...m, isDeleted: isDel } : m));
+        setChats(prev => prev.map(c => {
+          if (c.id === cid && c.lastMessage?.id === mid) {
+            return { ...c, lastMessage: { ...c.lastMessage, isDeleted: isDel } };
+          }
+          return c;
+        }));
+      }
+    });
+
+    const onUserTyping = (dto: any) => {
       const chatId = dto.chatId ?? dto.ChatId;
       const personId = dto.personId ?? dto.PersonId;
       const isTyping = dto.isTyping ?? dto.IsTyping;
-      const fullName = dto.fullName ?? dto.FullName ?? "";
+      const name = dto.name ?? dto.Name ?? dto.fullName ?? dto.FullName ?? "";
+      const action = dto.action ?? dto.Action ?? "typing";
       
       const profile = userProfileRef.current;
-      if (personId === profile?.id) return;
+      if (personId?.toString() === profile?.id?.toString()) return;
       
+      if (isTyping) {
+        if (action.toLowerCase() === 'recording voice message') {
+          if (!activeRecordingUsersRef.current[personId]) {
+            activeRecordingUsersRef.current[personId] = true;
+            playWhatsappRecordChirp();
+          }
+        } else {
+          if (!activeTypingUsersRef.current[personId]) {
+            activeTypingUsersRef.current[personId] = true;
+            playTripleKeystrokeSynth();
+          }
+        }
+      } else {
+        if (action.toLowerCase() === 'recording voice message') {
+          activeRecordingUsersRef.current[personId] = false;
+        } else {
+          activeTypingUsersRef.current[personId] = false;
+        }
+      }
+
       setTypingUsers(prev => {
         const chatTyping = { ...(prev[chatId] || {}) };
         if (isTyping) {
-          chatTyping[personId] = { name: fullName, isTyping: true };
+          chatTyping[personId] = { name: name, isTyping: true, action: action };
         } else {
           delete chatTyping[personId];
         }
@@ -2212,7 +3423,12 @@ export default function App() {
           delete typingTimeoutsRef.current[timeoutKey];
         }, 5000);
       }
-    });
+    };
+
+    hs.on("UserTyping", onUserTyping);
+    hs.on("Typing", onUserTyping);
+    hs.on("ReceiveTyping", onUserTyping);
+    hs.on("OnTyping", onUserTyping);
 
     hs.on("ChatCreated", (chat: ChatDto) => {
       setChats(prev => {
@@ -2284,10 +3500,34 @@ export default function App() {
     hs.on("MessagesRead", (data: any) => {
       const cid = data.chatId ?? data.ChatId;
       const pid = data.personId ?? data.PersonId;
+      const readAt = data.readAt ?? data.ReadAt ?? new Date().toISOString();
       const profile = userProfileRef.current;
-      if (pid === profile?.id) {
-        setChats(prev => prev.map(c => c.id === cid ? { ...c, unreadCount: 0 } : c));
-      }
+
+      setChats(prev => prev.map(c => {
+        if (c.id !== cid) return c;
+
+        let nextUnreadCount = c.unreadCount;
+        if (pid === profile?.id) {
+          nextUnreadCount = 0;
+        }
+
+        const updatedParticipants = (c.participants || []).map(p => {
+          const pId = p.personId ?? (p as any).PersonId;
+          if (pId === pid) {
+            return {
+              ...p,
+              lastReadAt: readAt
+            };
+          }
+          return p;
+        });
+
+        return {
+          ...c,
+          unreadCount: nextUnreadCount,
+          participants: updatedParticipants
+        };
+      }));
     });
 
     hs.on("UserOnline", (personId: number) => {
@@ -2359,9 +3599,16 @@ export default function App() {
        hs.off("PersonStatusChanged");
 
        hs.off("MessageSent");
+       hs.off("ReceiveMessage");
+       hs.off("ReceiveMessageDto");
+       hs.off("OnMessageSent");
        hs.off("MessageEdited");
        hs.off("MessageDeleted");
+        hs.off("UpdateChat");
        hs.off("UserTyping");
+       hs.off("Typing");
+       hs.off("ReceiveTyping");
+       hs.off("OnTyping");
        hs.off("ChatCreated");
        hs.off("GroupChatCreated");
        hs.off("GroupChatUpdated");
@@ -2446,13 +3693,91 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [chatMessages, isChatModalOpen, activeChatId]);
 
+  const sendVoiceNote = React.useCallback(async () => {
+    const mergedBlob = new Blob(voiceNotePartsRef.current, { type: 'audio/mp3' });
+    if (mergedBlob.size === 0) {
+      setIsRecording(false);
+      setRecordingState('inactive');
+      setActiveStream(null);
+      setSwipeX(0);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Audio = reader.result?.toString() || '';
+      const voiceFileName = `voice_note_${Date.now()}.mp3`;
+      
+      const sendDto: SendMessageDto = {
+        chatId: activeChatId!,
+        content: "",
+        type: MessageType.Audio,
+        attachments: [
+          {
+            fileName: voiceFileName,
+            filePath: base64Audio,
+            contentType: 'audio/mp3',
+            fileSize: mergedBlob.size,
+            thumbnailPath: ''
+          }
+        ],
+        replyToMessageId: replyingTo?.id || undefined
+      };
+
+      const tempId = Date.now() * -1;
+      const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
+        id: tempId,
+        chatId: activeChatId!,
+        senderPersonId: userProfile.id,
+        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+        content: "",
+        type: MessageType.Audio,
+        isEdited: false,
+        isDeleted: false,
+        sentAt: new Date().toISOString(),
+        attachments: sendDto.attachments!,
+        replyToId: replyingTo?.id || undefined,
+        replyTo: replyingTo || undefined,
+        status: 'sending'
+      };
+
+      setChatMessages(prev => [...prev, tempMsg]);
+      setIsRecording(false);
+      setRecordingState('inactive');
+      setActiveStream(null);
+      setSwipeX(0);
+      setReplyingTo(null);
+
+      try {
+        const formData = buildMessageFormData(sendDto);
+        const savedMsgRaw = await apiFetch<MessageDto>(`/Message/SendMessageChatId?chatId=${sendDto.chatId}`, {
+          method: 'POST',
+          body: formData
+        });
+        const savedMsg = normalizeMessage(savedMsgRaw);
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent', replyToId: savedMsg.replyToId || m.replyToId, replyTo: savedMsg.replyTo || m.replyTo } : m));
+      } catch (err: any) {
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+        toast.error('Failed to send voice note: ' + err.message);
+      }
+    };
+    reader.readAsDataURL(mergedBlob);
+  }, [activeChatId, replyingTo, userProfile]);
+
   const handleSendMessage = async (customDto?: SendMessageDto | React.MouseEvent, customTempId?: number) => {
     const isRetry = !!(customDto && typeof customDto === 'object' && 'content' in customDto);
-    const sendDto: SendMessageDto = isRetry ? (customDto as SendMessageDto) : {
+    const sendDto: SendMessageDto = isRetry ? {
+      chatId: (customDto as SendMessageDto).chatId ?? activeChatId!,
+      content: (customDto as SendMessageDto).content,
+      type: (customDto as SendMessageDto).type ?? MessageType.Text,
+      attachments: (customDto as SendMessageDto).attachments ?? [],
+      replyToMessageId: (customDto as SendMessageDto).replyToMessageId ?? (replyingTo?.id || undefined),
+    } : {
       chatId: activeChatId!,
       content: chatInput,
       type: MessageType.Text,
-      attachments: []
+      attachments: [],
+      replyToMessageId: replyingTo?.id || undefined,
     };
 
     if (!isRetry && (!chatInput.trim() || activeChatId === null)) return;
@@ -2473,6 +3798,7 @@ export default function App() {
         sentAt: new Date().toISOString(),
         attachments: [],
         replyToId: replyingTo?.id || undefined,
+        replyTo: replyingTo || undefined,
         status: 'sending'
       };
 
@@ -2485,12 +3811,14 @@ export default function App() {
     }
 
     try {
-      const savedMsg = await apiFetch<MessageDto>('/Message/SendMessage', {
+      const formData = buildMessageFormData(sendDto);
+      const savedMsgRaw = await apiFetch<MessageDto>(`/Message/SendMessageChatId?chatId=${sendDto.chatId}`, {
         method: 'POST',
-        body: JSON.stringify(sendDto)
+        body: formData
       });
+      const savedMsg = normalizeMessage(savedMsgRaw);
       // Replace optimistic message with saved message
-      setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent' } : m));
+      setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent', replyToId: savedMsg.replyToId || m.replyToId, replyTo: savedMsg.replyTo || m.replyTo } : m));
     } catch (err: any) {
       setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
       toast.error('Failed to send message: ' + err.message);
@@ -2509,14 +3837,15 @@ export default function App() {
         filePath: att.filePath,
         contentType: att.contentType,
         fileSize: att.fileSize,
-        thumbnailPath: att.thumbnailPath
-      }))
+        thumbnailPath: att.thumbnailPath,
+      })),
     };
 
     try {
-      await apiFetch<MessageDto>('/Message/SendMessage', {
+      const formData = buildMessageFormData(sendDto);
+      await apiFetch<MessageDto>(`/Message/SendMessageChatId?chatId=${sendDto.chatId}`, {
         method: 'POST',
-        body: JSON.stringify(sendDto)
+        body: formData
       });
       toast.success('Message forwarded successfully!');
       setIsForwardModalOpen(false);
@@ -2528,7 +3857,90 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'file') => {
     if (e.target.files && e.target.files.length > 0 && activeChatId !== null) {
-      const files = type === 'file' ? [e.target.files[0]] : Array.from(e.target.files);
+      const files = Array.from(e.target.files) as File[];
+      
+      if (type === 'file' && files.length > 1) {
+        // Send each file selected as a separate message immediately
+        files.forEach((file, fileIdx) => {
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const attachment: MessageAttachmentDto = {
+              fileName: file.name,
+              filePath: reader.result?.toString() || '',
+              contentType: file.type,
+              fileSize: file.size,
+              thumbnailPath: ''
+            };
+            
+            let msgType = MessageType.File;
+            if (file.type.startsWith('image/')) msgType = MessageType.Image;
+            else if (file.type.startsWith('video/')) msgType = MessageType.Video;
+            else if (file.type.startsWith('audio/')) msgType = MessageType.Audio;
+
+            const sendDto: SendMessageDto = {
+              chatId: activeChatId!,
+              content: "",
+              type: msgType,
+              attachments: [attachment],
+              replyToMessageId: replyingTo?.id || undefined,
+            };
+
+            const tempId = (Date.now() + fileIdx) * -1 - Math.floor(Math.random() * 100);
+            const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
+              id: tempId,
+              chatId: activeChatId!,
+              senderPersonId: userProfile.id,
+              senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
+              senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+              content: "",
+              type: msgType,
+              isEdited: false,
+              isDeleted: false,
+              sentAt: new Date().toISOString(),
+              attachments: [attachment],
+              replyToId: replyingTo?.id || undefined,
+              replyTo: replyingTo || undefined,
+              status: 'sending'
+            };
+
+            setChatMessages(prev => [...prev, tempMsg]);
+            setUploadProgress(prev => ({ ...prev, [tempId]: 1 }));
+
+            try {
+              const formData = buildMessageFormData(sendDto);
+              const savedMsgRaw = await apiFetch<MessageDto>(`/Message/SendMessageChatId?chatId=${sendDto.chatId}`, {
+                method: 'POST',
+                body: formData,
+                onUploadProgress: (progressEvent: any) => {
+                  if (progressEvent.total) {
+                    const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    setUploadProgress(prev => ({ ...prev, [tempId]: percent }));
+                  }
+                }
+              });
+              const savedMsg = normalizeMessage(savedMsgRaw);
+              setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent', replyToId: savedMsg.replyToId || m.replyToId, replyTo: savedMsg.replyTo || m.replyTo } : m));
+            } catch (err: any) {
+              setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+              toast.error(`Failed to send ${file.name}: ` + err.message);
+            } finally {
+              setTimeout(() => {
+                setUploadProgress(prev => {
+                  const next = { ...prev };
+                  delete next[tempId];
+                  return next;
+                });
+              }, 1000);
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+        
+        e.target.value = '';
+        setReplyingTo(null);
+        return;
+      }
+
       setUploadPreviewFiles(files);
       setUploadPreviewType(type);
       setUploadPreviewText("");
@@ -2576,19 +3988,14 @@ export default function App() {
         msgType = MessageType.Audio;
       }
 
-      let textContent = uploadPreviewText.trim();
-      if (!textContent) {
-        const typeLabel = msgType === MessageType.Image ? 'image' : 
-                          msgType === MessageType.Video ? 'video' : 
-                          msgType === MessageType.Audio ? 'audio' : 'file';
-        textContent = attachments.length > 1 ? `Sent ${attachments.length} ${typeLabel}s` : `Sent a ${typeLabel}`;
-      }
+      const textContent = uploadPreviewText.trim();
 
       const sendDto: SendMessageDto = {
         chatId: activeChatId!,
         content: textContent,
         type: msgType,
-        attachments: attachments
+        attachments: attachments,
+        replyToMessageId: replyingTo?.id || undefined,
       };
 
       const tempId = Date.now() * -1;
@@ -2605,24 +4012,42 @@ export default function App() {
         sentAt: new Date().toISOString(),
         attachments: attachments,
         replyToId: replyingTo?.id || undefined,
+        replyTo: replyingTo || undefined,
         status: 'sending'
       };
 
       setChatMessages(prev => [...prev, tempMsg]);
+      setUploadProgress(prev => ({ ...prev, [tempId]: 1 }));
       setUploadPreviewFiles([]);
       setUploadPreviewText("");
       setUploadPreviewType(null);
       setReplyingTo(null);
 
       try {
-        const savedMsg = await apiFetch<MessageDto>('/Message/SendMessage', {
+        const formData = buildMessageFormData(sendDto);
+        const savedMsgRaw = await apiFetch<MessageDto>(`/Message/SendMessageChatId?chatId=${sendDto.chatId}`, {
           method: 'POST',
-          body: JSON.stringify(sendDto)
+          body: formData,
+          onUploadProgress: (progressEvent: any) => {
+            if (progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setUploadProgress(prev => ({ ...prev, [tempId]: percent }));
+            }
+          }
         });
-        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent' } : m));
+        const savedMsg = normalizeMessage(savedMsgRaw);
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...savedMsg, status: 'sent', replyToId: savedMsg.replyToId || m.replyToId, replyTo: savedMsg.replyTo || m.replyTo } : m));
       } catch (err: any) {
         setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
         toast.error('Failed to send media: ' + err.message);
+      } finally {
+        setTimeout(() => {
+          setUploadProgress(prev => {
+            const next = { ...prev };
+            delete next[tempId];
+            return next;
+          });
+        }, 1000);
       }
     });
   };
@@ -2647,32 +4072,36 @@ export default function App() {
     }
   };
 
+  const toBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
   const handleCreateGroup = async () => {
     if (!newGroupName.trim() || selectedParticipants.length === 0) return;
 
     try {
       let uploadedImageUrl = "";
       if (newGroupImageFile) {
-        const uploadFd = new FormData();
-        uploadFd.append('file', newGroupImageFile);
-        const uploadRes = await apiFetch<any>('/Message/UploadFile', {
-          method: 'POST',
-          body: uploadFd
-        });
-        if (uploadRes && uploadRes.data) {
-          uploadedImageUrl = uploadRes.data;
-        }
+        uploadedImageUrl = await toBase64(newGroupImageFile);
       }
 
       const createDto = {
-        Name: newGroupName,
-        Description: newGroupDescription || "",
-        ImageUrl: uploadedImageUrl,
-        ParticipantPersonIds: [userProfile.id, ...selectedParticipants]
+        name: newGroupName,
+        description: newGroupDescription || "",
+        imageUrl: uploadedImageUrl,
+        participantPersonIds: [userProfile.id, ...selectedParticipants]
       };
 
       await apiFetch<any>('/Chat/CreateGroupChat', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify(createDto)
       });
       await loadMyChats(true);
@@ -2692,28 +4121,24 @@ export default function App() {
     if (!editingGroupId || !newGroupName.trim()) return;
 
     try {
-      let params = new URLSearchParams();
-      params.append('ChatId', editingGroupId.toString());
-      params.append('Name', newGroupName);
-      if (newGroupDescription) params.append('Description', newGroupDescription);
-
-      const formData = new FormData();
-      formData.append('ChatId', editingGroupId.toString());
-      formData.append('Name', newGroupName);
-      if (newGroupDescription) formData.append('Description', newGroupDescription);
-
+      let uploadedImageUrl = "";
       if (newGroupImageFile) {
-        formData.append('ImageUrl', newGroupImageFile);
-      } else {
-        formData.append('ImageUrl', '');
+        uploadedImageUrl = await toBase64(newGroupImageFile);
       }
+      
+      const updateDto = {
+        chatId: editingGroupId,
+        name: newGroupName,
+        description: newGroupDescription || "",
+        imageUrl: uploadedImageUrl
+      };
 
-      await apiFetch<any>(`/Chat/UpdateGroupChat?${params.toString()}`, {
+      await apiFetch<any>('/Chat/UpdateGroupChat', {
         method: 'PUT',
-        body: formData,
         headers: {
-          'Content-Type': 'multipart/form-data'
-        }
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateDto)
       });
       await loadMyChats(true);
       setIsEditGroupOpen(false);
@@ -2723,6 +4148,7 @@ export default function App() {
       toast.error('Failed to update group: ' + err.message);
     }
   };
+
 
   const handleDeleteChat = async () => {
     if (!editingGroupId) return;
@@ -2749,7 +4175,8 @@ export default function App() {
       let cachedMessages: MessageDto[] = [];
       if (cachedMessagesStr) {
         try {
-          cachedMessages = JSON.parse(cachedMessagesStr);
+          const parsed = JSON.parse(cachedMessagesStr);
+          cachedMessages = (parsed || []).map(normalizeMessage);
         } catch (e) {
           console.error('Failed to parse message cache:', e);
         }
@@ -2771,7 +4198,7 @@ export default function App() {
 
       apiFetch<MessageDto[]>(`/Message/GetChatMessages?chatId=${activeChatId}&page=1&pageSize=100`, { method: 'GET' })
         .then(messages => {
-          const fetchedMessages = messages || [];
+          const fetchedMessages = (messages || []).map(normalizeMessage);
           localStorage.setItem(cacheKey, JSON.stringify(fetchedMessages));
 
           setChatMessages(prev => {
@@ -2805,7 +4232,8 @@ export default function App() {
     const nextPage = currentPage + 1;
 
     try {
-      const historicalMessages = await apiFetch<MessageDto[]>(`/Message/GetChatMessages?chatId=${activeChatId}&page=${nextPage}&pageSize=100`, { method: 'GET' });
+      const messages = await apiFetch<MessageDto[]>(`/Message/GetChatMessages?chatId=${activeChatId}&page=${nextPage}&pageSize=100`, { method: 'GET' });
+      const historicalMessages = (messages || []).map(normalizeMessage);
       if (historicalMessages && historicalMessages.length > 0) {
         setChatMessages(prev => [...historicalMessages, ...prev]);
         setChatCurrentPages(prev => ({ ...prev, [activeChatId]: nextPage }));
@@ -2816,6 +4244,29 @@ export default function App() {
       toast.error('Failed to load older messages: ' + err.message);
     } finally {
       setIsPagingLoading(false);
+    }
+  };
+
+  const handleLogsScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (activeView !== 'logs') return;
+    const target = e.currentTarget;
+    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 120;
+    if (isAtBottom && !isPagingLoading) {
+      const filteredLogsCount = logs.filter(log => {
+        if (!logStartDate && !logEndDate) return true;
+        const logDate = new Date(log.timeOfAction);
+        const start = logStartDate ? new Date(logStartDate) : new Date(0);
+        const end = logEndDate ? new Date(logEndDate) : new Date();
+        return logDate >= start && logDate <= end;
+      }).length;
+
+      if (visibleLogsCount < filteredLogsCount) {
+        setIsPagingLoading(true);
+        setTimeout(() => {
+          setVisibleLogsCount(prev => prev + 50);
+          setIsPagingLoading(false);
+        }, 500);
+      }
     }
   };
 
@@ -2830,7 +4281,7 @@ export default function App() {
         const p5 = apiFetch('/Camera/GetAllCameras', { method: 'POST' }).then((res: any) => { if (res && res.data) { setCameras(res.data); syncDevicesFromFetchedType('camera', res.data); } });
         const p6 = apiFetch('/Door/GetAllDoors', { method: 'POST' }).then((res: any) => { if (res && res.data) { setDoors(res.data); syncDevicesFromFetchedType('door', res.data); } });
         const p7 = apiFetch('/Window/GetAllWindows', { method: 'POST' }).then((res: any) => { if (res && res.data) { setWindows(res.data); syncDevicesFromFetchedType('window', res.data); } });
-        const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) setExternals(res.data); });
+        const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) { setExternals(res.data); syncDevicesFromFetchedType('external', res.data); } });
         const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => { if (res && res.data) setHardwares(res.data); });
         const p10 = apiFetch('/Person/GetAllPersons', { method: 'POST' }).then((res: any) => { if (res && res.data) setAllUsers(res.data); });
         const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
@@ -2917,6 +4368,18 @@ export default function App() {
     }
   };
 
+  const refreshContactCategories = () => {
+    apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+      .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); })
+      .catch(err => console.error("Failed to load contact categories", err));
+  };
+
+  const refreshContacts = () => {
+    apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+      .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); })
+      .catch(err => console.error("Failed to load contacts", err));
+  };
+
   const handleAddCategory = () => {
     if (!newCategoryName.trim()) return;
     requestAuth(async () => {
@@ -2929,8 +4392,13 @@ export default function App() {
             icon: newCategoryIcon
           })
         });
-        if (response && response.data) {
-          setContactCategories(prev => [...prev, response.data]);
+        const isTrue = response === true || response?.data === true || response?.status === true || response?.isSuccess === true;
+        if (isTrue || (response && response.data)) {
+          if (response.data && typeof response.data === 'object') {
+            setContactCategories(prev => [...prev, response.data]);
+          } else {
+            refreshContactCategories();
+          }
           setNewCategoryName('');
           setNewCategoryDescription('');
           setNewCategoryIcon('UserCircle');
@@ -2954,20 +4422,27 @@ export default function App() {
           description: newCategoryDescription,
           icon: newCategoryIcon
         };
-        await apiFetch('/ContactCategory/UpdateContactCategory', {
+        const response: any = await apiFetch('/ContactCategory/UpdateContactCategory', {
           method: 'PUT',
           body: JSON.stringify(payload)
         });
-        setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
-          ...cat,
-          ...payload
-        } : cat));
-        setNewCategoryName('');
-        setNewCategoryDescription('');
-        setNewCategoryIcon('UserCircle');
-        setIsEditCategoryOpen(false);
-        setEditingCategory(null);
-        toast.success("Category updated successfully");
+        const isTrue = response === true || response?.data === true || response?.status === true || response?.isSuccess === true;
+        if (isTrue || response) {
+          if (isTrue && !(response?.data)) {
+            refreshContactCategories();
+          } else {
+            setContactCategories(prev => prev.map(cat => cat.id === editingCategory.id ? {
+              ...cat,
+              ...payload
+            } : cat));
+          }
+          setNewCategoryName('');
+          setNewCategoryDescription('');
+          setNewCategoryIcon('UserCircle');
+          setIsEditCategoryOpen(false);
+          setEditingCategory(null);
+          toast.success("Category updated successfully");
+        }
       } catch (err: any) {
         console.error("Failed to update category", err);
         toast.error(`Failed to update category: ${err.message}`);
@@ -3007,24 +4482,25 @@ export default function App() {
     if (editingContactId !== null) {
       requestAuth(async () => {
         try {
-          // Find newly added details (id is undefined or 0)
-          const newDetails = newContact.contactDetails.filter(d => !d.id || d.id === 0);
-          for (const ds of newDetails) {
-            const formData = new FormData();
-            formData.append('createContactDetailsDtos', JSON.stringify({
+          const payload = {
+            id: editingContactId,
+            firstName: newContact.firstName,
+            lastName: newContact.lastName,
+            imageUrl: isNewContactImageSelected ? (newContact.imageUrl || null) : null,
+            gender: 1,
+            ContactCategory: newContact.contactCategory || 0,
+            contactCategory: newContact.contactCategory || 0,
+            personId: newContact.personId || userProfile?.id || 1,
+            PersonId: newContact.personId || userProfile?.id || 1,
+            contactDetails: newContact.contactDetails.map(d => ({
+              id: d.id || 0,
               contactId: editingContactId,
-              personDetailsId: ds.personDetailsId || 0,
-              phoneNumber: ds.phoneNumber || '',
-              email: ds.email || ''
-            }));
-            await apiFetch(`/Contact/AddContactDetails?contactId=${editingContactId}`, { method: 'PUT', body: formData });
-          }
-
-          // Find newly added addresses
-          const newAddresses = newContact.address.filter(a => !a.id || a.id === 0);
-          for (const a of newAddresses) {
-            const formData = new FormData();
-            formData.append('createAddressDtos', JSON.stringify({
+              phoneNumber: d.phoneNumber || '',
+              email: d.email || ''
+            })),
+            address: newContact.address.map(a => ({
+              id: a.id || 0,
+              contactId: editingContactId,
               numberLine: a.numberLine || '',
               street: a.street || '',
               city: a.city || '',
@@ -3032,35 +4508,49 @@ export default function App() {
               state: a.state || '',
               country: a.country || '',
               postalCode: a.postalCode || ''
-            }));
-            await apiFetch(`/Contact/AddContactAddress?contactId=${editingContactId}`, { method: 'PUT', body: formData });
-          }
+            }))
+          };
 
-          setContacts(prev => prev.map(c => c.id === editingContactId ? {
-            ...c,
-            firstName: newContact.firstName,
-            lastName: newContact.lastName,
-            getContactCategoryDto: selectedCategory,
-            imageUrl: newContact.imageUrl || '',
-            contactDetails: newContact.contactDetails.map((d, i) => ({
-              ...d,
-              id: d.id || i + 1,
-              contactId: editingContactId,
-              personDetailsId: d.personDetailsId || 0
-            })),
-            address: newContact.address.map((a, i) => ({
-              ...a,
-              id: a.id || i + 1,
-              contactId: editingContactId,
-              personId: newContact.personId
-            })),
-          } : c));
-          toast.success("Contact updated successfully");
+          const res: any = await apiFetch('/Contact/UpdateContact', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+          });
+
+          const isTrue = res === true || res?.data === true || res?.status === true || res?.isSuccess === true;
+          if (isTrue || res?.data) {
+            if (isTrue && !(res?.data && typeof res.data === 'object')) {
+              refreshContacts();
+            } else {
+              const updatedContactData = res?.data;
+              setContacts(prev => prev.map(c => c.id === editingContactId ? {
+                ...c,
+                firstName: updatedContactData?.firstName || newContact.firstName,
+                lastName: updatedContactData?.lastName || newContact.lastName,
+                getContactCategoryDto: selectedCategory,
+                imageUrl: isNewContactImageSelected ? (updatedContactData?.imageUrl || newContact.imageUrl || '') : null,
+                contactDetails: (updatedContactData?.contactDetails || newContact.contactDetails).map((d: any, i: number) => ({
+                  ...d,
+                  id: d.id || i + 1,
+                  contactId: editingContactId,
+                  personDetailsId: d.personDetailsId || 0
+                })),
+                address: (updatedContactData?.address || newContact.address).map((a: any, i: number) => ({
+                  ...a,
+                  id: a.id || i + 1,
+                  contactId: editingContactId,
+                  personId: newContact.personId
+                })),
+              } : c));
+            }
+            toast.success("Contact updated successfully");
+            setIsAddContactOpen(false);
+          }
         } catch (err: any) {
-          console.error("Failed to update contact locally", err);
-          toast.error(`Update completed with errors: ${err.message}`);
+          console.error("Failed to update contact", err);
+          toast.error(`Failed to update contact: ${err.message}`);
         } finally {
           setEditingContactId(null);
+          setIsNewContactImageSelected(false);
           setIsAddContactOpen(false);
           setNewContact({
             firstName: '',
@@ -3081,8 +4571,10 @@ export default function App() {
             lastName: newContact.lastName,
             imageUrl: newContact.imageUrl || '',
             gender: 1,
+            ContactCategory: newContact.contactCategory || 0,
             contactCategory: newContact.contactCategory || 0,
             personId: userProfile?.id || 1,
+            PersonId: userProfile?.id || 1,
             contactDetails: newContact.contactDetails.map(d => ({
               contactId: 0,
               personDetailsId: d.personDetailsId || 0,
@@ -3105,35 +4597,41 @@ export default function App() {
             body: JSON.stringify(payload)
           });
 
-          if (res && res.data) {
-            const serverContact: ContactType = {
-              id: (res.data.id ?? res.data.Id) || Math.floor(Math.random() * 10000),
-              firstName: res.data.firstName || newContact.firstName,
-              lastName: res.data.lastName || newContact.lastName,
-              getContactCategoryDto: selectedCategory,
-              imageUrl: res.data.imageUrl || newContact.imageUrl || '',
-              contactDetails: (res.data.contactDetails || []).map((d: any, idx: number) => ({
-                id: d.id || idx + 1,
-                contactId: (res.data.id ?? res.data.Id) || 0,
-                phoneNumber: d.phoneNumber || '',
-                email: d.email || '',
-                personDetailsId: d.personDetailsId || 0
-              })),
-              address: (res.data.address || []).map((a: any, idx: number) => ({
-                id: a.id || idx + 1,
-                contactId: (res.data.id ?? res.data.Id) || 0,
-                personId: userProfile?.id || 1,
-                numberLine: a.numberLine || '',
-                street: a.street || '',
-                city: a.city || '',
-                region: a.region || '',
-                state: a.state || '',
-                country: a.country || 'United Kingdom',
-                postalCode: a.postalCode || ''
-              }))
-            };
-            setContacts(prev => [...prev, serverContact]);
-            toast.success('Contact created successfully on the server!');
+          const isTrue = res === true || res?.data === true || res?.status === true || res?.isSuccess === true;
+          if (isTrue || res?.data) {
+            if (isTrue && !(res?.data && typeof res.data === 'object')) {
+              refreshContacts();
+            } else if (res && res.data) {
+              const serverContact: ContactType = {
+                id: (res.data.id ?? res.data.Id) || Math.floor(Math.random() * 10000),
+                firstName: res.data.firstName || newContact.firstName,
+                lastName: res.data.lastName || newContact.lastName,
+                getContactCategoryDto: selectedCategory,
+                imageUrl: res.data.imageUrl || newContact.imageUrl || '',
+                contactDetails: (res.data.contactDetails || []).map((d: any, idx: number) => ({
+                  id: d.id || idx + 1,
+                  contactId: (res.data.id ?? res.data.Id) || 0,
+                  phoneNumber: d.phoneNumber || '',
+                  email: d.email || '',
+                  personDetailsId: d.personDetailsId || 0
+                })),
+                address: (res.data.address || []).map((a: any, idx: number) => ({
+                  id: a.id || idx + 1,
+                  contactId: (res.data.id ?? res.data.Id) || 0,
+                  personId: userProfile?.id || 1,
+                  numberLine: a.numberLine || '',
+                  street: a.street || '',
+                  city: a.city || '',
+                  region: a.region || '',
+                  state: a.state || '',
+                  country: a.country || 'United Kingdom',
+                  postalCode: a.postalCode || ''
+                }))
+              };
+              setContacts(prev => [...prev, serverContact]);
+            }
+            toast.success('Contact created successfully!');
+            setIsAddContactOpen(false);
           } else {
             // Fallback locally
             const newId = Math.floor(Math.random() * 10000);
@@ -3194,6 +4692,7 @@ export default function App() {
         : [{ numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' }]
     });
     setEditingContactId(contact.id);
+    setIsNewContactImageSelected(false);
     setIsAddContactOpen(true);
   };
 
@@ -3298,90 +4797,143 @@ export default function App() {
 
   
     const handleToggle = async (id: string) => {
-      let d = devices.find(x => x.id === id);
+      let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `appliance-${id}` || x.id === `light-${id}` || x.id === `camera-${id}` || x.id === `door-${id}` || x.id === `window-${id}` || x.id === `external-${id}`);
       if (!d) return;
 
       const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+
+      // Determine next status and state
+      let newStatus = d.status;
+      let nextActive = false;
+      if (d.type === 'light') {
+        nextActive = d.status === 'off';
+        newStatus = nextActive ? 'on' : 'off';
+      } else if (d.type === 'appliance') {
+        nextActive = (d.status === 'off' || d.status === 'inactive');
+        newStatus = nextActive ? 'on' : 'off';
+      } else if (d.type === 'door' || d.type === 'window') {
+        newStatus = d.status === 'locked' ? 'unlocked' : 'locked';
+      } else if (d.type === 'camera') {
+        nextActive = d.status === 'inactive';
+        newStatus = nextActive ? 'active' : 'inactive';
+      } else if (d.type === 'external' as any) {
+        nextActive = d.status === 'inactive';
+        newStatus = nextActive ? 'active' : 'inactive';
+      }
+
+      // Keep original states to revert on failure
+      const prevDevices = [...devices];
+      const prevLights = [...lights];
+      const prevAppliances = [...appliances];
+      const prevCameras = [...cameras];
+      const prevDoors = [...doors];
+      const prevExternals = [...externals];
+
+      // Optimistic update
+      setDevices(prev => prev.map(dev => dev.id === d.id ? { ...dev, status: newStatus as any } : dev));
+      if (d.type === 'light') {
+        setLights(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+      } else if (d.type === 'appliance') {
+        setAppliances(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+      } else if (d.type === 'camera') {
+        setCameras(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+      } else if (d.type === 'external' as any) {
+        setExternals(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+      }
 
       try {
         if (d.type === 'door') {
           if (d.status === 'locked') {
             await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+            setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: false } : item));
           } else {
             await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+            setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: true } : item));
           }
         } else if (d.type === 'light') {
-          const nextActive = d.status === 'off';
-          const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
+          const lightDto = (prevLights || []).find(l => l.id.toString() === rawId.toString());
+          const payload = { 
+            id: parseInt(rawId), 
+            isActive: nextActive, 
+            lightName: lightDto?.lightName || d.name,
+            brightnessLevel: d.value ?? lightDto?.brightnessLevel ?? 100,
+            roomId: resolveRoomId(lightDto?.roomId, rooms),
+            sectionId: resolveSectionId(lightDto?.sectionId, sections),
+            isHidden: false
+          };
           await apiFetch('/Light/UpdateLight', { 
             method: 'PUT', 
-            body: { 
-              id: parseInt(rawId), 
-              isActive: nextActive, 
-              lightName: lightDto?.lightName || d.name,
-              brightnessLevel: d.value ?? lightDto?.brightnessLevel ?? 100,
-              roomId: (lightDto?.roomId && lightDto.roomId !== 'none') ? parseInt(lightDto.roomId.toString()) : null,
-              sectionId: (lightDto?.sectionId && lightDto.sectionId !== 'none') ? parseInt(lightDto.sectionId.toString()) : null
-            } 
+            body: JSON.stringify(payload)
           });
         } else if (d.type === 'appliance') {
-          const nextActive = (d.status === 'off' || d.status === 'inactive');
-          const appDto = (appliances || []).find(a => a.id.toString() === rawId.toString());
+          const appDto = (prevAppliances || []).find(a => a.id.toString() === rawId.toString());
+          const payload = { 
+            id: parseInt(rawId), 
+            isActive: nextActive, 
+            applianceName: appDto?.applianceName || d.name,
+            applianceType: appDto?.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1) : 1,
+            roomId: resolveRoomId(appDto?.roomId, rooms),
+            sectionId: resolveSectionId(appDto?.sectionId, sections),
+            isHidden: false
+          };
           await apiFetch('/Appliance/UpdateAppliance', { 
             method: 'PUT', 
-            body: { 
-              id: parseInt(rawId), 
-              isActive: nextActive, 
-              applianceName: appDto?.applianceName || d.name,
-              applianceType: appDto?.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1) : 1,
-              roomId: (appDto?.roomId && appDto.roomId !== 'none') ? parseInt(appDto.roomId.toString()) : null,
-              sectionId: (appDto?.sectionId && appDto.sectionId !== 'none') ? parseInt(appDto.sectionId.toString()) : null
-            } 
+            body: JSON.stringify(payload)
           });
         } else if (d.type === 'camera') {
-          const nextActive = d.status === 'inactive';
-          const camDto = (cameras || []).find(c => c.id.toString() === rawId.toString());
+          const camDto = (prevCameras || []).find(c => c.id.toString() === rawId.toString());
+          const payload = { 
+            id: parseInt(rawId), 
+            isActive: nextActive, 
+            cameraName: camDto?.cameraName || d.name,
+            ipAddress: (camDto as any)?.ipAddress || "127.0.0.1",
+            username: (camDto as any)?.username || "admin",
+            streamPath: (camDto as any)?.streamPath || "/",
+            port: (camDto as any)?.port || 80,
+            roomId: resolveRoomId(camDto?.roomId, rooms),
+            sectionId: resolveSectionId(camDto?.sectionId, sections),
+            isHidden: false
+          };
           await apiFetch('/Camera/UpdateCamera', { 
             method: 'PUT', 
-            body: { 
-              id: parseInt(rawId), 
-              isActive: nextActive, 
-              cameraName: camDto?.cameraName || d.name,
-              ipAddress: (camDto as any)?.ipAddress || "127.0.0.1",
-              username: (camDto as any)?.username || "admin",
-              streamPath: (camDto as any)?.streamPath || "/",
-              port: (camDto as any)?.port || 80
-            } 
+            body: JSON.stringify(payload)
           });
+        } else if (d.type === 'external' as any) {
+          const extDto = (prevExternals || []).find(e => e.id.toString() === rawId.toString());
+          if (extDto) {
+            const payload = {
+              id: parseInt(rawId),
+              externalName: extDto.externalName,
+              isActive: nextActive,
+              isTriggered: extDto.isTriggered,
+              actionIds: extDto.actionIds || [],
+              roomId: resolveRoomId(extDto.roomId, rooms),
+              sectionId: resolveSectionId(extDto.sectionId, sections),
+              isHidden: false
+            };
+            await apiFetch('/External/UpdateExternal', { 
+              method: 'PUT', 
+              body: JSON.stringify(payload)
+            });
+          }
         }
         
         toast.success(`Device toggled successfully`);
       } catch (err: any) {
         console.error("Failed to toggle device remotely", err);
         toast.error(`Remote toggle failed: ${err.message}`);
-        return; // Don't update local state if remote fails
+        // Revert states on failure
+        setDevices(prevDevices);
+        setLights(prevLights);
+        setAppliances(prevAppliances);
+        setCameras(prevCameras);
+        setDoors(prevDoors);
+        setExternals(prevExternals);
       }
-
-      setDevices(prev => prev.map(d => {
-        if (d.id !== id) return d;
-        
-        let newStatus = d.status;
-        if (d.type === 'light') {
-          newStatus = d.status === 'on' ? 'off' : 'on';
-        } else if (d.type === 'appliance') {
-          newStatus = (d.status === 'on' || d.status === 'active') ? 'off' : 'on';
-        } else if (d.type === 'door' || d.type === 'window') {
-          newStatus = d.status === 'locked' ? 'unlocked' : 'locked';
-        } else if (d.type === 'camera') {
-          newStatus = d.status === 'active' ? 'inactive' : 'active';
-        }
-        
-        return { ...d, status: newStatus as any };
-      }));
   };
 
   const handleDoorAction = async (id: string, action: 'lock'|'unlock'|'open'|'close') => {
-    let d = devices.find(x => x.id === id);
+    let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `door-${id}` || x.id === `window-${id}`);
     if (!d) return;
 
     const rawId = getRawId(d.id);
@@ -3397,6 +4949,11 @@ export default function App() {
         } else if (action === 'close') {
           await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
         }
+        setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
+          ...item, 
+          isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
+          isOpen: action === 'open' ? true : action === 'close' ? false : item.isOpen
+        } : item));
       } else if (d.type === 'window') {
         if (action === 'lock') {
           await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
@@ -3407,6 +4964,11 @@ export default function App() {
         } else if (action === 'close') {
           await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
         }
+        setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
+          ...item, 
+          isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
+          isOpen: action === 'open' ? true : action === 'close' ? false : item.isOpen
+        } : item));
       }
       toast.success(`${d.type} toggled successfully`);
     } catch (err: any) {
@@ -3416,7 +4978,7 @@ export default function App() {
     }
 
     setDevices(prev => prev.map(dev => {
-      if (dev.id !== id) return dev;
+      if (dev.id !== d.id) return dev;
       let newStatus = dev.status;
       const isLocked = dev.status === 'locked' || dev.status === 'open-locked';
       const isOpen = dev.status === 'open' || dev.status === 'open-locked';
@@ -3435,27 +4997,33 @@ export default function App() {
   };
 
   const handleStatusChange = (id: string, status: string) => {
-    setDevices(prev => prev.map(d => 
-      d.id === id ? { ...d, status } : d
+    let d = devices.find(x => x.id === id || x.id.split('-')[1] === id);
+    if (!d) return;
+    setDevices(prev => prev.map(dev => 
+      dev.id === d.id ? { ...dev, status } : dev
     ));
   };
 
   const handleValueChange = (id: string, value: number) => {
-    setDevices(prev => prev.map(d => 
-      d.id === id ? { ...d, value } : d
+    let d = devices.find(x => x.id === id || x.id.split('-')[1] === id);
+    if (!d) return;
+    setDevices(prev => prev.map(dev => 
+      dev.id === d.id ? { ...dev, value } : dev
     ));
+    const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+    setLights(prev => prev.map(l => l.id.toString() === rawId ? { ...l, brightnessLevel: value } : l));
   };
 
   const valueChangeTimers = React.useRef<{ [id: string]: ReturnType<typeof setTimeout> }>({});
 
   const handleValueChangeEnd = (id: string, value: number) => {
-    if (valueChangeTimers.current[id]) {
-      clearTimeout(valueChangeTimers.current[id]);
+    const matchedId = devices.find(x => x.id === id || x.id.split('-')[1] === id)?.id || id;
+    if (valueChangeTimers.current[matchedId]) {
+      clearTimeout(valueChangeTimers.current[matchedId]);
     }
-    valueChangeTimers.current[id] = setTimeout(async () => {
-      // Get the latest device from state, since closure might have stale state
+    valueChangeTimers.current[matchedId] = setTimeout(async () => {
       setDevices(currentDevices => {
-        const d = currentDevices.find(x => x.id === id);
+        const d = currentDevices.find(x => x.id === matchedId);
         if (!d || d.type !== 'light') return currentDevices;
         const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
         const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
@@ -3468,8 +5036,8 @@ export default function App() {
             isActive: currentIsActive,
             lightName: lightDto?.lightName || d.name,
             brightnessLevel: d.value ?? value,
-            roomId: (lightDto?.roomId && lightDto.roomId !== 'none') ? parseInt(lightDto.roomId.toString()) : null,
-            sectionId: (lightDto?.sectionId && lightDto.sectionId !== 'none') ? parseInt(lightDto.sectionId.toString()) : null
+            roomId: resolveRoomId(lightDto?.roomId, rooms),
+            sectionId: resolveSectionId(lightDto?.sectionId, sections)
           })
         }).then(() => {
           toast.success('Brightness updated remotely');
@@ -3556,6 +5124,13 @@ export default function App() {
     } else if (d.type === 'window') {
       setSelectedWindow(d);
       setIsViewWindowOpen(true);
+    } else if (d.type === 'external' as any) {
+      const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+      const extDto = (externals || []).find(e => e.id.toString() === rawId.toString());
+      if (extDto) {
+        setSelectedExternal(extDto);
+        setIsViewExternalOpen(true);
+      }
     }
   };
 
@@ -3566,10 +5141,8 @@ export default function App() {
         const rawId = getRawId(editingDevice.id);
         const rRaw = editingDevice.room;
         const sRaw = editingDevice.section;
-        const parsedR = (rRaw && rRaw !== 'none' && rRaw !== '') ? parseInt(rRaw.toString(), 10) : null;
-        const finalRoomId = isNaN(parsedR as any) ? null : parsedR;
-        const parsedS = (sRaw && sRaw !== 'none' && sRaw !== '') ? parseInt(sRaw.toString(), 10) : null;
-        const finalSectionId = isNaN(parsedS as any) ? null : parsedS;
+        const finalRoomId = resolveRoomId(rRaw, rooms);
+        const finalSectionId = resolveSectionId(sRaw, sections);
 
         try {
           if (editingDevice.type === 'camera') {
@@ -3714,9 +5287,7 @@ export default function App() {
     requestAuth(async () => {
       if (editingRoom && editingRoom.id) {
         try {
-          const sRaw = editingRoom.section;
-          const parsedS = (sRaw && sRaw !== 'none' && sRaw !== '') ? parseInt(sRaw.toString(), 10) : null;
-          const finalSectionId = isNaN(parsedS as any) ? null : parsedS;
+          const finalSectionId = resolveSectionId(editingRoom.section, sections);
 
           await apiFetch('/Room/UpdateRoom', {
             method: 'PUT',
@@ -3724,7 +5295,7 @@ export default function App() {
               id: Number(editingRoom.id) || 0,
               roomName: editingRoom.name,
               icon: editingRoom.icon || 'Sofa',
-              personId: userProfile?.id || 0,
+              personId: editingRoom.personId !== undefined && editingRoom.personId !== null ? editingRoom.personId : (userProfile?.id || 0),
               sectionId: finalSectionId,
               isHidden: editingRoom.isHidden || false
             })
@@ -3788,8 +5359,8 @@ export default function App() {
       try {
         if (inferredType === 'camera') {
           const payload = {
-            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            roomId: resolveRoomId(newDevice.room, rooms),
+            sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             cameraName: newDevice.name,
             ipAddress: newDevice.ipAddress || '0.0.0.0',
@@ -3807,8 +5378,8 @@ export default function App() {
         } else if (inferredType === 'appliance') {
           const appType = newDevice.applianceType || 1;
           const payload = {
-            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            roomId: resolveRoomId(newDevice.room, rooms),
+            sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             applianceName: newDevice.name,
             applianceType: appType
@@ -3821,8 +5392,8 @@ export default function App() {
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'door') {
           const payload = {
-            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            roomId: resolveRoomId(newDevice.room, rooms),
+            sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             doorName: newDevice.name,
             doorType: 1,
@@ -3840,8 +5411,8 @@ export default function App() {
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'window') {
           const payload = {
-            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            roomId: resolveRoomId(newDevice.room, rooms),
+            sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             windowName: newDevice.name,
             windowId: Math.random().toString(36).substring(2, 9),
@@ -3859,8 +5430,8 @@ export default function App() {
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'light') {
           const payload = {
-            roomId: newDevice.room  && newDevice.room  !== 'none' ? parseInt(newDevice.room) : null,
-            sectionId: newDevice.section  && newDevice.section  !== 'none' ? parseInt(newDevice.section) : null,
+            roomId: resolveRoomId(newDevice.room, rooms),
+            sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             lightName: newDevice.name,
             brightnessLevel: 0
@@ -3907,8 +5478,8 @@ export default function App() {
           body: JSON.stringify({
             roomName: newRoom.name,
             icon: newRoom.icon || 'Sofa',
-            personId: userProfile?.id || 0,
-            sectionId: newRoom.section  && newRoom.section  !== 'none' ? parseInt(newRoom.section) : null,
+            personId: newRoom.personId !== undefined && newRoom.personId !== null ? newRoom.personId : (userProfile?.id || 0),
+            sectionId: resolveSectionId(newRoom.section, sections),
             isHidden: newRoom.isHidden || false
           })
         });
@@ -4068,6 +5639,7 @@ export default function App() {
     if (activeView === 'dashboard') {
       const activeDevices = devices.filter(d => d.status === 'on' || d.status === 'active').length;
       const externalCameras = devices.filter(d => d.type === 'camera' && d.section === 'security');
+      const totalFacilityCount = (appliances?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0);
       
       return (
         <motion.div
@@ -4093,7 +5665,7 @@ export default function App() {
                 <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Facilities</p>
               </div>
               <div className="text-right flex flex-col items-end justify-center">
-                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{rooms.length}</p>
+                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{totalFacilityCount}</p>
                 <div className="text-xs text-muted-foreground max-w-[120px] text-right">
                   Appliances, Cameras, Doors, Lights, Windows, Externals
                 </div>
@@ -4230,7 +5802,14 @@ export default function App() {
                   variant="default" 
                   size="icon" 
                   className="h-12 w-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white shadow transition-all duration-300 group-hover:translate-x-1"
-                  onClick={() => setActiveView(DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].id)}
+                  onClick={() => {
+                    const targetView = DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].id;
+                    if (targetView === 'facility-actions' && !canSeeActions) {
+                      toast.error("You do not have permission to access the Actions page.");
+                      return;
+                    }
+                    setActiveView(targetView);
+                  }}
                 >
                   <ArrowRight className="h-5 w-5 text-white" />
                 </Button>
@@ -4379,6 +5958,7 @@ export default function App() {
 
               if (cat.type === 'room') {
                 total = rooms.length;
+                active = total; // always full except if 0
                 statusSummary = `${total} Total Rooms`;
               } else if (cat.type === 'action') {
                 total = scenes.length;
@@ -4396,21 +5976,28 @@ export default function App() {
                 statusSummary = `${active} Triggered • ${inactive} OK`;
               } else if (cat.type === 'section') {
                 total = sections.length;
+                active = total; // always full except if 0
                 statusSummary = `${total} Total Sections`;
               } else {
                 const categoryDevices = devices.filter(d => d.type === cat.type);
                 total = categoryDevices.length;
-                active = categoryDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
-                inactive = total - active;
                 
                 if (cat.type === 'light' || cat.type === 'appliance') {
+                  active = categoryDevices.filter(d => d.status === 'on' || d.status === 'active').length;
+                  inactive = total - active;
                   statusSummary = `${active} On • ${inactive} Off`;
                 } else if (cat.type === 'door' || cat.type === 'window') {
                   const locked = categoryDevices.filter(d => d.status === 'locked' || d.status === 'open-locked').length;
                   const unlocked = total - locked;
+                  active = locked; // Windows and doors show locked count in progress bar
                   statusSummary = `${locked} Locked • ${unlocked} Unlocked`;
                 } else if (cat.type === 'camera') {
+                  active = categoryDevices.filter(d => d.status === 'active' || d.status === 'on').length;
+                  inactive = total - active;
                   statusSummary = `${active} Active • ${inactive} Inactive`;
+                } else {
+                  active = categoryDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
+                  inactive = total - active;
                 }
               }
 
@@ -4452,6 +6039,10 @@ export default function App() {
     }
 
     if (activeView === 'logs') {
+      const role = userProfile?.getUserDto?.roleName;
+      if (role !== 'Owner' && role !== 'Wife') {
+        return null;
+      }
       const filteredLogs = logs.filter(log => {
         if (!logStartDate && !logEndDate) return true;
         const logDate = new Date(log.timeOfAction);
@@ -4681,7 +6272,7 @@ export default function App() {
                   <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-2xl border border-muted">
                     <div className="h-12 w-12 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-primary/20">
                       <img 
-                        src={selectedLog.getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://picsum.photos/seed/system/100/100'} 
+                        src={getFullImageUrl(selectedLog.getPersonDto?.getPersonDetailsDto?.imageUrl) || 'https://picsum.photos/seed/system/100/100'} 
                         alt="User Avatar" 
                         className="h-full w-full object-cover" 
                       />
@@ -4771,8 +6362,16 @@ export default function App() {
 
           {contactView === 'overview' ? (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 items-start">
-              <Card className={cn("p-6 md:col-span-1 h-fit transition-all duration-300", (!contactCategories || contactCategories.length === 0) && "max-h-[240px]")}>
-                <h3 className="text-lg font-bold mb-4">Categories</h3>
+              <Card className={cn("p-6 md:col-span-1 h-fit transition-all duration-300 bg-white border border-slate-200 shadow-sm", (!contactCategories || contactCategories.length === 0) && "max-h-[240px]")}>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-slate-500" />
+                    Categories
+                  </h3>
+                  <Button variant="outline" size="sm" onClick={() => setIsAddCategoryOpen(true)} className="h-8 py-1 px-3 flex items-center gap-1.5 shadow-sm text-xs font-medium">
+                    <Plus className="h-3.5 w-3.5" /> Add Category
+                  </Button>
+                </div>
                 <div className="space-y-2">
                   {contactCategories && contactCategories.length > 0 ? (
                     contactCategories.map(cat => {
@@ -4827,13 +6426,13 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <Button variant="outline" className="w-full mt-4" size="sm" onClick={() => setIsAddCategoryOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" /> Add Category
-                </Button>
               </Card>
 
-              <Card className="p-6 md:col-span-2">
-                <h3 className="text-lg font-bold mb-4">Recent Contacts</h3>
+              <Card className="p-6 md:col-span-2 bg-white border border-slate-200 shadow-sm">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                  <Users className="h-5 w-5 text-slate-500" />
+                  Recent Contacts
+                </h3>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {contacts && contacts.length > 0 ? (
                     contacts.slice(0, 4).map(contact => (
@@ -4844,7 +6443,7 @@ export default function App() {
                       >
                         <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold overflow-hidden">
                           {contact.imageUrl ? (
-                            <img src={contact.imageUrl || undefined} alt={contact.firstName} className="h-full w-full object-cover" />
+                            <img src={getFullImageUrl(contact.imageUrl)} alt={contact.firstName} className="h-full w-full object-cover" />
                           ) : (
                             `${contact.firstName[0]}${contact.lastName[0]}`
                           )}
@@ -4906,7 +6505,7 @@ export default function App() {
                           <div className="flex items-center gap-3">
                             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary text-lg font-bold overflow-hidden">
                               {contact.imageUrl ? (
-                                <img src={contact.imageUrl || undefined} alt={contact.firstName} className="h-full w-full object-cover" />
+                                <img src={getFullImageUrl(contact.imageUrl)} alt={contact.firstName} className="h-full w-full object-cover" />
                               ) : (
                                 `${contact.firstName[0]}${contact.lastName[0]}`
                               )}
@@ -5505,6 +7104,10 @@ export default function App() {
     }
 
     if (activeView === 'all-users') {
+      const role = userProfile?.getUserDto?.roleName;
+      if (role !== 'Owner' && role !== 'Wife') {
+        return null;
+      }
       return (
         <motion.div
           key="all-users"
@@ -5533,44 +7136,46 @@ export default function App() {
                   onChange={(e) => setUserSearchQuery(e.target.value)}
                 />
               </div>
-              <div className="ml-auto flex items-center gap-3">
-                <Button 
-                  variant="outline"
-                  className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
-                  onClick={() => setIsAddFingerprintOpen(true)}
-                >
-                  <Fingerprint className="h-4 w-4" /> Add Fingerprint
-                </Button>
-                <Button 
-                  variant="outline"
-                  className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
-                  onClick={() => setIsRegisterNfidOpen(true)}
-                >
-                  <ScanLine className="h-4 w-4" /> Register NFID
-                </Button>
-                <Button 
-                  className="bg-black text-white hover:bg-black/90 transition-all font-medium px-6 flex items-center justify-center gap-2 shadow-sm"
-                  onClick={async () => {
-                    try {
-                      const res: any = await apiFetch('/User/GenerateToken', { method: 'POST' });
-                      const tokenData = res?.tokenCode ? res : res?.data;
-                      if (tokenData && tokenData.tokenCode) {
-                        setGeneratedToken(tokenData);
-                        setIsTokenModalOpen(true);
-                        toast.success(tokenData.message || res?.message || "Token successfully generated!");
-                      } else {
-                        toast.error("Failed to generate token: Invalid response structure");
+              {isOwner && (
+                <div className="ml-auto flex items-center gap-3">
+                  <Button 
+                    variant="outline"
+                    className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                    onClick={() => setIsAddFingerprintOpen(true)}
+                  >
+                    <Fingerprint className="h-4 w-4" /> Add Fingerprint
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                    onClick={() => setIsRegisterNfidOpen(true)}
+                  >
+                    <ScanLine className="h-4 w-4" /> Register NFID
+                  </Button>
+                  <Button 
+                    className="bg-black text-white hover:bg-black/90 transition-all font-medium px-6 flex items-center justify-center gap-2 shadow-sm"
+                    onClick={async () => {
+                      try {
+                        const res: any = await apiFetch('/User/GenerateToken', { method: 'POST' });
+                        const tokenData = res?.tokenCode ? res : res?.data;
+                        if (tokenData && tokenData.tokenCode) {
+                          setGeneratedToken(tokenData);
+                          setIsTokenModalOpen(true);
+                          toast.success(tokenData.message || res?.message || "Token successfully generated!");
+                        } else {
+                          toast.error("Failed to generate token: Invalid response structure");
+                        }
+                      } catch (err: any) {
+                        console.error('Failed to generate token', err);
+                        toast.error(`Failed to generate token: ${err.message}`);
                       }
-                    } catch (err: any) {
-                      console.error('Failed to generate token', err);
-                      toast.error(`Failed to generate token: ${err.message}`);
-                    }
-                  }}
-                >
-                  <Key className="h-4 w-4" />
-                  Generate Token
-                </Button>
-              </div>
+                    }}
+                  >
+                    <Key className="h-4 w-4" />
+                    Generate Token
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -5593,7 +7198,7 @@ export default function App() {
                 return (
                   <Card 
                     key={person.id} 
-                    className={`p-4 flex items-center justify-between group hover:shadow-md transition-shadow cursor-pointer ${person.disabled ? 'opacity-50 grayscale' : ''}`}
+                    className={`p-4 flex items-center justify-between group border border-slate-200 shadow-sm bg-white hover:shadow-md hover:border-primary/50 transition-all cursor-pointer ${person.disabled ? 'opacity-50 grayscale' : ''}`}
                     onClick={() => {
                       setViewingPerson(person);
                       setIsViewPersonDetailsOpen(true);
@@ -5602,7 +7207,7 @@ export default function App() {
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
                         <img 
-                          src={details?.imageUrl || undefined} 
+                          src={getFullImageUrl(details?.imageUrl) || undefined} 
                           alt={`${details.firstName} ${details.lastName}`} 
                           className="h-full w-full object-cover" 
                           referrerPolicy="no-referrer"
@@ -5747,7 +7352,7 @@ export default function App() {
       const lights = sortedRoomDevices.filter(d => d.type === 'light');
       const appliances = sortedRoomDevices.filter(d => d.type === 'appliance');
       const cameras = sortedRoomDevices.filter(d => d.type === 'camera');
-      const roomExternals = externals.filter(e => e.roomId === userRoomId || e.room === userRoomId);
+      const roomExternals = sortedRoomDevices.filter(d => d.type === 'external' as any);
       
       const roomScenes = scenes.filter(scene => 
         scene.actions.some(action => roomDevices.some(d => d.id === action.deviceId))
@@ -5922,20 +7527,17 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {(roomExternals || []).map(ext => (
-                      <Card key={ext.id} className="p-6 flex flex-col gap-4 border hover:border-primary/50 transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
-                        <div className="flex items-start justify-between">
-                          <div className="space-y-1">
-                            <h3 className="font-bold text-lg">{ext.externalName}</h3>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
-                            </div>
-                          </div>
-                          <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
-                            {ext.isTriggered ? 'TRIGGERED' : 'STANDBY'}
-                          </Badge>
-                        </div>
-                      </Card>
+                    {(roomExternals || []).map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
+                        onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
+                        onClick={handleDeviceClick}
+                      />
                     ))}
                   </div>
                 </div>
@@ -6046,9 +7648,11 @@ export default function App() {
               <div className="flex flex-row items-center gap-3 shrink-0">
                 {/* Rooms view doesn't have sort by room/section yet, adding placeholder or omit, user mentions it generally */}
                 {/* Let's just put Add button for Rooms */}
-                <Button onClick={() => setIsAddRoomOpen(true)} className="bg-primary text-primary-foreground shrink-0">
-                  <Plus className="mr-2 h-4 w-4" /> Add New Room
-                </Button>
+                {isOwner && (
+                  <Button onClick={() => setIsAddRoomOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                    <Plus className="mr-2 h-4 w-4" /> Add New Room
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -6062,7 +7666,7 @@ export default function App() {
               return (
                 <Card 
                   key={room.id} 
-                  className="p-6 hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
+                  className="p-6 border border-slate-200 shadow-sm hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
                   onClick={() => setActiveView(`room-${room.id}`)}
                 >
                   <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -6175,9 +7779,23 @@ export default function App() {
                           "h-8 w-8 transition-colors",
                           action.actionActive ? "text-green-500 hover:bg-green-50" : "text-slate-400 hover:bg-slate-50"
                         )}
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
+                          const originalActive = action.actionActive;
+                          // Optimistic update
                           setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: !a.actionActive } : a));
+                          try {
+                            await apiFetch(`/Action/ActivateDeactivateAction?id=${action.id}`, {
+                              method: 'POST',
+                              body: ''
+                            });
+                            toast.success(`Action updated successfully!`);
+                          } catch (err: any) {
+                            console.error("Failed to activate/deactivate action", err);
+                            toast.error(`Failed to update action: ${err.message}`);
+                            // Revert on failure
+                            setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: originalActive } : a));
+                          }
                         }}
                       >
                         {action.actionActive ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
@@ -6218,6 +7836,15 @@ export default function App() {
     }
 
     if (activeView === 'facility-hardware') {
+      if (!isOwner) {
+        return (
+          <div className="flex h-[50vh] flex-col items-center justify-center space-y-4">
+            <h2 className="text-xl font-bold">Access Denied</h2>
+            <p className="text-muted-foreground">Only the Owner role can view the Hardware page.</p>
+          </div>
+        );
+      }
+
       const filteredHardwares = hardwares.filter(hw => 
         !facilitySearchQuery || (hw?.hardwareName || '').toLowerCase().includes(facilitySearchQuery.toLowerCase())
       );
@@ -6289,12 +7916,14 @@ export default function App() {
                     By Section
                   </button>
                 </div>
-                <Button onClick={() => {
-                  setHardwareForm({ hardwareName: '' });
-                  setIsAddHardwareOpen(true);
-                }} className="bg-primary text-primary-foreground shrink-0">
-                  <Plus className="mr-2 h-4 w-4" /> Add Hardware
-                </Button>
+                {isOwner && (
+                  <Button onClick={() => {
+                    setHardwareForm({ hardwareName: '' });
+                    setIsAddHardwareOpen(true);
+                  }} className="bg-primary text-primary-foreground shrink-0">
+                    <Plus className="mr-2 h-4 w-4" /> Add Hardware
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -6312,7 +7941,7 @@ export default function App() {
                 return (
                   <Card 
                     key={hw.id} 
-                    className="p-6 space-y-4 hover:shadow-lg hover:border-primary/50 transition-all cursor-pointer bg-card"
+                    className="p-6 border border-slate-200 shadow-sm space-y-4 hover:shadow-lg hover:border-primary/50 transition-all cursor-pointer bg-card"
                     onClick={() => {
                       setSelectedHardware(hw);
                       setIsHardwareDetailOpen(true);
@@ -6450,12 +8079,14 @@ export default function App() {
                   By Section
                 </button>
               </div>
-              <Button onClick={() => {
-                setExternalForm({ externalsName: '', actionIds: [] });
-                setIsAddExternalOpen(true);
-              }} className="bg-primary text-primary-foreground shrink-0">
-                <Plus className="mr-2 h-4 w-4" /> Add External Device
-              </Button>
+              {isOwner && (
+                <Button onClick={() => {
+                  setExternalForm({ externalsName: '', actionIds: [] });
+                  setIsAddExternalOpen(true);
+                }} className="bg-primary text-primary-foreground shrink-0">
+                  <Plus className="mr-2 h-4 w-4" /> Add External Device
+                </Button>
+              )}
             </div>
           </div>
 
@@ -6590,15 +8221,17 @@ export default function App() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
                 <Input 
                   placeholder="Search sections..." 
-                  className="pl-10 h-10 rounded-xl"
+                  className="pl-10 h-10"
                   value={sectionSearchQuery}
                   onChange={(e) => setSectionSearchQuery(e.target.value)}
                 />
               </div>
               <div className="flex flex-row items-center gap-3 shrink-0">
-                <Button onClick={() => setIsAddSectionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
-                  <Plus className="mr-2 h-4 w-4" /> Add New Section
-                </Button>
+                {isOwner && (
+                  <Button onClick={() => setIsAddSectionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                    <Plus className="mr-2 h-4 w-4" /> Add New Section
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -6659,7 +8292,7 @@ export default function App() {
                       <div className="space-y-3">
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Direct Devices</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none').map(device => (
+                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined').map(device => (
                             <DeviceCard 
                               key={device.id} 
                               device={device} 
@@ -6671,7 +8304,7 @@ export default function App() {
                               onClick={handleDeviceClick}
                             />
                           ))}
-                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none').length === 0 && (
+                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined').length === 0 && (
                             <p className="text-xs text-muted-foreground italic">No direct devices in this section.</p>
                           )}
                         </div>
@@ -6706,9 +8339,11 @@ export default function App() {
               </div>
               <p className="text-muted-foreground">Overview of all rooms in HanssonHub.</p>
             </div>
-            <Button size="sm" onClick={() => setIsAddRoomOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add Room
-            </Button>
+            {isOwner && (
+              <Button size="sm" onClick={() => setIsAddRoomOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Add Room
+              </Button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -6719,7 +8354,7 @@ export default function App() {
                 const activeInRoom = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
                 
                 return (
-                  <Card key={room.id} className="border cursor-pointer overflow-hidden transition-all hover:shadow-md group relative"
+                  <Card key={room.id} className="border border-slate-200 shadow-sm cursor-pointer overflow-hidden transition-all hover:shadow-md group relative"
                     onClick={() => setActiveView(`room-${room.id}`)}
                   >
                     <Button 
@@ -6871,10 +8506,12 @@ export default function App() {
                     View Room Details
                   </Button>
                 ) : (
-                  <Button onClick={() => setIsAddDeviceOpen(true)} className="bg-primary text-primary-foreground shrink-0">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add New {singularName}
-                  </Button>
+                  isOwner && (
+                    <Button onClick={() => setIsAddDeviceOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add New {singularName}
+                    </Button>
+                  )
                 )}
               </div>
             </div>
@@ -7053,7 +8690,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className="flex-1 min-h-0 overflow-y-auto relative">
+        <div className="flex-1 min-h-0 overflow-y-auto relative" onScroll={handleLogsScroll}>
         <div 
           className={cn(
             "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
@@ -7064,7 +8701,7 @@ export default function App() {
           )}
         /><div className="p-8 pb-12 min-h-full">
             <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
-              <div className="min-h-full">
+              <div className="min-h-full px-2 py-1.5">
                 <AnimatePresence mode="wait">
                   {renderView()}
                 </AnimatePresence>
@@ -7958,62 +9595,66 @@ export default function App() {
                 <DialogDescription className="mt-0">Detailed view of user properties and system settings.</DialogDescription>
               </div>
               <div className="flex items-center gap-2 pr-6">
-                <Button 
-                   variant="ghost" 
-                   size="icon" 
-                   className="h-8 w-8 bg-transparent border border-blue-200 text-black hover:bg-blue-50"
-                  onClick={() => {
-                    if (viewingPerson) {
-                      setUpdateUserRoleData({
-                        id: viewingPerson.getUserDto.id,
-                        userName: viewingPerson.getUserDto.userName,
-                        password: '',
-                        role: viewingPerson.getUserDto.role
-                      });
-                      setIsEditPersonRoleOpen(true);
-                    }
-                  }}
-                >
-                  <Settings2 className="h-4 w-4 text-blue-500" />
-                </Button>
-                <Button 
-                   variant="ghost" 
-                   size="icon" 
-                   className={cn(
-                    "h-8 w-8 bg-transparent border hover:bg-muted",
-                    viewingPerson?.disabled ? "text-green-600 border-green-200" : "text-yellow-600 border-yellow-200"
-                  )}
-                  onClick={() => {
-                    if (viewingPerson) {
-                      requestAuth(() => {
-                        setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
-                          ...u, 
-                          disabled: !u.disabled, 
-                          getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
-                        } : u));
-                        setIsViewPersonDetailsOpen(false);
-                      });
-                    }
-                  }}
-                >
-                  {viewingPerson?.disabled ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                </Button>
-                <Button 
-                   variant="ghost" 
-                   size="icon" 
-                   className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
-                  onClick={() => {
-                    if (viewingPerson) {
-                      requestAuth(() => {
-                        setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
-                        setIsViewPersonDetailsOpen(false);
-                      });
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4 text-red-600" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
+                {isOwner && (
+                  <>
+                    <Button 
+                       variant="ghost" 
+                       size="icon" 
+                       className="h-8 w-8 bg-transparent border border-blue-200 text-black hover:bg-blue-50"
+                      onClick={() => {
+                        if (viewingPerson) {
+                          setUpdateUserRoleData({
+                            id: viewingPerson.getUserDto.id,
+                            userName: viewingPerson.getUserDto.userName,
+                            password: '',
+                            role: viewingPerson.getUserDto.role
+                          });
+                          setIsEditPersonRoleOpen(true);
+                        }
+                      }}
+                    >
+                      <Settings2 className="h-4 w-4 text-blue-500" />
+                    </Button>
+                    <Button 
+                       variant="ghost" 
+                       size="icon" 
+                       className={cn(
+                        "h-8 w-8 bg-transparent border hover:bg-muted",
+                        viewingPerson?.disabled ? "text-green-600 border-green-200" : "text-yellow-600 border-yellow-200"
+                      )}
+                      onClick={() => {
+                        if (viewingPerson) {
+                          requestAuth(() => {
+                            setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
+                              ...u, 
+                              disabled: !u.disabled, 
+                              getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
+                            } : u));
+                            setIsViewPersonDetailsOpen(false);
+                          });
+                        }
+                      }}
+                    >
+                      {viewingPerson?.disabled ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                    </Button>
+                    <Button 
+                       variant="ghost" 
+                       size="icon" 
+                       className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
+                      onClick={() => {
+                        if (viewingPerson) {
+                          requestAuth(() => {
+                            setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
+                            setIsViewPersonDetailsOpen(false);
+                          });
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </Button>
+                    <div className="h-4 w-px bg-border mx-1" />
+                  </>
+                )}
                 <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
                   <X className="h-4 w-4" />
                 </DialogClose>
@@ -8028,7 +9669,7 @@ export default function App() {
                   <div className="flex items-start gap-6 border-b pb-4">
                     <div className="h-24 w-24 rounded-2xl bg-muted flex items-center justify-center overflow-hidden shrink-0 border-2 border-primary/10 shadow-inner">
                       <img 
-                        src={viewingPerson.getPersonDetailsDto.imageUrl || `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`} 
+                        src={getFullImageUrl(viewingPerson.getPersonDetailsDto.imageUrl) || `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`} 
                         alt="Profile" 
                         referrerPolicy="no-referrer"
                         className="h-full w-full object-cover" 
@@ -8222,7 +9863,7 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) setEditingContactId(null); }}>
+      <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) { setEditingContactId(null); setIsNewContactImageSelected(false); } }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-black bg-white shadow-2xl">
           <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b bg-white pr-16">
             <div className="flex items-center justify-between">
@@ -8268,11 +9909,11 @@ export default function App() {
                     <Camera className="h-3 w-3" /> Avatar
                   </Label>
                   <div 
-                    className="relative h-40 w-40 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer group bg-muted/30 hover:bg-muted transition-all shadow-sm"
+                    className="relative h-40 w-40 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer group bg-muted/30 hover:bg-muted transition-all shadow-sm"
                     onClick={() => document.getElementById('contact-avatar-upload')?.click()}
                   >
                     {newContact.imageUrl ? (
-                      <img src={newContact.imageUrl || undefined} alt="Avatar" className="h-full w-full object-cover" />
+                      <img src={getFullImageUrl(newContact.imageUrl) || undefined} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <ImagePlus className="h-8 w-8" />
@@ -8948,34 +10589,38 @@ export default function App() {
       <Dialog open={isViewRoomOpen} onOpenChange={setIsViewRoomOpen}>
         <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (viewingRoom) {
-                  handleEditRoom(viewingRoom);
-                  setIsViewRoomOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (viewingRoom) {
-                  handleDeleteRoom(viewingRoom.id);
-                  setIsViewRoomOpen(false);
-                  setActiveView('facility-rooms');
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (viewingRoom) {
+                      handleEditRoom(viewingRoom);
+                      setIsViewRoomOpen(false);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (viewingRoom) {
+                      handleDeleteRoom(viewingRoom.id);
+                      setIsViewRoomOpen(false);
+                      setActiveView('facility-rooms');
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -8997,13 +10642,13 @@ export default function App() {
                   
                   <div className="space-y-1">
                     <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium">{(sections || []).find(s => s.id === viewingRoom.section)?.name || 'N/A'}</div>
+                    <div className="font-medium">{(sections || []).find(s => s.id.toString() === viewingRoom.section?.toString() || s.id.toString() === currentRoomDto?.sectionId?.toString())?.name || 'N/A'}</div>
                   </div>
                   {currentRoomDto && (
                     <>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{currentRoomDto.createdByName || currentRoomDto.createdBy || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentRoomDto.createdBy) || currentRoomDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -9017,14 +10662,8 @@ export default function App() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
-                        <div className="font-medium">
-                          {currentRoomDto.isDeleted ? <Badge variant="destructive">Deleted</Badge> : <Badge variant="secondary">No</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{currentRoomDto.lastModifiedByName || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentRoomDto.lastModifiedBy) || currentRoomDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
@@ -9260,7 +10899,7 @@ export default function App() {
               <div className="flex items-center gap-4">
                 <div className="h-20 w-20 rounded-full overflow-hidden bg-muted flex items-center justify-center text-3xl font-bold border-4 border-primary/10">
                   {viewingContact.imageUrl ? (
-                    <img src={viewingContact.imageUrl || undefined} alt={viewingContact.firstName} className="h-full w-full object-cover" />
+                    <img src={getFullImageUrl(viewingContact.imageUrl) || undefined} alt={viewingContact.firstName} className="h-full w-full object-cover" />
                   ) : (
                     viewingContact.firstName.charAt(0)
                   )}
@@ -9337,44 +10976,48 @@ export default function App() {
       <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
         <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedHardware) {
-                    setHardwareForm({
-                      ...selectedHardware,
-                      applianceIdNames: selectedHardware.applianceIdNames || [],
-                      cameraIdNames: selectedHardware.cameraIdNames || [],
-                      lightIdNames: selectedHardware.lightIdNames || [],
-                      windowIdNames: selectedHardware.windowIdNames || [],
-                      doorIdNames: selectedHardware.doorIdNames || [],
-                      externalIdNames: selectedHardware.externalIdNames || [],
-                    });
-                    setIsHardwareDetailOpen(false);
-                    setIsEditHardwareOpen(true);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (selectedHardware) {
-                  requestAuth(() => {
-                    setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
-                    setIsHardwareDetailOpen(false);
-                  });
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedHardware) {
+                        setHardwareForm({
+                          ...selectedHardware,
+                          applianceIdNames: selectedHardware.applianceIdNames || [],
+                          cameraIdNames: selectedHardware.cameraIdNames || [],
+                          lightIdNames: selectedHardware.lightIdNames || [],
+                          windowIdNames: selectedHardware.windowIdNames || [],
+                          doorIdNames: selectedHardware.doorIdNames || [],
+                          externalIdNames: selectedHardware.externalIdNames || [],
+                        });
+                        setIsHardwareDetailOpen(false);
+                        setIsEditHardwareOpen(true);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (selectedHardware) {
+                      requestAuth(() => {
+                        setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
+                        setIsHardwareDetailOpen(false);
+                      });
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -9963,36 +11606,11 @@ export default function App() {
                     externalName: externalForm.externalName,
                     actionIds: (externalForm.actionIds || []).map(Number)
                   };
-                  const res: any = await apiFetch('/External/CreateExternal', {
+                  await apiFetch('/External/CreateExternal', {
                     method: 'POST',
                     body: JSON.stringify(payload)
                   });
-                  if (res && res.data) {
-                    setExternals(prev => [...prev, res.data]);
-                    toast.success('External device added successfully!');
-                  } else {
-                    const newExt: GetExternalDto = {
-                      id: Math.floor(Math.random() * 9000) + 1000,
-                      externalName: externalForm.externalName,
-                      externalId: `EXT-DEV-${Math.floor(Math.random() * 80) + 10}`,
-                      isTriggered: false,
-                      isActive: true,
-                      actionIds: externalForm.actionIds || [],
-                      roomId: externalForm.roomId,
-                      sectionId: externalForm.sectionId,
-                      createdBy: 1,
-                      createdByName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                      createdOn: new Date().toISOString(),
-                      lastModifiedBy: 1,
-                      lastModifiedByName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                      lastModifiedOn: new Date().toISOString(),
-                      isDeleted: false,
-                      personId: 1,
-                      peronName: userProfile?.getPersonDetailsDto?.firstName || 'User',
-                      deletedBy: 0
-                    };
-                    setExternals(prev => [...prev, newExt]);
-                  }
+                  toast.success('External device added successfully!');
                   setIsAddExternalOpen(false);
                   addLogEntry('Window Control', `Added Boundary Device: ${externalForm.externalName}`);
                   setExternalForm({});
@@ -10013,41 +11631,45 @@ export default function App() {
       <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedExternal) {
-                  setExternalForm(selectedExternal);
-                  setIsViewExternalOpen(false);
-                  setIsEditExternalOpen(true);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => requestAuth(async () => {
-                try {
-                  if (selectedExternal) {
-                    await apiFetch(`/External/DeleteExternal?externalId=${selectedExternal.id}`, { method: 'PUT' });
-                    setExternals(prev => prev.filter(e => e.id !== selectedExternal.id));
-                    setIsViewExternalOpen(false);
-                    addLogEntry('Hardware Security', `Removed external device: ${selectedExternal.externalName}`);
-                    toast.success('External device removed successfully');
-                  }
-                } catch (err: any) {
-                  toast.error(`Error deleting external device: ${err.message}`);
-                }
-              })}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedExternal) {
+                      setExternalForm(selectedExternal);
+                      setIsViewExternalOpen(false);
+                      setIsEditExternalOpen(true);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => requestAuth(async () => {
+                    try {
+                      if (selectedExternal) {
+                        await apiFetch(`/External/DeleteExternal?externalId=${selectedExternal.id}`, { method: 'PUT' });
+                        setExternals(prev => prev.filter(e => e.id !== selectedExternal.id));
+                        setIsViewExternalOpen(false);
+                        addLogEntry('Hardware Security', `Removed external device: ${selectedExternal.externalName}`);
+                        toast.success('External device removed successfully');
+                      }
+                    } catch (err: any) {
+                      toast.error(`Error deleting external device: ${err.message}`);
+                    }
+                  })}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -10095,7 +11717,7 @@ export default function App() {
                 
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                  <div className="font-medium">{selectedExternal.createdByName || 'System'}</div>
+                  <div className="font-medium">{getUserNameById(selectedExternal.createdBy) || selectedExternal.createdByName || 'System'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -10103,7 +11725,7 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                  <div className="font-medium">{selectedExternal.lastModifiedByName || 'System'}</div>
+                  <div className="font-medium">{getUserNameById(selectedExternal.lastModifiedBy) || selectedExternal.lastModifiedByName || 'System'}</div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
@@ -10327,33 +11949,37 @@ export default function App() {
                   </div>
                   
                   <div className="flex items-center gap-1 z-50">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                      onClick={() => {
-                        if (selectedCamera) {
-                          handleEditDevice(selectedCamera.id, 'camera');
-                          setIsCameraModalOpen(false);
-                        }
-                      }}
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                      onClick={() => {
-                        if (selectedCamera) {
-                          handleDeleteDevice(selectedCamera.id, 'camera');
-                          setIsCameraModalOpen(false);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <div className="h-4 w-px bg-border mx-1" />
+                    {isOwner && (
+                      <>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          onClick={() => {
+                            if (selectedCamera) {
+                              handleEditDevice(selectedCamera.id, 'camera');
+                              setIsCameraModalOpen(false);
+                            }
+                          }}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                          onClick={() => {
+                            if (selectedCamera) {
+                              handleDeleteDevice(selectedCamera.id, 'camera');
+                              setIsCameraModalOpen(false);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <div className="h-4 w-px bg-border mx-1" />
+                      </>
+                    )}
                     <Button 
                       variant="ghost" 
                       size="icon" 
@@ -10497,19 +12123,15 @@ export default function App() {
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                          <div className="font-medium">{(sections || []).find(s => s.id === currentCameraDto?.sectionId)?.name || 'N/A'}</div>
-                        </div>
-                        
-                        
-                        <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                           <div className="font-medium">
-                            {currentCameraDto?.isDeleted ? 'Deleted' : 'No'}
+                            {selectedCamera?.section ? ((sections || []).find(s => s.id.toString() === selectedCamera.section?.toString())?.name || 'N/A') : (currentCameraDto?.sectionId ? ((sections || []).find(s => s.id.toString() === currentCameraDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
                           </div>
                         </div>
+                        
+                        
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                          <div className="font-medium">{currentCameraDto?.createdByName || 'System'}</div>
+                          <div className="font-medium">{getUserNameById(currentCameraDto?.createdBy) || currentCameraDto?.createdByName || 'System'}</div>
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -10517,7 +12139,7 @@ export default function App() {
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                          <div className="font-medium">{currentCameraDto?.lastModifiedByName || 'System'}</div>
+                          <div className="font-medium">{getUserNameById(currentCameraDto?.lastModifiedBy) || currentCameraDto?.lastModifiedByName || 'System'}</div>
                         </div>
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -10643,33 +12265,37 @@ export default function App() {
       <Dialog open={isApplianceModalOpen} onOpenChange={setIsApplianceModalOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedAppliance) {
-                  handleEditDevice(selectedAppliance.id, 'appliance');
-                  setIsApplianceModalOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (selectedAppliance) {
-                  handleDeleteDevice(selectedAppliance.id, 'appliance');
-                  setIsApplianceModalOpen(false);
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedAppliance) {
+                      handleEditDevice(selectedAppliance.id, 'appliance');
+                      setIsApplianceModalOpen(false);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (selectedAppliance) {
+                      handleDeleteDevice(selectedAppliance.id, 'appliance');
+                      setIsApplianceModalOpen(false);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -10718,19 +12344,19 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                      <div className="font-medium">{(sections || []).find(s => s.id === currentApplianceDto.sectionId)?.name || 'N/A'}</div>
-                    </div>
-                    
-                    
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                       <div className="font-medium">
-                        {currentApplianceDto.isDeleted ? 'Deleted' : 'No'}
+                        {selectedAppliance.section ? ((sections || []).find(s => s.id.toString() === selectedAppliance.section?.toString())?.name || 'N/A') : (currentApplianceDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentApplianceDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                      <div className="font-medium">
+                        {selectedAppliance.room ? ((rooms || []).find(r => r.id.toString() === selectedAppliance.room?.toString())?.name || 'N/A') : (currentApplianceDto.roomId ? ((rooms || []).find(r => r.id.toString() === currentApplianceDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
                       </div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                      <div className="font-medium">{currentApplianceDto.createdByName || 'System'}</div>
+                      <div className="font-medium">{getUserNameById(currentApplianceDto.createdBy) || currentApplianceDto.createdByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -10738,7 +12364,7 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                      <div className="font-medium">{currentApplianceDto.lastModifiedByName || 'System'}</div>
+                      <div className="font-medium">{getUserNameById(currentApplianceDto.lastModifiedBy) || currentApplianceDto.lastModifiedByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -10757,33 +12383,37 @@ export default function App() {
       <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedDoor) {
-                  handleEditDevice(selectedDoor.id, 'door');
-                  setIsDoorModalOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (selectedDoor) {
-                  handleDeleteDevice(selectedDoor.id, 'door');
-                  setIsDoorModalOpen(false);
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedDoor) {
+                      handleEditDevice(selectedDoor.id, 'door');
+                      setIsDoorModalOpen(false);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (selectedDoor) {
+                      handleDeleteDevice(selectedDoor.id, 'door');
+                      setIsDoorModalOpen(false);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -10814,13 +12444,21 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Type</span>
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Door Type</span>
                   <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
                 </div>
                 
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">{selectedDoor.section ? (sections || []).find(s => s.id === selectedDoor.section)?.name : 'N/A'}</div>
+                  <div className="font-medium">
+                    {selectedDoor.section ? ((sections || []).find(s => s.id.toString() === selectedDoor.section?.toString())?.name || 'N/A') : (currentDoorDto?.sectionId ? ((sections || []).find(s => s.id.toString() === currentDoorDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                  <div className="font-medium">
+                    {selectedDoor.room ? ((rooms || []).find(r => r.id.toString() === selectedDoor.room?.toString())?.name || 'N/A') : (currentDoorDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentDoorDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
+                  </div>
                 </div>
                 {currentDoorDto && (
                   <>
@@ -10840,15 +12478,8 @@ export default function App() {
                     
                     
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Deletion Status</span>
-                      <div className="font-medium">
-                        {currentDoorDto.isDeleted ? <span className="text-red-500">Deleted (by: {currentDoorDto.deletedBy})</span> : 'Active'}
-                        {currentDoorDto.deletedOn && <div className="text-[10px]">{format(new Date(currentDoorDto.deletedOn), 'PPp')}</div>}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                      <div className="font-medium">{currentDoorDto.createdByName || 'System'}</div>
+                      <div className="font-medium">{getUserNameById(currentDoorDto.createdBy) || currentDoorDto.createdByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -10856,7 +12487,7 @@ export default function App() {
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                      <div className="font-medium">{currentDoorDto.lastModifiedByName || 'System'}</div>
+                      <div className="font-medium">{getUserNameById(currentDoorDto.lastModifiedBy) || currentDoorDto.lastModifiedByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -10874,33 +12505,37 @@ export default function App() {
       <Dialog open={isLightModalOpen} onOpenChange={setIsLightModalOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedLight) {
-                  handleEditDevice(selectedLight.id, 'light');
-                  setIsLightModalOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (selectedLight) {
-                  handleDeleteDevice(selectedLight.id, 'light');
-                  setIsLightModalOpen(false);
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedLight) {
+                      handleEditDevice(selectedLight.id, 'light');
+                      setIsLightModalOpen(false);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (selectedLight) {
+                      handleDeleteDevice(selectedLight.id, 'light');
+                      setIsLightModalOpen(false);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -10933,8 +12568,10 @@ export default function App() {
                   </div>
                   
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium">{selectedLight.section ? (sections || []).find(s => s.id === selectedLight.section)?.name : 'N/A'}</div>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                    <div className="font-medium">
+                      {selectedLight.room ? ((rooms || []).find(r => r.id.toString() === selectedLight.room?.toString())?.name || 'N/A') : (currentLightDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentLightDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
+                    </div>
                   </div>
                   {/* BaseDefaultDto Integration */}
                   {currentLightDto && (
@@ -10953,19 +12590,15 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                        <div className="font-medium">{(sections || []).find(s => s.id === currentLightDto.sectionId)?.name || 'N/A'}</div>
-                      </div>
-                      
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
                         <div className="font-medium">
-                          {currentLightDto.isDeleted ? 'Deleted' : 'No'}
+                          {selectedLight.section ? ((sections || []).find(s => s.id.toString() === selectedLight.section?.toString())?.name || 'N/A') : (currentLightDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentLightDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
                         </div>
                       </div>
+                      
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{currentLightDto.createdByName || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentLightDto.createdBy) || currentLightDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -10973,7 +12606,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{currentLightDto.lastModifiedByName || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentLightDto.lastModifiedBy) || currentLightDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -10991,43 +12624,47 @@ export default function App() {
       <Dialog open={isViewSectionOpen} onOpenChange={setIsViewSectionOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (viewingSection) {
-                  setEditingSection(viewingSection);
-                  setIsEditSectionOpen(true);
-                  setIsViewSectionOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (viewingSection) {
-                  requestAuth(async () => {
-                    try {
-                      await apiFetch(`/Section/DeleteSection?sectionId=${viewingSection.id}`, { method: 'PUT' });
-                      setSections((prev: any) => prev.filter((s: any) => s.id !== viewingSection.id));
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (viewingSection) {
+                      setEditingSection(viewingSection);
+                      setIsEditSectionOpen(true);
                       setIsViewSectionOpen(false);
-                      toast.success("Section deleted successfully");
-                    } catch (err: any) {
-                      console.error("Failed to delete section", err);
-                      toast.error(`Failed to delete section: ${err.message}`);
                     }
-                  });
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (viewingSection) {
+                      requestAuth(async () => {
+                        try {
+                          await apiFetch(`/Section/DeleteSection?sectionId=${viewingSection.id}`, { method: 'PUT' });
+                          setSections((prev: any) => prev.filter((s: any) => s.id !== viewingSection.id));
+                          setIsViewSectionOpen(false);
+                          toast.success("Section deleted successfully");
+                        } catch (err: any) {
+                          console.error("Failed to delete section", err);
+                          toast.error(`Failed to delete section: ${err.message}`);
+                        }
+                      });
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
             <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
@@ -11062,20 +12699,18 @@ export default function App() {
                           {currentSectionDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
-                        <div className="font-medium text-sm">
-                          {currentSectionDto.isDeleted ? <Badge variant="destructive">Deleted</Badge> : <Badge variant="secondary">Active</Badge>}
-                        </div>
-                      </div>
                       
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium text-sm">{currentSectionDto.createdByName || 'System'}</div>
+                        <div className="font-medium text-sm">{getUserNameById(currentSectionDto.createdBy) || currentSectionDto.createdByName || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
                         <div className="font-medium text-sm">{currentSectionDto.createdOn ? format(new Date(currentSectionDto.createdOn), 'PPp') : 'N/A'}</div>
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <div className="font-medium text-sm">{getUserNameById(currentSectionDto.lastModifiedBy) || currentSectionDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -11162,8 +12797,10 @@ export default function App() {
                   </div>
                   
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                    <div className="font-medium text-sm">{selectedWindow.section ? (sections || []).find(s => s.id === selectedWindow.section)?.name : 'N/A'}</div>
+                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                    <div className="font-medium text-sm">
+                      {selectedWindow.room ? ((rooms || []).find(r => r.id.toString() === selectedWindow.room?.toString())?.name || 'N/A') : (currentWindowDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentWindowDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
+                    </div>
                   </div>
                   {/* BaseDefaultDto Integration */}
                   {currentWindowDto && (
@@ -11182,19 +12819,15 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                        <div className="font-medium text-sm">{(sections || []).find(s => s.id === currentWindowDto.sectionId)?.name || 'N/A'}</div>
-                      </div>
-                      
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Deleted Status</span>
-                        <div className="font-medium">
-                          {currentWindowDto.isDeleted ? 'Deleted' : 'No'}
+                        <div className="font-medium text-sm">
+                          {selectedWindow.section ? ((sections || []).find(s => s.id.toString() === selectedWindow.section?.toString())?.name || 'N/A') : (currentWindowDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentWindowDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
                         </div>
                       </div>
+                      
+                      
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{currentWindowDto.createdByName || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentWindowDto.createdBy) || currentWindowDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
@@ -11202,7 +12835,7 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{currentWindowDto.lastModifiedByName || 'System'}</div>
+                        <div className="font-medium">{getUserNameById(currentWindowDto.lastModifiedBy) || currentWindowDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
@@ -11423,7 +13056,9 @@ export default function App() {
                   <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
                     <UserCircle className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-slate-200">{selectedAction?.createdByName || 'System'}</div>
+                  <div className="font-bold text-slate-700 dark:text-slate-200">
+                    {getUserNameById(selectedAction?.createdBy) || selectedAction?.createdByName || 'System'}
+                  </div>
                   <div className="text-xs text-slate-400 ml-auto">{selectedAction?.createdOn ? format(new Date(selectedAction.createdOn), 'PP') : 'N/A'}</div>
                 </div>
               </div>
@@ -11433,7 +13068,9 @@ export default function App() {
                   <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
                     <Settings2 className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-slate-200">{selectedAction?.lastModifiedByName || 'System'}</div>
+                  <div className="font-bold text-slate-700 dark:text-slate-200">
+                    {getUserNameById(selectedAction?.lastModifiedBy) || selectedAction?.lastModifiedByName || 'System'}
+                  </div>
                   <div className="text-xs text-slate-400 ml-auto">{selectedAction?.lastModifiedOn ? format(new Date(selectedAction.lastModifiedOn), 'PP') : 'N/A'}</div>
                 </div>
               </div>
@@ -12024,18 +13661,19 @@ export default function App() {
               </div>
             </div>
 
-            <ScrollArea className="flex-1 bg-white">
+            <div className="flex-1 bg-white overflow-y-auto no-scrollbar">
               <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
                 <div className="divide-y divide-slate-50 w-full">
                   {(chats || [])
                     .filter(c => !chatSearchQuery || (c.name || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
                     .map((chat) => {
                     const chatMsgs = chatMessages.filter(m => m.chatId === chat.id);
-                    const lastMsg = chatMsgs.length > 0 ? chatMsgs[chatMsgs.length - 1] : chat.lastMessage;
+                    const sortedChatMsgs = [...chatMsgs].sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime());
+                    const lastMsg = sortedChatMsgs.length > 0 ? sortedChatMsgs[sortedChatMsgs.length - 1] : chat.lastMessage;
                     const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
                     
                     const activeChatTypers = typingUsers[chat.id] || {};
-                    const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
+                    const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
                     const isTypingInChat = typers.length > 0;
                     
                     return (
@@ -12081,22 +13719,39 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1 min-w-0">
+                            <div className="flex items-center gap-1 min-w-0 w-full">
                               {isTypingInChat ? (
                                 <p className="text-[14px] text-[#25d366] font-semibold truncate leading-relaxed animate-pulse">
-                                  {typers[0].name} typing...
+                                  {typers[0].name} {typers[0].action?.toLowerCase() === 'recording voice message' ? 'recording voice message...' : 'typing...'}
                                 </p>
                               ) : (
-                                <>
-                                  {lastMsg && lastMsg.senderPersonId === userProfile.id && <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" />}
-                                  <p className="text-[14px] text-[#667781] truncate leading-relaxed">
-                                    {lastMsg ? (lastMsg.isDeleted ? 'This message was deleted' : lastMsg.content) : 'No messages yet'}
-                                  </p>
-                                </>
+                                <p className="text-[14px] text-[#667781] truncate leading-relaxed w-full">
+                                  {(() => {
+                                    if (!lastMsg) return 'No messages yet';
+                                    if (lastMsg.isDeleted) return 'This message was deleted';
+                                    
+                                    let msgContent = lastMsg.content || '';
+                                    if (!msgContent && lastMsg.attachments && lastMsg.attachments.length > 0) {
+                                      msgContent = formatLastMessageAttachmentsText(lastMsg.attachments);
+                                    }
+
+                                    let prefixStr = '';
+                                    if (lastMsg.senderPersonId === userProfile?.id) {
+                                      prefixStr = 'You: ';
+                                    } else if (chat.isGroup) {
+                                      const senderUser = (allUsers || []).find(u => u.id === lastMsg.senderPersonId);
+                                      const firstName = senderUser?.getPersonDetailsDto?.firstName || 'User';
+                                      prefixStr = `${firstName}: `;
+                                    }
+
+                                    const combined = prefixStr + msgContent;
+                                    return combined.length > 35 ? combined.substring(0, 35) + '...' : combined;
+                                  })()}
+                                </p>
                               )}
                             </div>
                             {chat.unreadCount > 0 && (
-                              <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm">
+                              <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm shrink-0">
                                 {chat.unreadCount}
                               </div>
                             )}
@@ -12107,10 +13762,8 @@ export default function App() {
                   })}
                 </div>
               </PullToRefresh>
-            </ScrollArea>
+            </div>
           </div>
-
-          {/* Chat Box (Dynamic Width) */}
           <div className="flex flex-col bg-[#efeae2] relative overflow-hidden flex-1 h-full transition-all duration-300">
             {activeChatId ? (
               <>
@@ -12145,15 +13798,18 @@ export default function App() {
                           <div className="flex items-center gap-1.5 ">
                             {(() => {
                               const activeChatTypers = typingUsers[chat.id] || {};
-                              const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
+                              const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
                               if (typers.length > 0) {
+                                const actionText = typers[0].action?.toLowerCase() === 'recording voice message' 
+                                  ? 'is recording a voice message...' 
+                                  : 'is typing...';
                                 return (
                                   <span className="text-[12px] text-emerald-600 font-bold leading-none flex items-center gap-1 animate-pulse">
                                     <span className="relative flex h-1.5 w-1.5">
                                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                                     </span>
-                                    {typers[0].name} is typing...
+                                    {typers[0].name} {actionText}
                                   </span>
                                 );
                               }
@@ -12204,7 +13860,7 @@ export default function App() {
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                             <Input 
                               placeholder="Search messages..." 
-                              className="h-8 pl-8 text-xs bg-white border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
+                              className="h-8 pl-8 text-xs bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
                               value={messageSearchQuery}
                               onChange={(e) => setMessageSearchQuery(e.target.value)}
                             />
@@ -12272,10 +13928,16 @@ export default function App() {
 
                       <div className="space-y-4 flex-1">
                         {(() => {
+                           const chat = (chats || []).find(c => c.id === activeChatId);
                            const currentMessages = chatMessages.filter(m => 
                             m.chatId === activeChatId && 
                             (!messageSearchQuery || m.content?.toLowerCase().includes(messageSearchQuery.toLowerCase()))).sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime()
                           );
+
+                          const unreadStartIndex = currentMessages.length - activeChatUnreadCount;
+                          const unreadBoundaryMessageId = (activeChatUnreadCount > 0 && unreadStartIndex >= 0 && unreadStartIndex < currentMessages.length) 
+                            ? currentMessages[unreadStartIndex].id 
+                            : null;
 
                           if (currentMessages.length === 0) {
                             return (
@@ -12307,14 +13969,28 @@ export default function App() {
                                       <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">{group.label}</span>
                                     </div>
                                     {group.messages.map((msg, idx) => {
-                                      const isMe = msg.senderPersonId === userProfile.id;
-                                      const isTextType = !msg.type || msg.type === MessageType.Text || String(msg.type) === "1" || String(msg.type).toLowerCase() === "text" || !msg.attachments || msg.attachments.length === 0;
-                                      const isImageType = (msg.type === MessageType.Image || String(msg.type) === "2" || String(msg.type).toLowerCase() === "image") && msg.attachments && msg.attachments.length > 0;
+                                      const isMe = msg.senderPersonId?.toString() === userProfile?.id?.toString();
+                                      const isTextType = msg.type === MessageType.Text || String(msg.type) === "0" || String(msg.type).toLowerCase() === "text" || !msg.attachments || msg.attachments.length === 0;
+                                      const isImageType = (msg.type === MessageType.Image || String(msg.type) === "1" || String(msg.type).toLowerCase() === "image") && msg.attachments && msg.attachments.length > 0;
                                       const isFileType = (msg.type === MessageType.File || String(msg.type) === "4" || String(msg.type).toLowerCase() === "file") && msg.attachments && msg.attachments.length > 0;
-                                      const isVideoType = (msg.type === MessageType.Video || String(msg.type) === "3" || String(msg.type).toLowerCase() === "video") && msg.attachments && msg.attachments.length > 0;
-                                      const isAudioType = (msg.type === MessageType.Audio || String(msg.type) === "7" || String(msg.type).toLowerCase() === "audio") && msg.attachments && msg.attachments.length > 0;
+                                      const isVideoType = (msg.type === MessageType.Video || String(msg.type) === "2" || String(msg.type).toLowerCase() === "video") && msg.attachments && msg.attachments.length > 0;
+                                      const isAudioType = (msg.type === MessageType.Audio || String(msg.type) === "3" || String(msg.type).toLowerCase() === "audio") && msg.attachments && msg.attachments.length > 0;
+                                      const showUnreadDivider = msg.id === unreadBoundaryMessageId;
                                       return (
-                                        <motion.div 
+                                        <React.Fragment key={msg.id || idx}>
+                                          {showUnreadDivider && (
+                                            <div className="flex items-center justify-center my-6 relative w-full col-span-full py-2 px-4 select-none">
+                                              <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                                                <div className="w-full border-t border-[#c0e0fc]" />
+                                              </div>
+                                              <div className="relative flex justify-center z-10">
+                                                <span className="bg-[#e1f3ff] text-[#007bfc] px-4 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest shadow-sm border border-[#b2dbff] flex items-center gap-1.5">
+                                                  {activeChatUnreadCount} Unread Message{activeChatUnreadCount > 1 ? 's' : ''}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          )}
+                                          <motion.div 
                                           initial={{ opacity: 0, y: 15, scale: 0.95 }}
                                           animate={{ opacity: 1, y: 0, scale: 1 }}
                                           transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
@@ -12329,12 +14005,15 @@ export default function App() {
                                             }
                                           }}
                                           key={msg.id || idx} 
+                                          id={`msg-${msg.id}`}
                                           className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start", selectedMessageId === msg.id ? "z-50 relative" : "")}
                                         >
                                           <div 
                                             className={cn(
-                                              "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all",
-                                              isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12",
+                                              "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all duration-300",
+                                              highlightedMessageId === msg.id 
+                                                ? "bg-[#fff59d] ring-2 ring-amber-400 scale-[1.03] shadow-md rounded-xl ml-6 mr-6" 
+                                                : (isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12"),
                                               selectedMessageId === msg.id ? "shadow-2xl scale-[1.02]" : ""
                                             )}
                                             onTouchStart={(e) => {
@@ -12363,102 +14042,153 @@ export default function App() {
                                             )}
 
                                             <div className="px-1 py-0.5">
-                                              {msg.replyToId && (
-                                                <div className="mb-2 p-2 bg-black/5 rounded-lg border-l-4 border-primary text-[13px] bg-white/40">
+                                              {msg.isDeleted ? (
+                                                <div className="flex items-center gap-2 text-slate-400/80 italic text-[14px] py-1.5 select-none min-w-[175px]">
+                                                  <Ban className="h-4 w-4 text-slate-400/50 shrink-0" />
+                                                  <span>This message was deleted</span>
+                                                </div>
+                                              ) : (
+                                                <>
                                                   {(() => {
-                                                    const repliedMsg = (chatMessages || []).find(m => m.id === msg.replyToId);
-                                                    return repliedMsg ? (
-                                                      <>
-                                                        <p className="font-bold text-primary text-[11px] mb-0.5">{getMessageSenderName(repliedMsg)}</p>
-                                                        <p className="truncate text-slate-500 italic">
-                                                          {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type]}]`}
-                                                        </p>
-                                                      </>
-                                                    ) : (
-                                                      <p className="text-slate-400 italic">Original message unavailable</p>
+                                                    const hasReply = !!(msg.replyToId || msg.replyTo);
+                                                    if (!hasReply) return null;
+                                                    const replyId = msg.replyToId || msg.replyTo?.id;
+                                                    const repliedMsg = (chatMessages || []).find(m => m.id?.toString() === replyId?.toString()) || 
+                                                                       allMessagesMapRef.current.get(replyId?.toString() || "") || 
+                                                                       msg.replyTo;
+                                                    return (
+                                                      <div 
+                                                        className="mb-1 rounded-[4px] border-l-[3px] border-[#1fa855] bg-black/5 overflow-hidden cursor-pointer hover:bg-black/10 transition-colors select-none"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          if (replyId) {
+                                                            const targetId = `msg-${replyId}`;
+                                                            const target = document.getElementById(targetId);
+                                                            if (target) {
+                                                              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                              const numId = Number(replyId);
+                                                              setHighlightedMessageId(isNaN(numId) ? (replyId as any) : numId);
+                                                              setTimeout(() => {
+                                                                setHighlightedMessageId(null);
+                                                              }, 2000);
+                                                            } else {
+                                                              toast.error("Referenced message not loaded in view");
+                                                            }
+                                                          }
+                                                        }}
+                                                      >
+                                                        <div className="px-2 py-1 bg-white/30 flex flex-col justify-center min-h-[36px]">
+                                                          {repliedMsg ? (
+                                                            <>
+                                                              <p className="font-semibold text-[#1fa855] text-[12px] leading-tight mb-0.5">
+                                                                {getMessageSenderName(repliedMsg)}
+                                                              </p>
+                                                              <p className="truncate text-slate-500 text-[12px] leading-tight opacity-90">
+                                                                {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type] || 'Attachment'}]`}
+                                                              </p>
+                                                            </>
+                                                          ) : (
+                                                            <p className="text-slate-400 italic text-[11px]">Original message reference</p>
+                                                          )}
+                                                        </div>
+                                                      </div>
                                                     );
                                                   })()}
-                                                </div>
-                                              )}
-                                              {isTextType && (
-                                                <p className="text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap">{msg.content}</p>
-                                              )}
-                                              {isImageType && (
-                                                <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
-                                                  <div className={cn(
-                                                    "grid gap-0.5 rounded-md overflow-hidden",
-                                                    msg.attachments.length === 1 ? "grid-cols-1" : 
-                                                    msg.attachments.length === 2 ? "grid-cols-2" : 
-                                                    "grid-cols-2"
-                                                  )}>
-                                                    {msg.attachments.map((att, idx) => (
-                                                      <img 
-                                                        key={idx}
-                                                        src={att.filePath || undefined} 
-                                                        alt="uploaded" 
-                                                        className={cn(
-                                                          "w-full h-auto object-cover hover:opacity-95 transition-opacity cursor-pointer shadow-sm",
-                                                          msg.attachments.length > 1 ? "aspect-square" : "max-h-[400px]"
+                                                  {/* Message text content */}
+                                                  {/* Dynamic attachments list based on individual attachment type */}
+                                                  {msg.attachments && msg.attachments.length > 0 && (() => {
+                                                    const mediaAttachments = msg.attachments.filter(att => {
+                                                      const isImg = att.type === MessageType.Image || att.contentType?.startsWith('image/') || att.filePath?.startsWith('data:image');
+                                                      const isVid = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.startsWith('data:video');
+                                                      return isImg || isVid;
+                                                    });
+                                                    const otherAttachments = msg.attachments.filter(att => {
+                                                      const isImg = att.type === MessageType.Image || att.contentType?.startsWith('image/') || att.filePath?.startsWith('data:image');
+                                                      const isVid = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.startsWith('data:video');
+                                                      return !isImg && !isVid;
+                                                    });
+
+                                                    return (
+                                                      <div className="mt-1 space-y-2">
+                                                        {mediaAttachments.length > 0 && (
+                                                          <div className="relative rounded-xl overflow-hidden">
+                                                            <WhatsAppMediaGrid 
+                                                              media={mediaAttachments} 
+                                                              onMediaClick={(url) => {
+                                                                const idx = mediaAttachments.findIndex(att => {
+                                                                  const fullUrl = getFullImageUrl(att.filePath);
+                                                                  return fullUrl === url;
+                                                                });
+                                                                setGalleryMedia(mediaAttachments);
+                                                                setGalleryIndex(idx !== -1 ? idx : 0);
+                                                                setSlideDirection(1);
+                                                                setIsPreviewModalOpen(true);
+                                                              }}
+                                                            />
+                                                            {(msg as any).status === 'sending' && (
+                                                              <div className="absolute inset-0 bg-black/30 backdrop-blur-xs flex items-center justify-center z-10">
+                                                                <div className="bg-white/95 p-2 rounded-full shadow-lg">
+                                                                  <CircularProgress progress={uploadProgress[msg.id] || 0} />
+                                                                </div>
+                                                              </div>
+                                                            )}
+                                                          </div>
                                                         )}
-                                                        onClick={() => {
-                                                          setPreviewMediaUrl(att.filePath);
-                                                          setIsPreviewModalOpen(true);
-                                                        }}
-                                                        referrerPolicy="no-referrer"
-                                                      />
-                                                    ))}
-                                                  </div>
-                                                  {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
-                                                </div>
-                                              )}
-                                              {isFileType && (
-                                                <div className="space-y-1">
-                                                  {msg.attachments.map((att, idx) => (
-                                                    <div key={idx} className="flex items-center gap-3 bg-black/5 p-3 rounded-xl min-w-[280px] hover:bg-black/10 transition-colors cursor-pointer group/file border border-black/5">
-                                                      <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
-                                                        <FileText className="h-7 w-7 text-white" />
+                                                        {otherAttachments.map((att, idx) => {
+                                                          const fullUrl = getFullImageUrl(att.filePath);
+                                                          const isAudio = att.type === MessageType.Audio || att.contentType?.startsWith('audio/') || att.filePath?.startsWith('data:audio');
+                                                          if (isAudio) {
+                                                            return (
+                                                              <div key={idx} className="mb-1">
+                                                                <CustomAudioPlayer 
+                                                                  src={fullUrl || ""} 
+                                                                  fileName={att.fileName || "Audio Message"} 
+                                                                  isSending={(msg as any).status === 'sending'}
+                                                                  progress={uploadProgress[msg.id] || 0}
+                                                                />
+                                                              </div>
+                                                            );
+                                                          }
+                                                          // Default / File type (Ensure transparent background to match bubble)
+                                                          return (
+                                                            <div 
+                                                              key={idx} 
+                                                              className="flex items-center gap-3 bg-transparent p-2 rounded-xl min-w-[280px] hover:bg-black/[0.03] transition-colors cursor-pointer group/file border border-black/5"
+                                                              onClick={(e) => { if (fullUrl) handleDownloadFile(e, fullUrl, att.fileName || 'download'); }}
+                                                            >
+                                                              <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
+                                                                <FileText className="h-7 w-7 text-white" />
+                                                              </div>
+                                                              <div className="flex-1 min-w-0">
+                                                                <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
+                                                                <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
+                                                                  {att.contentType?.split('/')[1]?.toUpperCase() || att.fileName?.split('.').pop()?.toUpperCase() || 'FILE'} • {(att.fileSize ? (att.fileSize / 1024 / 1024).toFixed(1) : '0.0')} MB
+                                                                </p>
+                                                              </div>
+                                                              {(msg as any).status === 'sending' ? (
+                                                                <CircularProgress progress={uploadProgress[msg.id] || 0} />
+                                                              ) : (
+                                                                <Button variant="ghost" size="icon" className="h-9 w-9 bg-black/5 hover:bg-black/10 shrink-0 rounded-full" onClick={(e) => { if (fullUrl) handleDownloadFile(e, fullUrl, att.fileName || 'download'); }}>
+                                                                  <Download className="h-4 w-4" />
+                                                                </Button>
+                                                              )}
+                                                            </div>
+                                                          );
+                                                        })}
                                                       </div>
-                                                      <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
-                                                        <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
-                                                          {att.contentType.split('/')[1]?.toUpperCase() || 'FILE'} • {(att.fileSize / 1024 / 1024).toFixed(1)} MB
-                                                        </p>
-                                                      </div>
-                                                      <Button variant="ghost" size="icon" className="h-9 w-9 bg-white/50 hover:bg-white shrink-0 rounded-full">
-                                                        <Download className="h-4 w-4" />
-                                                      </Button>
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                              )}
-                                              {isVideoType && (
-                                                <div className="space-y-1.5 rounded-lg overflow-hidden bg-black/5 p-1 border border-black/5">
-                                                  {msg.attachments.map((att, idx) => (
-                                                    <video 
-                                                      key={idx}
-                                                      src={att.filePath || undefined} 
-                                                      controls 
-                                                      className="w-full rounded-md shadow-sm max-h-[300px] object-cover" 
-                                                    />
-                                                  ))}
-                                                  {msg.content && <p className="px-1 py-1 text-[13px] text-[#111b21]">{msg.content}</p>}
-                                                </div>
-                                              )}
-                                              {isAudioType && (
-                                                <div className="space-y-1 p-2 bg-black/5 rounded-xl border border-black/5 min-w-[280px]">
-                                                  {msg.attachments.map((att, idx) => (
-                                                    <div key={idx} className="flex items-center gap-3">
-                                                      <div className="h-10 w-10 rounded-full bg-emerald-500 flex items-center justify-center text-white shrink-0">
-                                                        <Volume2 className="h-5 w-5" />
-                                                      </div>
-                                                      <div className="flex-1 min-w-0">
-                                                        <audio src={att.filePath || undefined} controls className="w-full h-8 scale-90 origin-left" />
-                                                        <p className="text-[10px] text-[#667781] px-1 truncate">{att.fileName}</p>
-                                                      </div>
-                                                    </div>
-                                                  ))}
-                                                  {msg.content && <p className="px-1 pt-1 text-[13px] text-[#111b21]">{msg.content}</p>}
-                                                </div>
+                                                    );
+                                                  })()}
+
+                                                  {/* Message text content */}
+                                                  {msg.content && (
+                                                    <p className={cn(
+                                                      "text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap",
+                                                      msg.attachments && msg.attachments.length > 0 ? "mt-2" : "mt-0"
+                                                    )}>
+                                                      {msg.content}
+                                                    </p>
+                                                  )}
+                                                </>
                                               )}
                                               
                                               <div className="flex items-center justify-end gap-1 mt-1 shrink-0 select-none whitespace-nowrap">
@@ -12472,12 +14202,20 @@ export default function App() {
                                                   if ((msg as any).status === 'sending') {
                                                     return <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0 animate-pulse" />;
                                                   }
-                                                  return <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb] shrink-0" />;
+                                                  const tickStatus = getMessageTickStatus(msg, chat);
+                                                  if (tickStatus === 'blue') {
+                                                    return <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb] shrink-0" />;
+                                                  }
+                                                  if (tickStatus === 'single') {
+                                                    return <Check className="h-3.5 w-3.5 text-slate-400 shrink-0" />;
+                                                  }
+                                                  return <CheckCheck className="h-3.5 w-3.5 text-slate-400 shrink-0" />;
                                                 })()}
                                               </div>
                                             </div>
                                           </div>
                                         </motion.div>
+                                      </React.Fragment>
                                       );
                                     })}
                                   </div>
@@ -12487,27 +14225,30 @@ export default function App() {
                               {/* Active Typers Bubble inside Chat Box, pushing the last message upward */}
                               {(() => {
                                 const activeChatTypers = typingUsers[activeChatId!] || {};
-                                const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean }[]).filter(t => t.isTyping);
-                                return typers.map((typer, tIdx) => (
-                                  <motion.div
-                                    key={`typer-bubble-${tIdx}`}
-                                    initial={{ opacity: 0, y: 15, scale: 0.95 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    className="flex w-full mb-1 justify-start"
-                                  >
-                                    <div className="bg-white rounded-xl rounded-tl-none mr-12 p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] max-w-[80%] flex flex-col">
-                                      <span className="text-xs font-bold text-primary mb-1">{typer.name}</span>
-                                      <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-sm">
-                                        <span>typing</span>
-                                        <span className="flex gap-0.5 items-end h-3 pl-1">
-                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce" />
-                                        </span>
+                                const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
+                                return typers.map((typer, tIdx) => {
+                                  const isRecording = typer.action?.toLowerCase() === 'recording voice message';
+                                  return (
+                                    <motion.div
+                                      key={`typer-bubble-${tIdx}`}
+                                      initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      className="flex w-full mb-1 justify-start"
+                                    >
+                                      <div className="bg-white rounded-xl rounded-tl-none mr-12 p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] max-w-[80%] flex flex-col">
+                                        <span className="text-xs font-bold text-primary mb-1">{typer.name}</span>
+                                        <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-sm">
+                                          <span>{isRecording ? "recording" : "typing"}</span>
+                                          <span className="flex gap-0.5 items-end h-3 pl-1">
+                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce" />
+                                          </span>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </motion.div>
-                                ));
+                                    </motion.div>
+                                  );
+                                });
                               })()}
 
                               </PullToRefresh>
@@ -12523,6 +14264,30 @@ export default function App() {
                   {selectedMessageId === null && (
                     <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#efeae2] to-transparent z-10 pointer-events-none" />
                   )}
+
+                  {/* Floating Scroll to Bottom Button with Triple Down Chevron Icon */}
+                  <AnimatePresence>
+                    {showScrollToBottom && (
+                      <motion.button
+                        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                        onClick={() => {
+                          if (chatEndRef.current) {
+                            chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+                          }
+                        }}
+                        className="absolute bottom-6 right-6 h-11 w-11 rounded-full bg-white text-[#54656f] hover:text-[#111b21] flex items-center justify-center shadow-[0_2px_5px_0_rgba(11,20,26,.26),0_2px_10px_0_rgba(11,20,26,.16)] transition-all active:scale-95 hover:bg-slate-50 z-20 cursor-pointer"
+                        title="Scroll to bottom"
+                      >
+                        <div className="flex flex-col items-center -space-y-1.5 select-none pointer-events-none">
+                          <ChevronDown className="h-4 w-4 stroke-[2.5]" />
+                          <ChevronDown className="h-4 w-4 stroke-[2.5] opacity-85" />
+                          <ChevronDown className="h-4 w-4 stroke-[2.5] opacity-65" />
+                        </div>
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
 
                   {/* Restrictive Context Menu Dropdown & Backdrop */}
                   {selectedMessageId !== null && selectedMessageRect && (() => {
@@ -12545,31 +14310,26 @@ export default function App() {
                     const spaceBelow = containerRect.height - (relativeTop + selectedMessageRect.height);
                     const spaceAbove = relativeTop;
                     
-                    // Decide vertical alignment direction (above/below message bubble)
                     const positionY = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove) ? 'below' : 'above';
                     
-                    const spaceOnRightOfLeftEdge = containerRect.width - relativeLeft;
-                    const spaceOnLeftOfRightEdge = relativeLeft + selectedMessageRect.width;
-                    
-                    let targetLeft = relativeLeft;
-                    if (isMe) {
-                      // Align right edge of options with right edge of message sent by the user at all times
-                      targetLeft = relativeLeft + selectedMessageRect.width - dropdownWidth;
+                    let targetTop = positionY === 'below' 
+                      ? relativeTop + selectedMessageRect.height + 8
+                      : relativeTop - dropdownHeight - 8;
+                      
+                    const isVoiceNote = msg.type === MessageType.Audio || (msg.content && msg.content.includes('/api/voice'));
+                    const isShortMsg = msg.type === MessageType.Text && (msg.content || "").length < 60 && selectedMessageRect.width < containerRect.width * 0.75;
+                    const shouldForceAlign = isVoiceNote || isShortMsg;
+
+                    let targetLeft = isMe 
+                      ? relativeLeft + selectedMessageRect.width - dropdownWidth 
+                      : relativeLeft;
+                      
+                    if (!shouldForceAlign) {
+                      // Keep horizontally bound inside messages area with safe padding
+                      targetLeft = Math.max(16, Math.min(containerRect.width - dropdownWidth - 16, targetLeft));
                     } else {
-                      if (spaceOnRightOfLeftEdge < dropdownWidth && spaceOnLeftOfRightEdge >= dropdownWidth) {
-                        // Align with right side of the bubble
-                        targetLeft = relativeLeft + selectedMessageRect.width - dropdownWidth;
-                      }
-                    }
-                    
-                    // Keep horizontally bound inside messages area with safe padding, prioritizing user's alignment
-                    targetLeft = Math.max(16, Math.min(containerRect.width - dropdownWidth - 16, targetLeft));
-                    
-                    let targetTop = 0;
-                    if (positionY === 'below') {
-                      targetTop = relativeTop + selectedMessageRect.height + 8;
-                    } else {
-                      targetTop = relativeTop - dropdownHeight - 8;
+                      // Still keep it bound within the container boundaries to prevent viewport overflow, but try to preserve alignment
+                      targetLeft = Math.max(8, Math.min(containerRect.width - dropdownWidth - 8, targetLeft));
                     }
                     
                     return (
@@ -12601,7 +14361,7 @@ export default function App() {
                                     chatId: msg.chatId,
                                     content: msg.content || "",
                                     type: msg.type,
-                                    attachments: msg.attachments || []
+                                    attachments: msg.attachments || [],
                                   };
                                   handleSendMessage(resendDto, msg.id);
                                 }}
@@ -12715,27 +14475,6 @@ export default function App() {
 
                 <footer className="p-3.5 bg-[#f0f2f5] border-t shrink-0 z-50">
                   <div className="flex flex-col gap-2 relative">
-                    {/* Replying UI */}
-                    {replyingTo && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mx-auto w-[95%] bg-white/80 backdrop-blur-sm p-3 rounded-t-xl border-t border-l border-r border-[#d1d7db] flex items-center justify-between gap-3 shadow-sm"
-                      >
-                        <div className="border-l-4 border-primary pl-3 flex-1 overflow-hidden">
-                          <p className="text-xs font-bold text-primary mb-0.5">{replyingTo.senderName}</p>
-                          <p className="text-sm text-[#667781] truncate">{replyingTo.content}</p>
-                        </div>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => setReplyingTo(null)}
-                          className="h-8 w-8 rounded-full hover:bg-slate-200"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </motion.div>
-                    )}
 
                     <div className="flex items-center gap-2 max-w-[95%] mx-auto relative w-full">
                       <div className="flex items-center shrink-0">
@@ -12764,7 +14503,7 @@ export default function App() {
                         </Popover>
                         
                         <label htmlFor="file-upload" className="cursor-pointer">
-                          <input type="file" id="file-upload" className="hidden" onChange={(e) => handleFileUpload(e, 'file')} />
+                          <input type="file" id="file-upload" className="hidden" multiple onChange={(e) => handleFileUpload(e, 'file')} />
                           <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
                             <Paperclip className="h-6 w-6" />
                           </div>
@@ -12793,33 +14532,213 @@ export default function App() {
                   </div>
                 )}
                 <div className="relative">
-                  {isRecording ? (
+                  {recordingState !== 'inactive' ? (
                         <div className="flex-1 h-12 flex items-center px-4 bg-white rounded-xl shadow-sm border animate-in fade-in slide-in-from-bottom-2">
                           <div className="flex items-center gap-3 w-full">
-                            <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse shrink-0" />
-                            <span className="text-sm font-bold text-[#111b21] min-w-[50px] shrink-0">
-                              {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
-                            </span>
-                            <div className="flex-1 flex items-center justify-center gap-1.5 h-8">
-                               {Array.from({length: 16}).map((_, i) => (
-                                 <div 
-                                   key={i} 
-                                   className="w-1.5 bg-[#1DB954] rounded-full spotify-bar" 
-                                   style={{ 
-                                      animationDelay: `${i * 0.08}s`,
-                                      animationDuration: `${0.6 + Math.random() * 0.4}s`
-                                   }} 
-                                 />
-                               ))}
-                            </div>
+                            
                             <Button 
                               variant="ghost" 
-                              size="sm" 
-                              className="text-destructive font-bold h-8 px-2 shrink-0"
-                              onClick={() => setIsRecording(false)}
+                              size="icon" 
+                              className="text-destructive shrink-0 h-8 w-8 rounded-full"
+                              onClick={() => {
+                                if (mediaRecorderRef.current) {
+                                  (mediaRecorderRef.current as any).isCancelled = true;
+                                  if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
+                                    mediaRecorderRef.current.stop();
+                                  }
+                                }
+                                setIsRecording(false);
+                                setRecordingState('inactive');
+                                setRecordingTime(0);
+                                setActiveStream(null);
+                                setSwipeX(0);
+                                if (playbackAudioRef.current) {
+                                  playbackAudioRef.current.pause();
+                                  playbackAudioRef.current.src = "";
+                                }
+                                setPlaybackPreviewUrl(null);
+                                setPlaybackPreviewPlaying(false);
+                              }}
                             >
-                              Cancel
+                              <Trash2 className="h-5 w-5" />
                             </Button>
+
+                            {recordingState === 'recording' ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100 shrink-0 animate-in fade-in"
+                                  onClick={() => {
+                                     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                                       (mediaRecorderRef.current as any).isPauseStop = true;
+                                       mediaRecorderRef.current.stop();
+                                       setRecordingState('paused');
+                                     }
+                                  }}
+                                >
+                                  <Pause className="h-5 w-5" />
+                                </Button>
+
+                                <motion.div
+                                  drag="x"
+                                  dragConstraints={{ left: -140, right: 0 }}
+                                  dragElastic={{ left: 0.1, right: 0 }}
+                                  onDrag={(_, info) => {
+                                    setSwipeX(info.offset.x);
+                                  }}
+                                  onDragEnd={(_, info) => {
+                                    if (info.offset.x < -90) {
+                                      if (mediaRecorderRef.current) {
+                                        (mediaRecorderRef.current as any).isCancelled = true;
+                                        if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
+                                          mediaRecorderRef.current.stop();
+                                        }
+                                      }
+                                      setIsRecording(false);
+                                      setRecordingState('inactive');
+                                      setRecordingTime(0);
+                                      setActiveStream(null);
+                                      setSwipeX(0);
+                                      if (playbackAudioRef.current) {
+                                        playbackAudioRef.current.pause();
+                                        playbackAudioRef.current.src = "";
+                                      }
+                                      setPlaybackPreviewUrl(null);
+                                      setPlaybackPreviewPlaying(false);
+                                      require('react-hot-toast').toast.success("Recording discarded");
+                                    } else {
+                                      setSwipeX(0);
+                                    }
+                                  }}
+                                  style={{ x: swipeX }}
+                                  className="flex-1 flex items-center justify-between px-3 py-1 bg-slate-50 border border-slate-100 rounded-full cursor-grab active:cursor-grabbing select-none"
+                                >
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+                                    <span className="text-xs font-bold font-mono text-[#111b21] min-w-[36px]">
+                                      {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                                    </span>
+                                  </div>
+
+                                  {/* Waveform Visualization */}
+                                  <RecordingWaveform stream={activeStream} />
+
+                                  <div className="flex items-center gap-1 text-[#54656f] shrink-0">
+                                    <motion.span
+                                      animate={{ x: [0, -4, 0] }}
+                                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                                      className="text-xs font-medium tracking-tight whitespace-nowrap"
+                                    >
+                                      {swipeX < -40 ? "Release to cancel" : "Slide left to cancel ⟨⟨"}
+                                    </motion.span>
+                                  </div>
+                                </motion.div>
+                              </>
+                            ) : (
+                              /* Paused state preview layout */
+                              <>
+                                <div className="flex-1 flex items-center justify-center gap-4 h-8">
+                                   <div className="flex items-center gap-4">
+                                     <Button
+                                       variant="ghost"
+                                       size="icon"
+                                       className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100"
+                                       onClick={async () => {
+                                          if (!playbackPreviewUrl) {
+                                             const mergedBlob = new Blob(voiceNotePartsRef.current, { type: 'audio/mp3' });
+                                             const url = URL.createObjectURL(mergedBlob);
+                                             setPlaybackPreviewUrl(url);
+                                             if (!playbackAudioRef.current) {
+                                               playbackAudioRef.current = new Audio();
+                                             }
+                                             playbackAudioRef.current.onended = () => {
+                                               setPlaybackPreviewPlaying(false);
+                                             };
+                                             playbackAudioRef.current.src = url;
+                                             playbackAudioRef.current.play();
+                                             setPlaybackPreviewPlaying(true);
+                                          } else if (playbackAudioRef.current) {
+                                             if (playbackPreviewPlaying) {
+                                               playbackAudioRef.current.pause();
+                                               setPlaybackPreviewPlaying(false);
+                                             } else {
+                                               playbackAudioRef.current.play();
+                                               setPlaybackPreviewPlaying(true);
+                                             }
+                                          }
+                                       }}
+                                     >
+                                       {playbackPreviewPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                                     </Button>
+
+                                     <Button
+                                       variant="ghost"
+                                       size="icon"
+                                       className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100"
+                                       onClick={async () => {
+                                          try {
+                                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                            setRecordingState('recording');
+                                            setActiveStream(stream);
+                                            if (playbackAudioRef.current) {
+                                              playbackAudioRef.current.pause();
+                                              setPlaybackPreviewPlaying(false);
+                                            }
+
+                                            (window as any).lastTypingSentTime = Date.now();
+                                            apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
+
+                                            const recorder = new MediaRecorder(stream);
+                                            mediaRecorderRef.current = recorder;
+                                            audioChunksRef.current = [];
+
+                                            recorder.ondataavailable = (e) => {
+                                              if (e.data && e.data.size > 0) {
+                                                audioChunksRef.current.push(e.data);
+                                              }
+                                            };
+
+                                            recorder.onstop = () => {
+                                              stream.getTracks().forEach(track => track.stop());
+                                              setActiveStream(null);
+
+                                              if ((recorder as any).isCancelled) {
+                                                setIsRecording(false);
+                                                setRecordingState('inactive');
+                                                voiceNotePartsRef.current = [];
+                                                return;
+                                              }
+
+                                              if (audioChunksRef.current.length > 0) {
+                                                const segmentBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+                                                voiceNotePartsRef.current.push(segmentBlob);
+                                                audioChunksRef.current = [];
+                                              }
+
+                                              if ((recorder as any).isPauseStop) {
+                                                return;
+                                              }
+
+                                              sendVoiceNote();
+                                            };
+
+                                            recorder.start();
+                                          } catch (err) {
+                                            console.error("Microphone permission denied:", err);
+                                            require('react-hot-toast').toast.error("Could not access microphone");
+                                          }
+                                       }}
+                                     >
+                                       <Mic className="h-5 w-5" />
+                                     </Button>
+                                   </div>
+                                </div>
+                                <span className="text-sm font-bold text-[#111b21] min-w-[45px] shrink-0 text-right">
+                                  {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -12827,12 +14746,15 @@ export default function App() {
                           placeholder="Type a message" 
                           className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] text-black"
                           value={chatInput}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
                           onChange={(e) => {
                             setChatInput(e.target.value);
                             const now = Date.now();
                             if (now - (window as any).lastTypingSentTime > 5000 || !(window as any).lastTypingSentTime) {
                               (window as any).lastTypingSentTime = now;
-                              apiFetch(`/Message/TypingIndicator?chatId=${activeChatId}`, { method: 'POST' }).catch(() => {});
+                              apiFetch(`/Message/Typing?chatId=${activeChatId}&action=typing`, { method: 'POST' }).catch(() => {});
                             }
                           }}
                           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -12842,14 +14764,19 @@ export default function App() {
                   </div>
 
                 <div className="flex items-center shrink-0">
-                      {isRecording ? (
+                      {recordingState !== 'inactive' ? (
                         <Button 
                           onClick={() => {
-                            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                              mediaRecorderRef.current.stop();
-                              // The actual message sending will happen in onstop event
+                            if (recordingState === 'recording') {
+                              if (mediaRecorderRef.current) {
+                                (mediaRecorderRef.current as any).isPauseStop = false;
+                                mediaRecorderRef.current.stop();
+                              }
+                            } else if (recordingState === 'paused') {
+                              sendVoiceNote();
                             } else {
                               setIsRecording(false);
+                              setRecordingState('inactive');
                             }
                           }}
                           className="rounded-full h-11 w-11 bg-primary text-white shadow-lg flex items-center justify-center p-0 animate-in zoom-in"
@@ -12869,16 +14796,26 @@ export default function App() {
                           size="icon" 
                           className={cn(
                             "rounded-full h-11 w-11 text-[#54656f] transition-all relative overflow-hidden",
-                            isRecording && "bg-destructive text-white scale-110 shadow-lg"
+                            recordingState !== 'inactive' && "bg-destructive text-white scale-110 shadow-lg"
                           )}
-                          onMouseDown={async () => {
+                          onClick={async () => {
                             try {
+                              const startTime = Date.now();
                               const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                               setIsRecording(true);
+                              setRecordingState('recording');
+                              setActiveStream(stream);
+                              setRecordingTime(0);
+                              setPlaybackPreviewUrl(null);
+                              setPlaybackPreviewPlaying(false);
+                              
+                              (window as any).lastTypingSentTime = Date.now();
+                              apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
                               
                               const recorder = new MediaRecorder(stream);
                               mediaRecorderRef.current = recorder;
                               audioChunksRef.current = [];
+                              voiceNotePartsRef.current = [];
                               
                               recorder.ondataavailable = (e) => {
                                 if (e.data.size > 0) {
@@ -12887,34 +14824,33 @@ export default function App() {
                               };
                               
                               recorder.onstop = () => {
-                                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  const base64Audio = reader.result?.toString();
-                                  const msg = {
-                                    id: Math.random().toString(36).substr(2, 9),
-                                    userId: userProfile.id.toString(),
-                                    userName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-                                    userAvatar: userProfile.getPersonDetailsDto.imageUrl,
-                                    text: `Sent a voice note (${recordingTime}s)`,
-                                    type: "audio",
-                                    mediaUrl: base64Audio,
-                                    chatId: activeChatId,
-                                    duration: recordingTime,
-                                    timestamp: new Date().toISOString()
-                                  };
-                                  socketRef.current.emit("chat:message", msg);
-                                  setIsRecording(false);
-                                };
-                                reader.readAsDataURL(audioBlob);
-                                
-                                // Stop all tracks
                                 stream.getTracks().forEach(track => track.stop());
+                                setActiveStream(null);
+
+                                if ((recorder as any).isCancelled) {
+                                  setIsRecording(false);
+                                  setRecordingState('inactive');
+                                  voiceNotePartsRef.current = [];
+                                  return;
+                                }
+
+                                if (audioChunksRef.current.length > 0) {
+                                  const segmentBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+                                  voiceNotePartsRef.current.push(segmentBlob);
+                                  audioChunksRef.current = [];
+                                }
+
+                                if ((recorder as any).isPauseStop) {
+                                  return;
+                                }
+
+                                sendVoiceNote();
                               };
                               
                               recorder.start();
                             } catch (err) {
                               console.error("Microphone permission denied:", err);
+                              toast.error("Could not access microphone");
                             }
                           }}
                         >
@@ -12956,7 +14892,7 @@ export default function App() {
                           className="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
                         >
                           <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50">
-                            <img src={user.getPersonDetailsDto.imageUrl || undefined} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                            <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                           </div>
                           <span className="text-[10px] font-bold text-slate-700 group-hover:text-primary transition-colors truncate w-full text-center">
                             {user.getPersonDetailsDto.firstName}
@@ -12989,7 +14925,7 @@ export default function App() {
             <Dialog open={isViewGroupOpen} onOpenChange={setIsViewGroupOpen}>
         <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
           <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
-            <div className="p-5 flex flex-row items-center justify-between w-full">
+            <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
               <div className="flex items-center gap-3 text-left">
                 <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
                   <Info className="h-5 w-5" />
@@ -13194,7 +15130,7 @@ export default function App() {
       }}>
         <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
           <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
-            <div className="p-5 flex flex-row items-center justify-between w-full">
+            <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
               <div className="flex items-center gap-3 text-left">
                 <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
                   <Settings className="h-5 w-5" />
@@ -13629,6 +15565,7 @@ export default function App() {
           setSelectedParticipants([]);
           setNewGroupName("");
           setNewGroupDescription("");
+          setHomeMemberSearchQuery("");
         }
       }}>
         <DialogContent 
@@ -13640,8 +15577,11 @@ export default function App() {
               : "max-w-md w-[90vw]"
           )}
         >
-          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
-            <div className="p-5 flex flex-row items-center justify-between w-full">
+          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 mb-0">
+            <div className={cn(
+              "flex flex-row items-center justify-between w-full",
+              isGroupMode ? "pt-7 px-7 pb-5" : "pt-8 pl-8 pr-5 pb-5"
+            )}>
               <div className="flex items-center gap-3 text-left">
                 <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
                   {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
@@ -13684,7 +15624,10 @@ export default function App() {
                     </div>
                     <div className="w-full space-y-3">
                       <div className="space-y-1">
-                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1.5">
+                          <Tag className="h-3.5 w-3.5 text-primary" />
+                          Group Name
+                        </Label>
                         <Input 
                           placeholder="e.g., Family Hub" 
                           value={newGroupName}
@@ -13695,7 +15638,10 @@ export default function App() {
                     </div>
                   </div>
                   <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
+                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-primary" />
+                      Description (Optional)
+                    </Label>
                     <Input 
                       placeholder="What is this group about?" 
                       value={newGroupDescription}
@@ -13709,7 +15655,10 @@ export default function App() {
                 <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
                   <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
                     <div className="p-6">
-                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1">Select Members</h3>
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
+                        <Users className="h-4 w-4 text-emerald-600" />
+                        Select Members
+                      </h3>
                       <div className="grid grid-cols-2 gap-3">
                         {(() => {
                           const loggedInMember = {
@@ -13814,8 +15763,10 @@ export default function App() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input 
-                      placeholder="Search people..." 
-                      className="pl-9 h-10 bg-white border-slate-200 rounded-xl focus-visible:ring-0 focus-visible:ring-offset-0"
+                      placeholder="Search home members..." 
+                      value={homeMemberSearchQuery}
+                      onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
+                      className="pl-9 h-10 bg-white border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     />
                   </div>
                 </div>
@@ -13823,52 +15774,63 @@ export default function App() {
                 <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
                   <div className="p-4">
                     <div className="space-y-3">
-                      {allUsers.filter(u => u.id !== userProfile.id).map((user) => {
-                        const isOnline = user.isOnline ?? !user.disabled;
-                        return (
-                          <button
-                            key={user.id}
-                            onClick={() => startDirectChat(user)}
-                            className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 bg-white hover:bg-slate-50 text-left shadow-sm group"
-                          >
-                            <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative shadow-inner">
-                              {user.getPersonDetailsDto.imageUrl ? (
-                                <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                              ) : (
-                                <UserIcon className="h-5 w-5 text-slate-400" />
-                              )}
-                              {isOnline && (
-                                <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
-                              )}
-                            </div>
-
-                            <div className="flex-1 min-w-0 text-left">
-                              <h4 className="font-bold text-sm text-slate-800 truncate">
-                                {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                              </h4>
-                              <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
-                                {isOnline ? (
-                                  <span className="text-emerald-600 font-bold flex items-center gap-1">
-                                    <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                    Online
-                                  </span>
+                      {(() => {
+                        const filteredUsers = allUsers.filter(u => {
+                          if (u.id === userProfile.id) return false;
+                          if (!homeMemberSearchQuery.trim()) return true;
+                          const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
+                          const username = (u.getUserDto?.userName || "").toLowerCase();
+                          const search = homeMemberSearchQuery.toLowerCase();
+                          return fullName.includes(search) || username.includes(search);
+                        });
+                        
+                        return filteredUsers.map((user) => {
+                          const isOnline = user.isOnline ?? !user.disabled;
+                          return (
+                            <button
+                              key={user.id}
+                              onClick={() => startDirectChat(user)}
+                              className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 bg-white hover:bg-slate-50 text-left shadow-sm group"
+                            >
+                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative shadow-inner">
+                                {user.getPersonDetailsDto.imageUrl ? (
+                                  <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                                 ) : (
-                                  <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                    <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
-                                    Offline
-                                  </span>
+                                  <UserIcon className="h-5 w-5 text-slate-400" />
                                 )}
-                                <span className="text-slate-300">•</span>
-                                <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
+                                {isOnline && (
+                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
+                                )}
                               </div>
-                            </div>
 
-                            <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all ml-auto">
-                              <ChevronRight className="h-5 w-5 text-slate-400" />
-                            </div>
-                          </button>
-                        );
-                      })}
+                              <div className="flex-1 min-w-0 text-left">
+                                <h4 className="font-bold text-sm text-slate-800 truncate">
+                                  {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
+                                </h4>
+                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
+                                  {isOnline ? (
+                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                      Online
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                      Offline
+                                    </span>
+                                  )}
+                                  <span className="text-slate-300">•</span>
+                                  <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
+                                </div>
+                              </div>
+
+                              <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all ml-auto">
+                                <ChevronRight className="h-5 w-5 text-slate-400" />
+                              </div>
+                            </button>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </ScrollArea>
@@ -13876,17 +15838,18 @@ export default function App() {
             )}
           </div>
 
-          <div className="p-4 border-t bg-slate-50 flex gap-3 shrink-0">
-             {isGroupMode && (
+          {isGroupMode && (
+            <div className="p-4 border-t bg-slate-50 flex items-center justify-end shrink-0">
                <Button 
-                className="flex-1 rounded-xl h-10 font-bold shadow-sm" 
-                onClick={handleCreateGroup}
-                disabled={!newGroupName.trim()}
+                 className="px-4 rounded-xl h-10 font-bold shadow-sm flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" 
+                 onClick={handleCreateGroup}
+                 disabled={!newGroupName.trim()}
                >
+                 <Plus className="h-4 w-4" />
                  Create Group ({selectedParticipants.length + 1})
-                </Button>
-             )}
-          </div>
+               </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -13924,10 +15887,16 @@ export default function App() {
                      const file = uploadPreviewFiles[uploadPreviewActiveIndex];
                      if (!file) return null;
                      const isImage = file.type?.startsWith('image/');
+                     const isVideo = file.type?.startsWith('video/');
                      if (isImage) {
                        const url = URL.createObjectURL(file);
                        return (
-                         <img src={url || undefined} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ height: "300px", width: "300px" }} />
+                         <img src={url || undefined} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ maxHeight: "350px", maxWidth: "100%" }} />
+                       );
+                     } else if (isVideo) {
+                       const url = URL.createObjectURL(file);
+                       return (
+                         <video src={url || undefined} controls className="object-contain rounded-lg shadow-sm" style={{ maxHeight: "350px", maxWidth: "100%" }} />
                        );
                      } else {
                        return (
@@ -13947,11 +15916,19 @@ export default function App() {
                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
                    {(uploadPreviewFiles || []).map((file, idx) => {
                      const isImage = file.type?.startsWith('image/');
-                     const url = isImage ? URL.createObjectURL(file) : '';
+                     const isVideo = file.type?.startsWith('video/');
+                     const url = (isImage || isVideo) ? URL.createObjectURL(file) : '';
                      return (
                        <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'} flex items-center justify-center bg-white`} onClick={() => setUploadPreviewActiveIndex(idx)}>
                          {isImage ? (
                            <img src={url || undefined} className="w-full h-full object-cover" />
+                         ) : isVideo ? (
+                           <div className="relative w-full h-full bg-slate-100 flex items-center justify-center">
+                             <video src={url || undefined} className="w-full h-full object-cover" />
+                             <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                               <Play className="h-4 w-4 text-white fill-white" />
+                             </div>
+                           </div>
                          ) : (
                            <Paperclip className="h-5 w-5 text-slate-500" />
                          )}
@@ -14052,28 +16029,173 @@ export default function App() {
 
       {/* Media Preview Modal */}
       <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between">
-            <div className="flex flex-col gap-0.5 text-left select-none">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="h-6 w-6 text-primary shrink-0" />
-                <DialogTitle className="text-xl font-bold tracking-tight">Image Preview</DialogTitle>
-              </div>
-              <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider ml-1">Viewing full size image</p>
-            </div>
+        <DialogContent showCloseButton={false} className="sm:max-w-[480px] p-0 overflow-hidden bg-white text-slate-900 border border-slate-200 shadow-2xl rounded-[12px] flex flex-col h-[85vh]">
+          <DialogHeader className="pl-10 pt-8 pr-6 pb-4 border-b border-slate-100 flex flex-row items-center justify-between shrink-0 bg-white mb-0">
+            {(() => {
+              const hasGallery = galleryMedia && galleryMedia.length > 0;
+              const activeItem = hasGallery ? galleryMedia[galleryIndex] : null;
+              const isVid = activeItem ? (activeItem.type === MessageType.Video || activeItem.contentType?.startsWith('video/') || activeItem.filePath?.toLowerCase().endsWith('.mp4') || activeItem.filePath?.toLowerCase().endsWith('.webm')) : false;
+              
+              return (
+                <div className="flex flex-col gap-0.5 text-left select-none">
+                  <div className="flex items-center gap-2">
+                    {isVid ? (
+                      <Play className="h-5 w-5 text-[#00a884] shrink-0 fill-[#00a884]" />
+                    ) : (
+                      <ImageIcon className="h-5 w-5 text-[#00a884] shrink-0" />
+                    )}
+                    <DialogTitle className="text-lg font-bold tracking-tight text-slate-900">
+                      {isVid ? "Video Preview" : "Image Preview"}
+                    </DialogTitle>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                    {hasGallery ? `Media ${galleryIndex + 1} of ${galleryMedia.length}` : "Viewing full size media"}
+                  </p>
+                </div>
+              );
+            })()}
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-10 w-10 rounded-full shrink-0" 
+              className="h-10 w-10 rounded-full shrink-0 text-slate-400 hover:text-slate-800 hover:bg-slate-100" 
               onClick={() => setIsPreviewModalOpen(false)}
             >
               <X className="h-6 w-6" />
             </Button>
           </DialogHeader>
-          <div className="flex-1 flex items-center justify-center p-6 bg-slate-50 overflow-hidden">
-            <div className="relative w-full h-full flex items-center justify-center -translate-y-8">
-              <img src={previewMediaUrl || undefined} alt="Preview" className="max-w-full max-h-[90%] object-contain shadow-sm rounded-lg" referrerPolicy="no-referrer" />
-            </div>
+          
+          <div 
+            className="flex-1 flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden select-none"
+            onTouchStart={(e) => {
+              touchStartX.current = e.changedTouches[0].clientX;
+            }}
+            onTouchEnd={(e) => {
+              touchEndX.current = e.changedTouches[0].clientX;
+              const diffX = touchStartX.current - touchEndX.current;
+              const swipeThreshold = 50;
+              if (galleryMedia.length <= 1) return;
+              if (diffX > swipeThreshold) {
+                if (galleryIndex < galleryMedia.length - 1) {
+                  setSlideDirection(1);
+                  setGalleryIndex(prev => prev + 1);
+                }
+              } else if (diffX < -swipeThreshold) {
+                if (galleryIndex > 0) {
+                  setSlideDirection(-1);
+                  setGalleryIndex(prev => prev - 1);
+                }
+              }
+            }}
+            onMouseDown={(e) => {
+              mouseStartX.current = e.clientX;
+            }}
+            onMouseUp={(e) => {
+              const diffX = mouseStartX.current - e.clientX;
+              const swipeThreshold = 50;
+              if (galleryMedia.length <= 1) return;
+              if (diffX > swipeThreshold) {
+                if (galleryIndex < galleryMedia.length - 1) {
+                  setSlideDirection(1);
+                  setGalleryIndex(prev => prev + 1);
+                }
+              } else if (diffX < -swipeThreshold) {
+                if (galleryIndex > 0) {
+                  setSlideDirection(-1);
+                  setGalleryIndex(prev => prev - 1);
+                }
+              }
+            }}
+          >
+            {(() => {
+              const hasGallery = galleryMedia && galleryMedia.length > 0;
+              
+              // Back / Next Buttons
+              const showBack = hasGallery && galleryIndex > 0;
+              const showNext = hasGallery && galleryIndex < galleryMedia.length - 1;
+
+              const activeItem = hasGallery ? galleryMedia[galleryIndex] : null;
+              const url = activeItem ? getFullImageUrl(activeItem.filePath) : previewMediaUrl;
+              const isVid = activeItem ? (activeItem.type === MessageType.Video || activeItem.contentType?.startsWith('video/') || activeItem.filePath?.toLowerCase().endsWith('.mp4') || activeItem.filePath?.toLowerCase().endsWith('.webm')) : false;
+
+              return (
+                <div className="relative w-full h-full flex items-center justify-center">
+                  {showBack && (
+                    <Button 
+                      variant="ghost" 
+                      className="absolute left-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 hover:scale-105 transition-all duration-200" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSlideDirection(-1);
+                        setGalleryIndex(galleryIndex - 1);
+                      }}
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </Button>
+                  )}
+                  {showNext && (
+                    <Button 
+                      variant="ghost" 
+                      className="absolute right-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 hover:scale-105 transition-all duration-200" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSlideDirection(1);
+                        setGalleryIndex(galleryIndex + 1);
+                      }}
+                    >
+                      <ChevronRight className="h-6 w-6" />
+                    </Button>
+                  )}
+
+                  <AnimatePresence initial={false} custom={slideDirection} mode="wait">
+                    <motion.div
+                      key={galleryIndex}
+                      custom={slideDirection}
+                      variants={{
+                        enter: (dir: number) => ({
+                          x: dir > 0 ? 150 : -150,
+                          opacity: 0,
+                          scale: 0.98
+                        }),
+                        center: {
+                          x: 0,
+                          opacity: 1,
+                          scale: 1
+                        },
+                        exit: (dir: number) => ({
+                          x: dir < 0 ? 150 : -150,
+                          opacity: 0,
+                          scale: 0.98
+                        })
+                      }}
+                      initial="enter"
+                      animate="center"
+                      exit="exit"
+                      transition={{
+                        x: { type: "spring", stiffness: 350, damping: 32 },
+                        opacity: { duration: 0.2 }
+                      }}
+                      className="w-full h-full flex items-center justify-center absolute inset-0"
+                    >
+                      {isVid ? (
+                        <video 
+                          src={url || undefined} 
+                          controls 
+                          autoPlay 
+                          className="max-w-full max-h-[90%] object-contain shadow-xl rounded-lg border border-slate-200 bg-white"
+                        />
+                      ) : (
+                        <img 
+                          src={url || undefined} 
+                          alt="Preview" 
+                          className="max-w-full max-h-[90%] object-contain shadow-xl rounded-lg border border-slate-200 bg-white" 
+                          referrerPolicy="no-referrer" 
+                        />
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>
@@ -14133,10 +16255,20 @@ export default function App() {
               <div className="flex justify-end">
                 <Button 
                   className="w-[220px] px-4 font-medium bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2"
-                  onClick={() => {
-                    // Simulate image acquisition
-                    const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-                    setFingerprintImages(prev => [...prev, dummyImg]);
+                  disabled={!selectedFingerprintUserId || !selectedFingerprintHardwareId}
+                  onClick={async () => {
+                    try {
+                      await apiFetch(`/FingerPrint/RequestFingerPrint?hardwareId=${selectedFingerprintHardwareId}&personId=${selectedFingerprintUserId}`, {
+                        method: 'POST',
+                        body: ''
+                      });
+                      toast.success("Fingerprint request sent to hardware.");
+                    } catch (err: any) {
+                      toast.error("Failed to request fingerprint: " + err.message);
+                      // fallback dummy image for sandbox testing if actual server is not reachable
+                      const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+                      setFingerprintImages(prev => [...prev, dummyImg]);
+                    }
                   }}
                 >
                   <Radio className="h-4 w-4" />
@@ -14174,20 +16306,29 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pr-8 border-t bg-slate-100/50 flex items-center justify-center">
             <Button 
               className="w-[220px] bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
               disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
-              onClick={() => {
+              onClick={async () => {
                 const payload = {
-                  userId: selectedFingerprintUserId,
-                  images: (fingerprintImages || []).map(img => img.split(',')[1]) // Send base64 data (bytes)
+                  personId: parseInt(selectedFingerprintUserId),
+                  fingerPrintEncoding: (fingerprintImages || []).map(img => img.includes(',') ? img.split(',')[1] : img)
                 };
                 console.log("Submitting fingerprint data:", payload);
-                // Implementation for actual sending will be added later
-                setIsAddFingerprintOpen(false);
-                setFingerprintImages([]);
-                setSelectedFingerprintUserId("");
+                try {
+                  await apiFetch('/FingerPrint/CreateFingerPrint', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                  });
+                  toast.success("Fingerprint registered successfully!");
+                  setIsAddFingerprintOpen(false);
+                  setFingerprintImages([]);
+                  setSelectedFingerprintUserId("");
+                } catch (err: any) {
+                  toast.error("Failed to create fingerprint: " + err.message);
+                }
               }}
             >
               <CheckCircle2 className="h-5 w-5" />
@@ -14346,15 +16487,24 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pb-4 pr-8 pt-4 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pr-8 border-t bg-slate-100/50 flex items-center justify-center">
             <Button 
               className="bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
               disabled={!selectedNfidUserId || !selectedNfidHardwareId}
-              onClick={() => {
+              onClick={async () => {
                 console.log("Sending NFID Data for user", selectedNfidUserId, "to hardware", selectedNfidHardwareId);
-                setIsRegisterNfidOpen(false);
-                setSelectedNfidUserId("");
-                setSelectedNfidHardwareId("");
+                try {
+                  await apiFetch(`/FingerPrint/SendNFIDCode?hardwareId=${selectedNfidHardwareId}&personId=${selectedNfidUserId}`, {
+                    method: 'POST',
+                    body: ''
+                  });
+                  toast.success("NFID code sent to hardware successfully!");
+                  setIsRegisterNfidOpen(false);
+                  setSelectedNfidUserId("");
+                  setSelectedNfidHardwareId("");
+                } catch (err: any) {
+                  toast.error("Failed to send NFID code: " + err.message);
+                }
               }}
             >
               <Send className="h-5 w-5" />
