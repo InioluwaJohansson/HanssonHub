@@ -376,6 +376,18 @@ const DASHBOARD_FACILITIES = [
 const mapSection = (s: any): Section => {
   if (!s) return s;
   const idStr = (s.sectionId ?? s.id ?? '').toString();
+  
+  let dbId: number | undefined = undefined;
+  if (typeof s.id === 'number') {
+    dbId = s.id;
+  } else if (s.id && !isNaN(parseInt(s.id.toString(), 10))) {
+    dbId = parseInt(s.id.toString(), 10);
+  } else if (typeof s.Id === 'number') {
+    dbId = s.Id;
+  } else if (s.Id && !isNaN(parseInt(s.Id.toString(), 10))) {
+    dbId = parseInt(s.Id.toString(), 10);
+  }
+
   return {
     ...s,
     id: idStr,
@@ -384,6 +396,7 @@ const mapSection = (s: any): Section => {
     isHidden: !!(s.isHidden || s.IsHidden),
     sectionId: s.sectionId ?? s.id,
     sectionName: s.sectionName || s.name,
+    dbId: dbId,
   } as Section;
 };
 
@@ -398,18 +411,63 @@ const getProp = (obj: any, propName: string) => {
   return undefined;
 };
 
+const isExternalTriggered = (e: any): boolean => {
+  if (!e) return false;
+  const val = getProp(e, 'isTriggered');
+  return val === true || val === 'true' || val === 1 || val === '1';
+};
+
+const isPropActive = (item: any): boolean => {
+  if (!item) return false;
+  const val = getProp(item, 'isActive');
+  return val === true || val === 'true' || val === 1 || val === '1' || val === 'active' || val === 'on';
+};
+
+const getInitials = (firstName?: string, lastName?: string): string => {
+  const f = firstName?.trim().charAt(0) || '';
+  const l = lastName?.trim().charAt(0) || '';
+  const init = (f + l).toUpperCase();
+  return init || '?';
+};
+
 const resolveSectionId = (sectionVal: any, sectionsList: Section[]): number | null => {
   if (sectionVal === undefined || sectionVal === null || sectionVal === '' || sectionVal === 'none' || sectionVal === '0') return null;
+  
+  // 1. Check if sectionVal matches a section's id, sectionId, or dbId
+  const match = (sectionsList || []).find(s => 
+    s.id?.toString() === sectionVal.toString() || 
+    s.sectionId?.toString() === sectionVal.toString() ||
+    s.dbId?.toString() === sectionVal.toString()
+  );
+  if (match && match.dbId !== undefined) {
+    return match.dbId;
+  }
+
+  // 2. If it is already a valid integer, return it if a corresponding section exists
   const parsed = parseInt(sectionVal.toString(), 10);
-  if (!isNaN(parsed)) {
-    if ((sectionsList || []).some(s => s.id.toString() === parsed.toString() || (s as any).sectionId?.toString() === parsed.toString())) {
+  if (!isNaN(parsed) && parsed > 0) {
+    const exists = (sectionsList || []).some(s => s.dbId === parsed || s.id?.toString() === parsed.toString());
+    if (exists) {
       return parsed;
     }
   }
-  const matchedSection = (sectionsList || []).find(s => s.name.toLowerCase() === sectionVal.toString().toLowerCase() || (s as any).sectionName?.toLowerCase() === sectionVal.toString().toLowerCase());
-  if (matchedSection) {
-    return parseInt(((matchedSection as any).sectionId ?? matchedSection.id).toString(), 10);
+
+  // 3. Fallback to match by name or sectionName
+  const matchedByName = (sectionsList || []).find(s => 
+    s.name?.toLowerCase() === sectionVal.toString().toLowerCase() || 
+    (s as any).sectionName?.toLowerCase() === sectionVal.toString().toLowerCase()
+  );
+  if (matchedByName) {
+    if (matchedByName.dbId !== undefined) return matchedByName.dbId;
+    const parsedMatchedId = parseInt(matchedByName.id.toString(), 10);
+    return !isNaN(parsedMatchedId) ? parsedMatchedId : null;
   }
+
+  // 4. Ultimate fallback: if parsed is a valid number, return it
+  if (!isNaN(parsed)) {
+    return parsed;
+  }
+
   return null;
 };
 
@@ -417,15 +475,165 @@ const resolveRoomId = (roomVal: any, roomsList: Room[]): number | null => {
   if (roomVal === undefined || roomVal === null || roomVal === '' || roomVal === 'none' || roomVal === '0') return null;
   const parsed = parseInt(roomVal.toString(), 10);
   if (!isNaN(parsed)) {
-    if ((roomsList || []).some(r => r.id.toString() === parsed.toString())) {
-      return parsed;
-    }
+    return parsed;
   }
   const matchedRoom = (roomsList || []).find(r => r.name.toLowerCase() === roomVal.toString().toLowerCase() || (r as any).roomName?.toLowerCase() === roomVal.toString().toLowerCase());
   if (matchedRoom) {
     return parseInt(matchedRoom.id.toString(), 10);
   }
   return null;
+};
+
+const getSectionRooms = (section: any, globalRooms: Room[]): Room[] => {
+  if (!section) return [];
+  const sectionIdStr = section.id?.toString();
+  const sectionDbIdStr = section.dbId?.toString() || (section as any).Id?.toString();
+
+  const nestedRoomsRaw = section.rooms || section.Rooms || [];
+  const mappedNestedRooms = nestedRoomsRaw.map((r: any) => ({
+    ...r,
+    id: r.id ?? r.Id,
+    name: r.roomName || r.name || '',
+    section: sectionIdStr,
+    icon: r.icon || 'Sofa'
+  }));
+
+  const roomsMap = new Map<string, Room>();
+  
+  // First, add global rooms belonging to this section
+  (globalRooms || []).forEach(r => {
+    const rSectionStr = r.section?.toString();
+    if (rSectionStr && (rSectionStr === sectionIdStr || rSectionStr === sectionDbIdStr)) {
+      roomsMap.set(r.id.toString(), r);
+    }
+  });
+
+  // Then, add nested rooms from the section object (overwriting or supplementing)
+  mappedNestedRooms.forEach((r: any) => {
+    roomsMap.set(r.id.toString(), r);
+  });
+
+  return Array.from(roomsMap.values());
+};
+
+const getSectionDirectDevices = (section: any, globalDevices: Device[]): Device[] => {
+  if (!section) return [];
+  const sectionIdStr = section.id?.toString();
+  const sectionDbIdStr = section.dbId?.toString() || (section as any).Id?.toString();
+
+  const rawDoors = section.doors || section.Doors || [];
+  const rawLights = section.lights || section.Lights || [];
+  const rawWindows = section.windows || section.Windows || [];
+  const rawAppliances = section.appliances || section.Appliances || [];
+  const rawCameras = section.cameras || section.Cameras || [];
+  const rawExternals = section.externals || section.Externals || [];
+
+  const isDirect = (item: any) => {
+    const rId = item.roomId !== undefined ? item.roomId : item.RoomId;
+    const sId = item.sectionId !== undefined ? item.sectionId : item.SectionId;
+    
+    const isRoomNull = (rId === undefined || rId === null || rId === '' || rId === 'none' || rId === 0 || rId === '0');
+    
+    const matchSection = sId !== undefined && sId !== null && (
+      sId.toString() === sectionIdStr || 
+      sId.toString() === sectionDbIdStr
+    );
+
+    return isRoomNull && matchSection;
+  };
+
+  const list: Device[] = [];
+
+  rawDoors.filter(isDirect).forEach((item: any) => {
+    let doorStatus = 'unlocked';
+    if (item.isOpen && item.isLocked) doorStatus = 'open-locked';
+    else if (item.isOpen) doorStatus = 'open';
+    else if (item.isLocked) doorStatus = 'locked';
+
+    list.push({
+      id: `door-${item.id}`,
+      name: item.doorName || item.name || "Unknown Door",
+      type: 'door',
+      status: doorStatus,
+      room: '',
+      section: sectionIdStr,
+      doorType: item.doorType || 'Interior'
+    } as Device);
+  });
+
+  rawLights.filter(isDirect).forEach((item: any) => {
+    list.push({
+      id: `light-${item.id}`,
+      name: item.lightName || item.name || "Unknown Light",
+      type: 'light',
+      status: (item.isActive || item.status === 'on') ? 'on' : 'off',
+      value: item.brightnessLevel || 0,
+      room: '',
+      section: sectionIdStr
+    } as Device);
+  });
+
+  rawWindows.filter(isDirect).forEach((item: any) => {
+    list.push({
+      id: `window-${item.id}`,
+      name: item.windowName || item.name || "Unknown Window",
+      type: 'window',
+      status: item.isLocked ? 'locked' : item.isOpen ? 'open' : 'closed',
+      room: '',
+      section: sectionIdStr
+    } as Device);
+  });
+
+  rawAppliances.filter(isDirect).forEach((item: any) => {
+    list.push({
+      id: `appliance-${item.id}`,
+      name: item.applianceName || item.name || "Unknown Appliance",
+      type: 'appliance',
+      status: (item.isActive || item.status === 'on') ? 'on' : 'off',
+      room: '',
+      section: sectionIdStr,
+      powerUsage: item.powerActive ? 150 : 0
+    } as Device);
+  });
+
+  rawCameras.filter(isDirect).forEach((item: any) => {
+    list.push({
+      id: `camera-${item.id}`,
+      name: item.cameraName || item.name || "Unknown Camera",
+      type: 'camera',
+      status: (item.isActive || item.status === 'active') ? 'active' : 'inactive',
+      room: '',
+      section: sectionIdStr
+    } as Device);
+  });
+
+  rawExternals.filter(isDirect).forEach((item: any) => {
+    list.push({
+      id: `external-${item.id}`,
+      name: item.externalName || item.name || "Unknown External",
+      type: 'external' as any,
+      status: (item.isActive || item.status === 'active') ? 'active' : 'inactive',
+      room: '',
+      section: sectionIdStr
+    } as Device);
+  });
+
+  // Merge with global devices that are direct and match the section
+  const devicesMap = new Map<string, Device>();
+
+  (globalDevices || []).forEach(d => {
+    const dSectionStr = d.section?.toString();
+    const isDirectGlobal = !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined';
+    if (dSectionStr && (dSectionStr === sectionIdStr || dSectionStr === sectionDbIdStr) && isDirectGlobal) {
+      devicesMap.set(d.id.toString(), d);
+    }
+  });
+
+  list.forEach(d => {
+    devicesMap.set(d.id.toString(), d);
+  });
+
+  return Array.from(devicesMap.values());
 };
 
 const base64ToFile = (base64: string, filename: string): File => {
@@ -1282,6 +1490,159 @@ export default function App() {
   const [windows, setWindows] = React.useState<GetWindowDto[]>([]);
   const [rooms, setRooms] = React.useState<Room[]>([]);
   const [sections, setSections] = React.useState<Section[]>([]);
+
+  React.useEffect(() => {
+    if (!sections || sections.length === 0) return;
+    
+    const nestedRooms: Room[] = [];
+    const nestedDevices: Device[] = [];
+
+    sections.forEach(section => {
+      const sectionIdStr = section.id?.toString();
+      const sectionDbId = section.dbId ?? (section.id ? parseInt(section.id.toString(), 10) : null);
+      const sectionDbIdStr = sectionDbId?.toString();
+
+      const rawRooms = section.rooms || section.Rooms || [];
+      rawRooms.forEach((r: any) => {
+        nestedRooms.push({
+          ...r,
+          id: r.id ?? r.Id,
+          name: r.roomName || r.name || '',
+          section: sectionIdStr,
+          icon: r.icon || 'Sofa'
+        });
+      });
+
+      const rawDoors = section.doors || section.Doors || [];
+      const rawLights = section.lights || section.Lights || [];
+      const rawWindows = section.windows || section.Windows || [];
+      const rawAppliances = section.appliances || section.Appliances || [];
+      const rawCameras = section.cameras || section.Cameras || [];
+      const rawExternals = section.externals || section.Externals || [];
+
+      const mapDevice = (item: any, type: string) => {
+        const rId = item.roomId !== undefined ? item.roomId : item.RoomId;
+        const roomStr = (rId !== undefined && rId !== null && rId !== 0 && rId !== '0' && rId !== 'none') ? rId.toString() : '';
+        const sId = item.sectionId !== undefined ? item.sectionId : item.SectionId;
+        const sectionStr = sId?.toString() || sectionIdStr || '';
+
+        if (type === 'door') {
+          let doorStatus = 'unlocked';
+          if (item.isOpen && item.isLocked) doorStatus = 'open-locked';
+          else if (item.isOpen) doorStatus = 'open';
+          else if (item.isLocked) doorStatus = 'locked';
+
+          return {
+            id: `door-${item.id}`,
+            name: item.doorName || item.name || "Unknown Door",
+            type: 'door',
+            status: doorStatus,
+            room: roomStr,
+            section: sectionStr,
+            doorType: item.doorType || 'Interior'
+          } as Device;
+        }
+
+        if (type === 'light') {
+          return {
+            id: `light-${item.id}`,
+            name: item.lightName || item.name || "Unknown Light",
+            type: 'light',
+            status: (item.isActive || item.status === 'on') ? 'on' : 'off',
+            value: item.brightnessLevel || 0,
+            room: roomStr,
+            section: sectionStr
+          } as Device;
+        }
+
+        if (type === 'window') {
+          return {
+            id: `window-${item.id}`,
+            name: item.windowName || item.name || "Unknown Window",
+            type: 'window',
+            status: item.isLocked ? 'locked' : item.isOpen ? 'open' : 'closed',
+            room: roomStr,
+            section: sectionStr
+          } as Device;
+        }
+
+        if (type === 'appliance') {
+          return {
+            id: `appliance-${item.id}`,
+            name: item.applianceName || item.name || "Unknown Appliance",
+            type: 'appliance',
+            status: (item.isActive || item.status === 'on') ? 'on' : 'off',
+            room: roomStr,
+            section: sectionStr,
+            powerUsage: item.powerActive ? 150 : 0
+          } as Device;
+        }
+
+        if (type === 'camera') {
+          return {
+            id: `camera-${item.id}`,
+            name: item.cameraName || item.name || "Unknown Camera",
+            type: 'camera',
+            status: (item.isActive || item.status === 'active') ? 'active' : 'inactive',
+            room: roomStr,
+            section: sectionStr
+          } as Device;
+        }
+
+        if (type === 'external') {
+          return {
+            id: `external-${item.id}`,
+            name: item.externalName || item.name || "Unknown External",
+            type: 'external' as any,
+            status: (item.isActive || item.status === 'active') ? 'active' : 'inactive',
+            room: roomStr,
+            section: sectionStr
+          } as Device;
+        }
+
+        return null;
+      };
+
+      rawDoors.forEach((d: any) => { const mapped = mapDevice(d, 'door'); if (mapped) nestedDevices.push(mapped); });
+      rawLights.forEach((l: any) => { const mapped = mapDevice(l, 'light'); if (mapped) nestedDevices.push(mapped); });
+      rawWindows.forEach((w: any) => { const mapped = mapDevice(w, 'window'); if (mapped) nestedDevices.push(mapped); });
+      rawAppliances.forEach((a: any) => { const mapped = mapDevice(a, 'appliance'); if (mapped) nestedDevices.push(mapped); });
+      rawCameras.forEach((c: any) => { const mapped = mapDevice(c, 'camera'); if (mapped) nestedDevices.push(mapped); });
+      rawExternals.forEach((e: any) => { const mapped = mapDevice(e, 'external'); if (mapped) nestedDevices.push(mapped); });
+    });
+
+    if (nestedRooms.length > 0) {
+      setRooms(prev => {
+        const roomsMap = new Map<string, Room>();
+        prev.forEach(r => { roomsMap.set(r.id.toString(), r); });
+        let changed = false;
+        nestedRooms.forEach(r => {
+          const key = r.id.toString();
+          if (!roomsMap.has(key)) {
+            roomsMap.set(key, r);
+            changed = true;
+          }
+        });
+        return changed ? Array.from(roomsMap.values()) : prev;
+      });
+    }
+
+    if (nestedDevices.length > 0) {
+      setDevices(prev => {
+        const devicesMap = new Map<string, Device>();
+        prev.forEach(d => { devicesMap.set(d.id.toString(), d); });
+        let changed = false;
+        nestedDevices.forEach(d => {
+          const key = d.id.toString();
+          if (!devicesMap.has(key)) {
+            devicesMap.set(key, d);
+            changed = true;
+          }
+        });
+        return changed ? Array.from(devicesMap.values()) : prev;
+      });
+    }
+  }, [sections]);
   const [roomSearchQuery, setRoomSearchQuery] = React.useState('');
   const [sectionSearchQuery, setSectionSearchQuery] = React.useState('');
   const [activeView, setActiveView] = React.useState<NavView>('dashboard');
@@ -1308,7 +1669,7 @@ export default function App() {
             id: `appliance-${item.id}`,
             name: item.applianceName || item.name || "Unknown Appliance",
             type: 'appliance',
-            status: item.isActive ? 'on' : 'off',
+            status: isPropActive(item) ? 'on' : 'off',
             room: roomStr,
             section: sectionStr,
             powerUsage: item.powerActive ? 150 : 0
@@ -1319,7 +1680,7 @@ export default function App() {
             id: `light-${item.id}`,
             name: item.lightName || item.name || "Unknown Light",
             type: 'light',
-            status: item.isActive ? 'on' : 'off',
+            status: isPropActive(item) ? 'on' : 'off',
             value: item.brightnessLevel || 0,
             room: roomStr,
             section: sectionStr
@@ -1330,7 +1691,7 @@ export default function App() {
             id: `camera-${item.id}`,
             name: item.cameraName || item.name || "Unknown Camera",
             type: 'camera',
-            status: item.isActive ? 'active' : 'inactive',
+            status: isPropActive(item) ? 'active' : 'inactive',
             room: roomStr,
             section: sectionStr
           } as Device;
@@ -1366,7 +1727,7 @@ export default function App() {
             id: `external-${item.id}`,
             name: item.externalName || item.name || "Unknown External",
             type: 'external' as any,
-            status: item.isActive ? 'active' : 'inactive',
+            status: isPropActive(item) ? 'active' : 'inactive',
             room: roomStr,
             section: sectionStr
           } as Device;
@@ -1579,6 +1940,8 @@ export default function App() {
   const [showAuthCode, setShowAuthCode] = React.useState(false);
   const [showAuthPwd, setShowAuthPwd] = React.useState(false);
   const [showNewAuthCode, setShowNewAuthCode] = React.useState(false);
+  const [showAddMemberPassword, setShowAddMemberPassword] = React.useState(false);
+  const [showAddMemberAuthCode, setShowAddMemberAuthCode] = React.useState(false);
 
   const [passwordData, setPasswordData] = React.useState<UpdateUserPasswordDto>({ 
     id: 1, 
@@ -1973,6 +2336,10 @@ export default function App() {
           }
         })
         .catch(err => console.error("Failed to preload app list data", err));
+
+      apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
+        .catch(err => console.error("Failed to preload actions", err));
     }
 
     // 2. All Users (Persons) Page
@@ -2173,6 +2540,10 @@ export default function App() {
             }
           })
           .catch(err => { console.error("Failed to load externals", err); setExternals([]); syncDevicesFromFetchedType('external', []); });
+
+        apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
+          .catch(err => console.error("Failed to load actions on externals page", err));
       }
     }
 
@@ -3011,8 +3382,10 @@ export default function App() {
             else if (isOpen) st = 'open';
             else if (isLocked) st = 'locked';
             else st = 'unlocked';
+          } else if (type === 'external') {
+            st = isExternalTriggered(item) ? 'triggered' : (isPropActive(item) ? 'active' : 'inactive');
           } else {
-            const isAct = (isActiveVal !== undefined && isActiveVal !== null) ? (isActiveVal === true || isActiveVal === 'true') : 
+            const isAct = (isActiveVal !== undefined && isActiveVal !== null) ? (isActiveVal === true || isActiveVal === 'true' || isActiveVal === 1 || isActiveVal === '1') : 
                           (existingDev ? (existingDev.status === 'on' || existingDev.status === 'active') : false);
             st = isAct ? (type === 'camera' ? 'active' : 'on') : (type === 'camera' ? 'inactive' : 'off');
           }
@@ -3053,10 +3426,10 @@ export default function App() {
     };
 
     // --- Device Listeners ---
-    ['Light', 'Appliance', 'Camera', 'Door', 'Window'].forEach(t => {
+    ['Light', 'Appliance', 'Camera', 'Door', 'Window', 'External'].forEach(t => {
       const type = t.toLowerCase();
       hs.on(`${t}Created`, (data) => {
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
         const dataId = data.id ?? data.Id;
         if (setter && dataId !== undefined && dataId !== null) {
           setter(prev => {
@@ -3067,7 +3440,7 @@ export default function App() {
         updateSyncDevice(type, dataId, data, 'add');
       });
       hs.on(`${t}Updated`, (data) => {
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
         const dataId = getProp(data, 'id');
         if (setter && dataId !== undefined && dataId !== null) {
           setter(prev => prev.map(x => {
@@ -3089,7 +3462,7 @@ export default function App() {
       });
       hs.on(`${t}Deleted`, (data) => {
         const id = typeof data === 'object' ? (data.id ?? data.Id) : data;
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows }[t]);
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
         if (setter && id !== undefined && id !== null) {
           setter(prev => prev.filter(x => x.id.toString() !== id.toString()));
         }
@@ -4121,16 +4494,11 @@ export default function App() {
     if (!editingGroupId || !newGroupName.trim()) return;
 
     try {
-      let uploadedImageUrl = "";
-      if (newGroupImageFile) {
-        uploadedImageUrl = await toBase64(newGroupImageFile);
-      }
-      
       const updateDto = {
         chatId: editingGroupId,
         name: newGroupName,
         description: newGroupDescription || "",
-        imageUrl: uploadedImageUrl
+        imageUrl: newGroupImageUrl || ""
       };
 
       await apiFetch<any>('/Chat/UpdateGroupChat', {
@@ -4830,9 +5198,17 @@ export default function App() {
       const prevExternals = [...externals];
 
       // Optimistic update
-      setDevices(prev => prev.map(dev => dev.id === d.id ? { ...dev, status: newStatus as any } : dev));
+      setDevices(prev => prev.map(dev => dev.id === d.id ? { 
+        ...dev, 
+        status: newStatus as any,
+        value: (d.type === 'light' && nextActive && (dev.value === undefined || dev.value === 0)) ? 100 : dev.value
+      } : dev));
       if (d.type === 'light') {
-        setLights(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+        setLights(prev => prev.map(item => item.id.toString() === rawId ? { 
+          ...item, 
+          isActive: nextActive,
+          brightnessLevel: (nextActive && (item.brightnessLevel === undefined || item.brightnessLevel === 0)) ? 100 : item.brightnessLevel
+        } : item));
       } else if (d.type === 'appliance') {
         setAppliances(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
       } else if (d.type === 'camera') {
@@ -4852,11 +5228,12 @@ export default function App() {
           }
         } else if (d.type === 'light') {
           const lightDto = (prevLights || []).find(l => l.id.toString() === rawId.toString());
+          const calculatedBrightness = (nextActive && (d.value === 0 || d.value === undefined || (lightDto && (lightDto.brightnessLevel === 0 || lightDto.brightnessLevel === undefined)))) ? 100 : (d.value ?? lightDto?.brightnessLevel ?? 100);
           const payload = { 
             id: parseInt(rawId), 
             isActive: nextActive, 
             lightName: lightDto?.lightName || d.name,
-            brightnessLevel: d.value ?? lightDto?.brightnessLevel ?? 100,
+            brightnessLevel: calculatedBrightness,
             roomId: resolveRoomId(lightDto?.roomId, rooms),
             sectionId: resolveSectionId(lightDto?.sectionId, sections),
             isHidden: false
@@ -4905,7 +5282,7 @@ export default function App() {
               id: parseInt(rawId),
               externalName: extDto.externalName,
               isActive: nextActive,
-              isTriggered: extDto.isTriggered,
+              isTriggered: isExternalTriggered(extDto),
               actionIds: extDto.actionIds || [],
               roomId: resolveRoomId(extDto.roomId, rooms),
               sectionId: resolveSectionId(extDto.sectionId, sections),
@@ -4937,37 +5314,83 @@ export default function App() {
     if (!d) return;
 
     const rawId = getRawId(d.id);
+    const isCurrentlyOpen = d.status === 'open' || d.status === 'open-locked';
+    const isCurrentlyLocked = d.status === 'locked' || d.status === 'open-locked';
+
+    if ((action === 'open' || action === 'close') && isCurrentlyLocked) {
+      toast.error(`Cannot ${action} ${d.type} because it is locked`);
+      return;
+    }
 
     try {
       if (d.type === 'door') {
-        if (action === 'lock') {
-          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'unlock') {
-          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open') {
-          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'close') {
-          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+        const doorDto = (doors || []).find(x => x.id.toString() === rawId.toString());
+        if (action === 'lock' && isCurrentlyOpen) {
+          await apiFetch('/Door/UpdateDoor', {
+            method: 'PUT',
+            body: JSON.stringify({
+              id: Number(rawId),
+              roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
+              sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
+              isHidden: getProp(doorDto, 'isHidden') ?? false,
+              doorName: getProp(doorDto, 'doorName') || d.name,
+              doorType: parseInt(getProp(doorDto, 'doorType')?.toString() || '1'),
+              isLocked: true,
+              isOpen: false,
+              openedBy: 0,
+              lockedBy: 0,
+              unlockedBy: 0
+            })
+          });
+        } else {
+          if (action === 'lock') {
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'unlock') {
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'open') {
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'close') {
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+          }
         }
         setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
           isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
-          isOpen: action === 'open' ? true : action === 'close' ? false : item.isOpen
+          isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       } else if (d.type === 'window') {
-        if (action === 'lock') {
-          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'unlock') {
-          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open') {
-          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'close') {
-          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+        const windowDto = (windows || []).find(x => x.id.toString() === rawId.toString());
+        if (action === 'lock' && isCurrentlyOpen) {
+          await apiFetch('/Window/UpdateWindow', {
+            method: 'PUT',
+            body: JSON.stringify({
+              id: Number(rawId),
+              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
+              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
+              isHidden: getProp(windowDto, 'isHidden') ?? false,
+              windowName: getProp(windowDto, 'windowName') || d.name,
+              isLocked: true,
+              isOpen: false,
+              openedBy: 0,
+              lockedBy: 0,
+              unlockedBy: 0
+            })
+          });
+        } else {
+          if (action === 'lock') {
+            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'unlock') {
+            await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'open') {
+            await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'close') {
+            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+          }
         }
         setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
           isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
-          isOpen: action === 'open' ? true : action === 'close' ? false : item.isOpen
+          isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       }
       toast.success(`${d.type} toggled successfully`);
@@ -5971,7 +6394,7 @@ export default function App() {
                 statusSummary = `${active} Active • ${inactive} Off`;
               } else if (cat.type === 'externals') {
                 total = externals.length;
-                active = externals.filter(e => e.isTriggered).length;
+                active = externals.filter(e => isExternalTriggered(e)).length;
                 inactive = total - active;
                 statusSummary = `${active} Triggered • ${inactive} OK`;
               } else if (cat.type === 'section') {
@@ -7205,16 +7628,24 @@ export default function App() {
                     }}
                   >
                     <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
-                        <img 
-                          src={getFullImageUrl(details?.imageUrl) || undefined} 
-                          alt={`${details.firstName} ${details.lastName}`} 
-                          className="h-full w-full object-cover" 
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${details.firstName}+${details.lastName}&background=random`;
-                          }}
-                        />
+                      <div className="h-12 w-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shrink-0">
+                        {details?.imageUrl ? (
+                          <img 
+                            src={getFullImageUrl(details.imageUrl)} 
+                            alt={`${details.firstName} ${details.lastName}`} 
+                            className="h-full w-full object-cover" 
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                              const parent = (e.target as HTMLImageElement).parentElement;
+                              if (parent) {
+                                parent.innerHTML = `<span class="font-bold text-sm text-slate-700">${getInitials(details?.firstName, details?.lastName)}</span>`;
+                              }
+                            }}
+                          />
+                        ) : (
+                          <span>{getInitials(details?.firstName, details?.lastName)}</span>
+                        )}
                       </div>
                       <div>
                         <h3 className="font-bold">{details.firstName} {details.lastName}</h3>
@@ -8105,8 +8536,8 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-3">
-                      <Badge variant={ext.isTriggered ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
-                        {ext.isTriggered ? 'TRIGGERED' : 'STANDBY'}
+                      <Badge variant={isExternalTriggered(ext) ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
+                        {isExternalTriggered(ext) ? 'TRIGGERED' : 'STANDBY'}
                       </Badge>
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <Switch 
@@ -8158,9 +8589,9 @@ export default function App() {
                     <div className="flex gap-1.5 flex-wrap mt-1">
                       {ext.actionIds && ext.actionIds.length > 0 ? (
                         ext.actionIds.map(aid => {
-                          const sceneName = (scenes || []).find(s => s.id === aid.toString())?.name || `ACT-${aid}`;
+                          const actionName = (actions || []).find(a => a.id.toString() === aid.toString())?.actionName || `ACT-${aid}`;
                           return (
-                            <Badge key={aid} variant="outline" className="font-mono text-[10px]">{sceneName}</Badge>
+                            <Badge key={aid} variant="outline" className="font-mono text-[10px]">{actionName}</Badge>
                           );
                         })
                       ) : (
@@ -8239,8 +8670,8 @@ export default function App() {
           <div className="grid grid-cols-1 gap-8">
             {sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
               sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
-                const sectionRooms = rooms.filter(r => r.section?.toString() === section.id?.toString());
-                const sectionDevices = devices.filter(d => d.section?.toString() === section.id?.toString());
+                const sectionRooms = getSectionRooms(section, rooms);
+                const sectionDevices = getSectionDirectDevices(section, devices);
                 
                 return (
                   <div key={section.id} className="space-y-4 group relative">
@@ -8267,7 +8698,7 @@ export default function App() {
                         </Button>
                       </div>
                     </div>
-
+ 
                     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                       {/* Rooms in Section */}
                       <div className="space-y-3">
@@ -8285,14 +8716,17 @@ export default function App() {
                               </CardContent>
                             </Card>
                           ))}
+                          {sectionRooms.length === 0 && (
+                            <p className="text-xs text-muted-foreground italic">No rooms in this section.</p>
+                          )}
                         </div>
                       </div>
-
+ 
                       {/* Devices in Section */}
                       <div className="space-y-3">
                         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Direct Devices</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined').map(device => (
+                          {sectionDevices.map(device => (
                             <DeviceCard 
                               key={device.id} 
                               device={device} 
@@ -8304,7 +8738,7 @@ export default function App() {
                               onClick={handleDeviceClick}
                             />
                           ))}
-                          {sectionDevices.filter(d => !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined').length === 0 && (
+                          {sectionDevices.length === 0 && (
                             <p className="text-xs text-muted-foreground italic">No direct devices in this section.</p>
                           )}
                         </div>
@@ -9328,11 +9762,11 @@ export default function App() {
                   };
                   try {
                     if (pendingUserAction.type === 'delete') {
-                      await apiFetch('/Person/DeletePerson', { method: 'PUT', body: JSON.stringify(authPayload) });
+                      await apiFetch(`/Person/DeletePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
                       setAllUsers(prev => prev.filter(u => u.id !== pendingUserAction.userId));
                       toast.success("User deleted safely");
                     } else if (pendingUserAction.type === 'disable' || pendingUserAction.type === 'toggle-disable') {
-                      await apiFetch('/Person/DisablePerson', { method: 'PUT', body: JSON.stringify(authPayload) });
+                      await apiFetch(`/Person/DisablePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
                       setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { 
                         ...u, 
                         disabled: !u.disabled, 
@@ -9480,11 +9914,43 @@ export default function App() {
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-pwd">Password</Label>
-                    <Input id="p-pwd" type="password" className={newPerson.createUserDto.password ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.password} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} />
+                    <div className="relative">
+                      <Input 
+                        id="p-pwd" 
+                        type={showAddMemberPassword ? "text" : "password"} 
+                        className={cn("pr-9 border-b-2", newPerson.createUserDto.password ? "border-b-green-400" : "border-b-slate-200")} 
+                        value={newPerson.createUserDto.password} 
+                        onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowAddMemberPassword(!showAddMemberPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showAddMemberPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-auth">Initial Auth Code (6 digits)</Label>
-                    <Input id="p-auth" placeholder="000000" maxLength={6} className={newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.authorizationCode} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} />
+                    <div className="relative">
+                      <Input 
+                        id="p-auth" 
+                        type={showAddMemberAuthCode ? "text" : "password"} 
+                        placeholder="000000" 
+                        maxLength={6} 
+                        className={cn("pr-9 border-b-2", newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-green-400" : "border-b-slate-200")} 
+                        value={newPerson.createUserDto.authorizationCode} 
+                        onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowAddMemberAuthCode(!showAddMemberAuthCode)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showAddMemberAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -9498,18 +9964,28 @@ export default function App() {
                   method: 'POST',
                   body: JSON.stringify(newPerson)
                 });
-                if (response && response.data) {
-                  setAllUsers(prev => [...prev, response.data]);
+                const isSuccess = response?.isSuccess !== false && response?.status !== false;
+                if (isSuccess) {
+                  // Reload the list of persons from the backend to ensure the new person is displayed and has all DB fields
+                  try {
+                    const personsRes: any = await apiFetch('/Person/GetAllPersons', { method: 'POST' });
+                    if (personsRes && personsRes.data && Array.isArray(personsRes.data)) {
+                      setAllUsers(personsRes.data);
+                    }
+                  } catch (reloadErr) {
+                    console.error("Failed to reload members after creation", reloadErr);
+                  }
                   setIsAddPersonOpen(false);
                   toast.success("Member created successfully");
                 } else {
-                    toast.error("Failed to create member");
+                  toast.error(response?.message || "Failed to create member");
                 }
               } catch (err: any) {
                 console.error("Failed to create user", err);
                 toast.error(err.message || "Failed to create user");
               }
-            }} className="bg-primary text-primary-foreground">
+            }} className="bg-primary text-primary-foreground flex items-center gap-2">
+              <UserPlus className="h-4 w-4" />
               Create Member
             </Button>
           </DialogFooter>
@@ -9624,13 +10100,22 @@ export default function App() {
                       )}
                       onClick={() => {
                         if (viewingPerson) {
-                          requestAuth(() => {
-                            setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
-                              ...u, 
-                              disabled: !u.disabled, 
-                              getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
-                            } : u));
-                            setIsViewPersonDetailsOpen(false);
+                          requestAuth(async () => {
+                            try {
+                              const pId = viewingPerson.id;
+                              await apiFetch(`/Person/DisablePerson?personId=${pId}`, { method: 'PUT' });
+                              const nextDisabled = !viewingPerson.disabled;
+                              setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
+                                ...u, 
+                                disabled: nextDisabled, 
+                                getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: nextDisabled } 
+                              } : u));
+                              setIsViewPersonDetailsOpen(false);
+                              toast.success(`User status updated successfully`);
+                            } catch (err: any) {
+                              console.error("Failed to disable person", err);
+                              toast.error(`Failed to update status: ${err.message}`);
+                            }
                           });
                         }
                       }}
@@ -9643,9 +10128,17 @@ export default function App() {
                        className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
                       onClick={() => {
                         if (viewingPerson) {
-                          requestAuth(() => {
-                            setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
-                            setIsViewPersonDetailsOpen(false);
+                          requestAuth(async () => {
+                            try {
+                              const pId = viewingPerson.id;
+                              await apiFetch(`/Person/DeletePerson?personId=${pId}`, { method: 'PUT' });
+                              setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
+                              setIsViewPersonDetailsOpen(false);
+                              toast.success("User deleted successfully");
+                            } catch (err: any) {
+                              console.error("Failed to delete person", err);
+                              toast.error(`Deletion failed: ${err.message}`);
+                            }
                           });
                         }
                       }}
@@ -9667,16 +10160,24 @@ export default function App() {
                 <>
                   {/* Identity Section */}
                   <div className="flex items-start gap-6 border-b pb-4">
-                    <div className="h-24 w-24 rounded-2xl bg-muted flex items-center justify-center overflow-hidden shrink-0 border-2 border-primary/10 shadow-inner">
-                      <img 
-                        src={getFullImageUrl(viewingPerson.getPersonDetailsDto.imageUrl) || `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`} 
-                        alt="Profile" 
-                        referrerPolicy="no-referrer"
-                        className="h-full w-full object-cover" 
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${viewingPerson.getPersonDetailsDto.firstName}+${viewingPerson.getPersonDetailsDto.lastName}&background=random`;
-                        }}
-                      />
+                    <div className="h-24 w-24 rounded-2xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-2 border-primary/10 shadow-inner font-bold text-lg text-slate-700">
+                      {viewingPerson.getPersonDetailsDto.imageUrl ? (
+                        <img 
+                          src={getFullImageUrl(viewingPerson.getPersonDetailsDto.imageUrl)} 
+                          alt="Profile" 
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover" 
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            const parent = (e.target as HTMLImageElement).parentElement;
+                            if (parent) {
+                              parent.innerHTML = `<span class="font-bold text-lg text-slate-700">${getInitials(viewingPerson.getPersonDetailsDto.firstName, viewingPerson.getPersonDetailsDto.lastName)}</span>`;
+                            }
+                          }}
+                        />
+                      ) : (
+                        <span>{getInitials(viewingPerson.getPersonDetailsDto.firstName, viewingPerson.getPersonDetailsDto.lastName)}</span>
+                      )}
                     </div>
                     <div className="space-y-3 flex-1">
                       <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Core Identity</h4>
@@ -11529,7 +12030,7 @@ export default function App() {
                 </Label>
                 <Select 
                   value={externalForm.sectionId?.toString() || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, sectionId: val === 'none' ? undefined : parseInt(val) }))}
+                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, sectionId: val === 'none' ? undefined : val }))}
                 >
                   <SelectTrigger id="ext-section">
                     <SelectValue placeholder="Select section" />
@@ -11601,7 +12102,7 @@ export default function App() {
                 try {
                   const payload = {
                     roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
-                    sectionId: (externalForm.sectionId && externalForm.sectionId !== 'none') ? parseInt(externalForm.sectionId.toString()) : null,
+                    sectionId: resolveSectionId(externalForm.sectionId, sections),
                     isHidden: true,
                     externalName: externalForm.externalName,
                     actionIds: (externalForm.actionIds || []).map(Number)
@@ -11689,7 +12190,7 @@ export default function App() {
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Triggered Status</span>
                   <div className="flex items-center gap-2 font-medium">
-                    {selectedExternal.isTriggered ? (
+                    {isExternalTriggered(selectedExternal) ? (
                       <Badge variant="destructive" className="animate-pulse">Triggered</Badge>
                     ) : (
                       <Badge variant="secondary">Standby</Badge>
@@ -11872,7 +12373,7 @@ export default function App() {
                   const payload = {
                     id: Number(externalForm.id),
                     roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
-                    sectionId: (externalForm.sectionId && externalForm.sectionId !== 'none') ? parseInt(externalForm.sectionId.toString()) : null,
+                    sectionId: resolveSectionId(externalForm.section || externalForm.sectionId, sections),
                     isHidden: true,
                     externalName: externalForm.externalName,
                     isTriggered: externalForm.isTriggered || false,
@@ -11889,7 +12390,7 @@ export default function App() {
                     isActive: externalForm.isActive !== false,
                     actionIds: externalForm.actionIds || [],
                     roomId: externalForm.roomId,
-                    sectionId: externalForm.sectionId,
+                    sectionId: resolveSectionId(externalForm.section || externalForm.sectionId, sections) || undefined,
                     room: externalForm.room,
                     section: externalForm.section
                   } : item));
@@ -15203,7 +15704,7 @@ export default function App() {
 
             {/* Right Column (60%) */}
             <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
-              <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+              <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-6 space-y-6">
                   {/* Manage Members */}
                   <div className="space-y-4">
@@ -15403,7 +15904,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </ScrollArea>
+              </div>
             </div>
           </div>
 

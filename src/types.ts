@@ -114,6 +114,9 @@ export interface Section {
   name: string;
   type?: 'general' | 'secretive';
   isHidden?: boolean;
+  dbId?: number;
+  sectionId?: string;
+  sectionName?: string;
 }
 
 export interface GetLogDto {

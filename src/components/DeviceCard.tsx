@@ -86,6 +86,10 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
   const handleDoorAction = (action: 'lock' | 'unlock' | 'open' | 'close') => {
     if ((device.type !== 'door' && device.type !== 'window') || isSummary) return;
     
+    if ((action === 'open' || action === 'close') && isLocked) {
+      return;
+    }
+
     if (onDoorAction) {
       onDoorAction(device.id, action);
       return;
@@ -218,11 +222,13 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 <Button 
                   variant="outline" 
                   size="icon" 
+                  disabled={isLocked}
                   className={cn(
                     "h-8 w-8 transition-colors rounded-lg border flex items-center justify-center shadow-sm",
                     isOpen
                       ? "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                      : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100",
+                    isLocked && "opacity-40 cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400"
                   )}
                   onClick={(e) => { e.stopPropagation(); handleDoorAction(isOpen ? 'close' : 'open'); }}
                   title={isOpen ? 'Close' : 'Open'}
