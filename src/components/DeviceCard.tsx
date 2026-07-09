@@ -153,7 +153,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
               <CardTitle className="text-sm font-medium leading-none">
                 {device.name}
               </CardTitle>
-              {device.doorType && (
+              {device.doorType && !/^\d+$/.test(device.doorType.toString()) && (
                 <span className="mt-1 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {device.doorType}
                 </span>

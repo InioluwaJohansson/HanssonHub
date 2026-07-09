@@ -88,6 +88,7 @@ import { GetUserDto } from './api/types';
 import { API_BASE_URL } from './config';
 import { apiFetch } from './api/client';
 import { ScrollArea } from './components/ui/scroll-area';
+import { HlsVideo } from './components/HlsVideo';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
 import { Separator } from './components/ui/separator';
@@ -621,6 +622,12 @@ const getSectionDirectDevices = (section: any, globalDevices: Device[]): Device[
   // Merge with global devices that are direct and match the section
   const devicesMap = new Map<string, Device>();
 
+  // First populate with list of section devices
+  list.forEach(d => {
+    devicesMap.set(d.id.toString(), d);
+  });
+
+  // Then overwrite with live stateful values from global devices so that toggles and adjustments react immediately
   (globalDevices || []).forEach(d => {
     const dSectionStr = d.section?.toString();
     const isDirectGlobal = !d.room || d.room === '' || d.room === 'none' || d.room === '0' || d.room === 'null' || d.room === 'undefined';
@@ -629,11 +636,35 @@ const getSectionDirectDevices = (section: any, globalDevices: Device[]): Device[
     }
   });
 
-  list.forEach(d => {
-    devicesMap.set(d.id.toString(), d);
-  });
-
   return Array.from(devicesMap.values());
+};
+
+const resolveSectionName = (device: any, dto: any, sections: Section[], rooms: Room[]): string => {
+  if (!sections || sections.length === 0) return 'N/A';
+  
+  let secId = getProp(device, 'section') ?? getProp(dto, 'sectionId') ?? getProp(dto, 'SectionId');
+  
+  if (!secId || secId === '0' || secId === 0) {
+    const roomId = getProp(device, 'room') ?? getProp(dto, 'roomId') ?? getProp(dto, 'RoomId');
+    if (roomId && roomId !== 'none' && roomId !== '0' && roomId !== 0) {
+      const room = (rooms || []).find(r => r.id?.toString() === roomId.toString());
+      if (room) {
+        secId = room.section;
+      }
+    }
+  }
+
+  if (!secId || secId === 'none' || secId === '0' || secId === 0) return 'N/A';
+
+  const secIdStr = secId.toString().toLowerCase();
+  const found = (sections || []).find(s => 
+    s.id?.toString().toLowerCase() === secIdStr || 
+    s.dbId?.toString().toLowerCase() === secIdStr ||
+    (s as any).sectionId?.toString().toLowerCase() === secIdStr ||
+    (s as any).SectionId?.toString().toLowerCase() === secIdStr
+  );
+  
+  return found?.name || found?.sectionName || 'N/A';
 };
 
 const base64ToFile = (base64: string, filename: string): File => {
@@ -3400,6 +3431,11 @@ export default function App() {
           const brightnessVal = getProp(item, 'brightnessLevel');
           const appTypeVal = getProp(item, 'applianceType');
           
+          const rawDoorType = getProp(item, 'doorType') ?? getProp(item, 'DoorType');
+          const doorTypeMapped = (rawDoorType !== undefined && rawDoorType !== null)
+            ? ((appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === rawDoorType.toString())?.name || rawDoorType.toString())
+            : (existingDev?.doorType);
+          
           return {
             id: `${type}-${getProp(item, 'id') ?? id}`,
             name: nameVal || existName,
@@ -3408,7 +3444,8 @@ export default function App() {
             room: (roomVal !== undefined && roomVal !== null && roomVal !== '') ? roomVal : existRoom,
             section: (sectionVal !== undefined && sectionVal !== null && sectionVal !== '') ? sectionVal : existSection,
             value: type === 'light' ? (brightnessVal !== undefined ? brightnessVal : (existingDev?.value ?? 0)) : undefined,
-            applianceType: appTypeVal ? ((appNamesDetailList?.applianceType || []).find(t => t.name === appTypeVal)?.id || 1) : (existingDev?.applianceType)
+            applianceType: appTypeVal ? ((appNamesDetailList?.applianceType || []).find(t => t.name === appTypeVal)?.id || 1) : (existingDev?.applianceType),
+            ...(type === 'door' ? { doorType: doorTypeMapped } : {})
           };
         };
 
@@ -3421,6 +3458,64 @@ export default function App() {
         return prev.map(d => {
           if (d.id !== targetId) return d;
           return mapToDevice(data, d);
+        });
+      });
+    };
+
+    const updateSectionsAndRoomsWithFacilityItem = (type: string, data: any, op: 'add' | 'update' | 'delete') => {
+      const dataId = data.id ?? data.Id ?? data.sectionId ?? data.roomId;
+      if (dataId === undefined || dataId === null) return;
+
+      const getVal = (prop: string) => data[prop] ?? data[prop.charAt(0).toUpperCase() + prop.slice(1)] ?? data[prop.toLowerCase()];
+      
+      const sectionId = getVal('sectionId');
+      const roomId = getVal('roomId');
+
+      setSections(prevSections => {
+        return prevSections.map(sec => {
+          const secIdStr = sec.id?.toString();
+          const secDbIdStr = sec.dbId?.toString() || (sec as any).Id?.toString();
+
+          let itemBelongsToThisSection = false;
+          if (sectionId !== undefined && sectionId !== null && sectionId !== '' && sectionId !== 0 && sectionId !== '0') {
+            itemBelongsToThisSection = (sectionId.toString() === secIdStr || sectionId.toString() === secDbIdStr);
+          } else if (roomId !== undefined && roomId !== null && roomId !== '' && roomId !== 0 && roomId !== '0') {
+            const secRooms = sec.rooms || (sec as any).Rooms || [];
+            itemBelongsToThisSection = secRooms.some((r: any) => (r.id ?? r.Id)?.toString() === roomId.toString());
+          }
+
+          const arrNames = {
+            door: ['doors', 'Doors'],
+            light: ['lights', 'Lights'],
+            window: ['windows', 'Windows'],
+            appliance: ['appliances', 'Appliances'],
+            camera: ['cameras', 'Cameras'],
+            external: ['externals', 'Externals'],
+            room: ['rooms', 'Rooms']
+          }[type];
+
+          if (!arrNames) return sec;
+
+          const updatedSec = { ...sec };
+          arrNames.forEach(arrName => {
+            const rawArr = (sec as any)[arrName] || [];
+            let updatedArr = [...rawArr];
+
+            updatedArr = updatedArr.filter((x: any) => (x.id ?? x.Id)?.toString() !== dataId.toString());
+
+            if (op !== 'delete' && itemBelongsToThisSection) {
+              const idx = rawArr.findIndex((x: any) => (x.id ?? x.Id)?.toString() === dataId.toString());
+              if (idx >= 0) {
+                updatedArr = rawArr.map((x: any) => (x.id ?? x.Id)?.toString() === dataId.toString() ? { ...x, ...data } : x);
+              } else {
+                updatedArr.push(data);
+              }
+            }
+
+            (updatedSec as any)[arrName] = updatedArr;
+          });
+
+          return updatedSec;
         });
       });
     };
@@ -3438,6 +3533,7 @@ export default function App() {
           });
         }
         updateSyncDevice(type, dataId, data, 'add');
+        updateSectionsAndRoomsWithFacilityItem(type, data, 'add');
       });
       hs.on(`${t}Updated`, (data) => {
         const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
@@ -3459,6 +3555,7 @@ export default function App() {
           }));
         }
         updateSyncDevice(type, dataId, data, 'update');
+        updateSectionsAndRoomsWithFacilityItem(type, data, 'update');
       });
       hs.on(`${t}Deleted`, (data) => {
         const id = typeof data === 'object' ? (data.id ?? data.Id) : data;
@@ -3467,10 +3564,12 @@ export default function App() {
           setter(prev => prev.filter(x => x.id.toString() !== id.toString()));
         }
         updateSyncDevice(type, id, {}, 'delete');
+        updateSectionsAndRoomsWithFacilityItem(type, { id }, 'delete');
       });
       hs.on(`${t}Triggered`, (data) => {
         toast.info(`${t} triggered`, { description: data.message });
         updateSyncDevice(type, (data.id ?? data.Id), data, 'update');
+        updateSectionsAndRoomsWithFacilityItem(type, data, 'update');
       });
     });
 
@@ -3486,22 +3585,31 @@ export default function App() {
     hs.on("PersonUpdated", (data) => setAllUsers(prev => prev.map(p => (p.id !== undefined && p.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && p.id.toString() === (data.id ?? data.Id).toString() ? { ...p, ...data } : p)));
     hs.on("PersonStatusChanged", (data) => setAllUsers(prev => prev.map(u => (u.id !== undefined && u.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && u.id.toString() === (data.id ?? data.Id).toString() ? { ...u, disabled: data.disabled } : u)));
     
-    hs.on("RoomCreated", (data) => setRooms(prev => {
+    hs.on("RoomCreated", (data) => {
       const dataId = data.id ?? data.Id;
-      if (dataId !== undefined && dataId !== null && prev.some(r => r.id.toString() === dataId.toString())) return prev;
-      return [...prev, { ...data, id: dataId, name: data.roomName || data.name, section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || '' }];
-    }));
-    hs.on("RoomUpdated", (data) => setRooms(prev => prev.map(r => (r.id !== undefined && r.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && r.id.toString() === (data.id ?? data.Id).toString() ? { 
-      ...r, 
-      ...data, 
-      name: data.roomName || data.name || r.name, 
-      section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || r.section || '' 
-    } : r)));
-    hs.on("RoomDeleted", (id) => setRooms(prev => {
+      setRooms(prev => {
+        if (dataId !== undefined && dataId !== null && prev.some(r => r.id.toString() === dataId.toString())) return prev;
+        return [...prev, { ...data, id: dataId, name: data.roomName || data.name, section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || '' }];
+      });
+      updateSectionsAndRoomsWithFacilityItem('room', data, 'add');
+    });
+    hs.on("RoomUpdated", (data) => {
+      const dataId = data.id ?? data.Id;
+      setRooms(prev => prev.map(r => (r.id !== undefined && r.id !== null && dataId !== undefined && dataId !== null) && r.id.toString() === dataId.toString() ? { 
+        ...r, 
+        ...data, 
+        name: data.roomName || data.name || r.name, 
+        section: data.sectionId?.toString() || data.SectionId?.toString() || data.sectionName || data.SectionName || data.section || data.Section || r.section || '' 
+      } : r));
+      updateSectionsAndRoomsWithFacilityItem('room', data, 'update');
+    });
+    hs.on("RoomDeleted", (id) => {
       const deletedId = typeof id === 'object' ? (id.id ?? id.Id) : id;
-      if (deletedId === undefined || deletedId === null) return prev;
-      return prev.filter(r => r.id.toString() !== deletedId.toString());
-    }));
+      if (deletedId !== undefined && deletedId !== null) {
+        setRooms(prev => prev.filter(r => r.id.toString() !== deletedId.toString()));
+        updateSectionsAndRoomsWithFacilityItem('room', { id: deletedId }, 'delete');
+      }
+    });
     
     hs.on("SectionCreated", (data) => setSections(prev => {
       const dataId = data.sectionId ?? data.id ?? data.Id;
@@ -3726,7 +3834,20 @@ export default function App() {
         payload = arg1;
       }
 
-      if (eventName === "MessageDeleted" || (payload && (payload.messageId ?? payload.MessageId))) {
+      if (eventName === "GroupChatCreated" || eventName === "ChatCreated") {
+        const chat = payload as ChatDto;
+        if (chat && chat.id) {
+          setChats(prev => {
+            if (prev.some(c => c.id === chat.id)) return prev;
+            return [chat, ...prev];
+          });
+          if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
+            homeSecurityConnection.invoke("JoinChat", chat.id)
+              .then(() => console.log(`Joined chat ${chat.id} from UpdateChat event ${eventName}`))
+              .catch(err => console.warn(`Failed to join chat ${chat.id} from UpdateChat:`, err));
+          }
+        }
+      } else if (eventName === "MessageDeleted" || (payload && (payload.messageId ?? payload.MessageId))) {
         const cid = payload?.chatId ?? payload?.ChatId;
         const mid = payload?.messageId ?? payload?.MessageId;
         const isDel = payload?.isDeleted ?? payload?.IsDeleted ?? true;
@@ -3808,6 +3929,11 @@ export default function App() {
         if (prev.some(c => c.id === chat.id)) return prev;
         return [chat, ...prev];
       });
+      if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
+        homeSecurityConnection.invoke("JoinChat", chat.id)
+          .then(() => console.log(`Joined chat ${chat.id} from ChatCreated direct event`))
+          .catch(err => console.warn(`Failed to join chat ${chat.id} from ChatCreated direct event:`, err));
+      }
     });
 
     hs.on("GroupChatCreated", (chat: ChatDto) => {
@@ -3815,6 +3941,11 @@ export default function App() {
         if (prev.some(c => c.id === chat.id)) return prev;
         return [chat, ...prev];
       });
+      if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
+        homeSecurityConnection.invoke("JoinChat", chat.id)
+          .then(() => console.log(`Joined chat ${chat.id} from GroupChatCreated direct event`))
+          .catch(err => console.warn(`Failed to join chat ${chat.id} from GroupChatCreated direct event:`, err));
+      }
     });
 
     hs.on("GroupChatUpdated", (chat: ChatDto) => {
@@ -5649,13 +5780,30 @@ export default function App() {
         if (isSuccess) {
           const finalRoom = (finalRoomId !== null) ? finalRoomId.toString() : '';
           const finalSection = (finalSectionId !== null) ? finalSectionId.toString() : '';
+          
+          let doorTypeName = undefined;
+          if (editingDevice.type === 'door') {
+            const dtId = editingDevice.doorType?.toString();
+            doorTypeName = (appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === dtId)?.name || editingDevice.doorType;
+          }
+
           const processedEditingDevice = {
             ...editingDevice,
             room: finalRoom,
-            section: finalSection
+            section: finalSection,
+            ...(doorTypeName ? { doorType: doorTypeName } : {})
           };
           setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...processedEditingDevice } as Device : d));
           
+          if (editingDevice.type === 'door') {
+            setDoors(prev => prev.map(d => d.id.toString() === rawId ? {
+              ...d,
+              doorName: editingDevice.name || d.doorName,
+              doorType: editingDevice.doorType || d.doorType,
+              roomId: finalRoomId,
+              sectionId: finalSectionId
+            } : d));
+          }
           if (editingDevice.type === 'camera') {
             setCameras(prev => prev.map(c => c.id.toString() === rawId ? {
               ...c,
@@ -6254,7 +6402,7 @@ export default function App() {
                   
                   return (
                     <div key={deviceId} className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md">
-                      <video src={feedUrl || undefined} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
+                      <HlsVideo src={feedUrl || undefined} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
                       <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white flex justify-between items-end">
                         <span className="font-semibold text-lg tracking-tight">{name}</span>
                         <span className="text-[10px] bg-red-500 text-white px-2.5 py-1 rounded-full font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
@@ -9521,24 +9669,6 @@ export default function App() {
                 onChange={(e) => setEditingSection(prev => prev ? { ...prev, name: e.target.value } : null)}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-sec-type" className="flex items-center gap-2">
-                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
-                Section Type
-              </Label>
-              <Select 
-                value={editingSection?.type || 'general'} 
-                onValueChange={(v: 'general' | 'secretive') => setEditingSection(prev => prev ? { ...prev, type: v } : null)}
-              >
-                <SelectTrigger id="edit-sec-type">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
-                  <SelectItem value="secretive">Secretive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
               <div className="space-y-0.5">
                 <Label htmlFor="edit-sec-hidden" className="text-sm font-medium flex items-center gap-2">
@@ -9559,15 +9689,13 @@ export default function App() {
               if (editingSection?.id && editingSection.name) {
                 requestAuth(async () => {
                   try {
-                    const payload = {
-                      id: Number(editingSection.id),
-                      sectionName: editingSection.name || '',
-                      SectionName: editingSection.name || '',
-                      isHidden: editingSection.isHidden ? true : false,
-                      IsHidden: editingSection.isHidden ? true : false
-                    };
-                    await apiFetch('/Section/UpdateSection', { method: 'PUT', body: JSON.stringify(payload) });
-                    setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, type: editingSection.type, isHidden: editingSection.isHidden }) : s));
+                    const idVal = Number(editingSection.id);
+                    const nameVal = encodeURIComponent(editingSection.name);
+                    const isHiddenVal = editingSection.isHidden ? 'true' : 'false';
+                    const url = `/Section/UpdateSection?Id=${idVal}&SectionName=${nameVal}&IsHidden=${isHiddenVal}`;
+                    
+                    await apiFetch(url, { method: 'PUT' });
+                    setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, isHidden: editingSection.isHidden }) : s));
                     setIsEditSectionOpen(false);
                     toast.success("Section updated successfully");
                   } catch (err: any) {
@@ -12209,7 +12337,9 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">{(sections || []).find(s => s.id === selectedExternal.sectionId || s.id.toString() === selectedExternal.sectionId?.toString())?.name || 'N/A'}</div>
+                  <div className="font-medium">
+                    {resolveSectionName(selectedExternal, selectedExternal, sections, rooms)}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
@@ -12511,7 +12641,7 @@ export default function App() {
 
                       {/* Video Player */}
                       {selectedCamera?.status === 'active' ? (
-                        <video
+                        <HlsVideo
                           ref={videoRef}
                           key={currentVideoUrl}
                           src={currentVideoUrl || undefined}
@@ -12602,7 +12732,7 @@ export default function App() {
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
                           <span className="font-semibold text-foreground">
-                            {selectedCamera?.section ? (sections || []).find(s => s.id.toString() === selectedCamera.section?.toString())?.name : 'Security'}
+                            {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
                           </span>
                         </div>
                       </div>
@@ -12625,7 +12755,7 @@ export default function App() {
                         <div className="space-y-1">
                           <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                           <div className="font-medium">
-                            {selectedCamera?.section ? ((sections || []).find(s => s.id.toString() === selectedCamera.section?.toString())?.name || 'N/A') : (currentCameraDto?.sectionId ? ((sections || []).find(s => s.id.toString() === currentCameraDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                            {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
                           </div>
                         </div>
                         
@@ -12846,7 +12976,7 @@ export default function App() {
                     <div className="space-y-1">
                       <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                       <div className="font-medium">
-                        {selectedAppliance.section ? ((sections || []).find(s => s.id.toString() === selectedAppliance.section?.toString())?.name || 'N/A') : (currentApplianceDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentApplianceDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                        {resolveSectionName(selectedAppliance, currentApplianceDto, sections, rooms)}
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -12952,7 +13082,7 @@ export default function App() {
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                   <div className="font-medium">
-                    {selectedDoor.section ? ((sections || []).find(s => s.id.toString() === selectedDoor.section?.toString())?.name || 'N/A') : (currentDoorDto?.sectionId ? ((sections || []).find(s => s.id.toString() === currentDoorDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                    {resolveSectionName(selectedDoor, currentDoorDto, sections, rooms)}
                   </div>
                 </div>
                 <div className="space-y-1">
@@ -13092,7 +13222,7 @@ export default function App() {
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                         <div className="font-medium">
-                          {selectedLight.section ? ((sections || []).find(s => s.id.toString() === selectedLight.section?.toString())?.name || 'N/A') : (currentLightDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentLightDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                          {resolveSectionName(selectedLight, currentLightDto, sections, rooms)}
                         </div>
                       </div>
                       
@@ -13203,19 +13333,39 @@ export default function App() {
                       
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
-                        <div className="font-medium text-sm">{getUserNameById(currentSectionDto.createdBy) || currentSectionDto.createdByName || 'System'}</div>
+                        <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'createdBy')) || getProp(currentSectionDto, 'createdByName') || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
-                        <div className="font-medium text-sm">{currentSectionDto.createdOn ? format(new Date(currentSectionDto.createdOn), 'PPp') : 'N/A'}</div>
+                        <div className="font-medium text-sm">
+                          {(() => {
+                            const dateVal = getProp(currentSectionDto, 'createdOn');
+                            if (!dateVal) return 'N/A';
+                            try {
+                              return format(new Date(dateVal), 'PPp');
+                            } catch {
+                              return 'N/A';
+                            }
+                          })()}
+                        </div>
                       </div>
                       <div className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium text-sm">{getUserNameById(currentSectionDto.lastModifiedBy) || currentSectionDto.lastModifiedByName || 'System'}</div>
+                        <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'lastModifiedBy')) || getProp(currentSectionDto, 'lastModifiedByName') || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
-                        <div className="font-medium text-sm">{currentSectionDto.lastModifiedOn ? format(new Date(currentSectionDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                        <div className="font-medium text-sm">
+                          {(() => {
+                            const dateVal = getProp(currentSectionDto, 'lastModifiedOn') || getProp(currentSectionDto, 'lastModifiedTime');
+                            if (!dateVal) return 'Never';
+                            try {
+                              return format(new Date(dateVal), 'PPp');
+                            } catch {
+                              return 'Never';
+                            }
+                          })()}
+                        </div>
                       </div>
                     </>
                   )}
@@ -13321,7 +13471,7 @@ export default function App() {
                       <div className="space-y-1">
                         <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
                         <div className="font-medium text-sm">
-                          {selectedWindow.section ? ((sections || []).find(s => s.id.toString() === selectedWindow.section?.toString())?.name || 'N/A') : (currentWindowDto.sectionId ? ((sections || []).find(s => s.id.toString() === currentWindowDto.sectionId?.toString())?.name || 'N/A') : 'N/A')}
+                          {resolveSectionName(selectedWindow, currentWindowDto, sections, rooms)}
                         </div>
                       </div>
                       
@@ -15582,9 +15732,6 @@ export default function App() {
                                 ) : (
                                   <UserIcon className="h-6 w-6 text-slate-400" />
                                 )}
-                                {member.isOnline && (
-                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
-                                )}
                               </div>
 
                               <div className="flex-1 min-w-0">
@@ -15766,9 +15913,6 @@ export default function App() {
                                 ) : (
                                   <UserIcon className="h-5 w-5 text-slate-400" />
                                 )}
-                                {member.isOnline && (
-                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
-                                )}
                               </div>
                               <div className="flex-1 text-left min-w-0">
                                 <h4 className="font-bold text-sm text-slate-800 truncate">
@@ -15845,9 +15989,6 @@ export default function App() {
                                   <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                                 ) : (
                                   <UserIcon className="h-5 w-5 text-slate-400" />
-                                )}
-                                {isOnline && (
-                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
                                 )}
                               </div>
                               <div className="flex-1 text-left min-w-0">
@@ -16154,7 +16295,7 @@ export default function App() {
 
                 {/* Right Side: 60% */}
                 <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
-                  <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                  <ScrollArea className="flex-1 no-scrollbar [&>[data-slot='scroll-area-viewport']]:no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
                     <div className="p-6">
                       <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
                         <Users className="h-4 w-4 text-emerald-600" />
@@ -16224,9 +16365,6 @@ export default function App() {
                                   ) : (
                                     <UserIcon className="h-6 w-6 text-slate-400" />
                                   )}
-                                  {item.isOnline && (
-                                    <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
-                                  )}
                                 </div>
 
                                 {/* Name & Status */}
@@ -16272,7 +16410,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                <ScrollArea className="flex-1 no-scrollbar [&>[data-slot='scroll-area-viewport']]:no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
                   <div className="p-4">
                     <div className="space-y-3">
                       {(() => {
@@ -16298,9 +16436,6 @@ export default function App() {
                                   <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                                 ) : (
                                   <UserIcon className="h-5 w-5 text-slate-400" />
-                                )}
-                                {isOnline && (
-                                  <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-white rounded-full shadow-sm" />
                                 )}
                               </div>
 
@@ -17103,7 +17238,7 @@ export default function App() {
                   <div key={i} className="relative bg-slate-900 rounded-sm overflow-hidden border border-white/5">
                     {camName ? (
                       <>
-                        <video 
+                        <HlsVideo 
                           src={videoUrl || undefined} 
                           autoPlay 
                           loop 
