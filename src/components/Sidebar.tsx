@@ -122,9 +122,9 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
     { id: 'facility-externals', label: 'Externals', icon: Radio },
     ...(isOwner ? [{ id: 'facility-hardware', label: 'Hardware', icon: Cpu }] : []),
     { id: 'facility-lights', label: 'Lights', icon: Lightbulb },
+    { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
-    { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
   ];
 
   return (

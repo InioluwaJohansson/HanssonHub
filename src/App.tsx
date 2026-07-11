@@ -1830,6 +1830,7 @@ export default function App() {
     setUserDto(userData);
     setIsLoggedIn(true);
     setActiveView('dashboard');
+    setIsSidebarCollapsed(true);
     
     // Update userProfile if needed
     setUserProfile(prev => {
@@ -2407,6 +2408,15 @@ export default function App() {
           }
         })
         .catch(err => console.error("Failed to reload rooms for overview", err));
+
+      apiFetch('/External/GetAllExternals', { method: 'POST' })
+        .then((res: any) => { 
+          if (res && res.data && Array.isArray(res.data)) { 
+            setExternals(res.data); 
+            syncDevicesFromFetchedType('external', res.data); 
+          } 
+        })
+        .catch(err => console.error("Failed to reload externals for overview", err));
     }
 
     // 2. All Users (Persons) Page
@@ -3685,11 +3695,47 @@ export default function App() {
     hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => (h.id !== undefined && h.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && h.id.toString() === (data.id ?? data.Id).toString() ? { ...h, ...data } : h)));
     
     hs.on("ActionCreated", (data) => setActions(prev => {
-      const dataId = data.actionId ?? data.ActionId ?? data.id;
+      const dataId = data.id ?? data.Id ?? data.actionId ?? data.ActionId;
       if (dataId !== undefined && dataId !== null && prev.some(a => a.id.toString() === dataId.toString())) return prev;
-      return [...prev, { ...data, id: dataId, actionName: (data.actionName ?? data.ActionName ?? data.name), actionDescription: (data.description ?? data.Description), actionActive: false, actionId: '', getActionStepDtos: [] }];
+      return [...prev, { 
+        ...data, 
+        id: dataId, 
+        actionName: (data.actionName ?? data.ActionName ?? data.name), 
+        actionDescription: (data.actionDescription ?? data.ActionDescription ?? data.description ?? data.Description), 
+        actionActive: (data.actionActive ?? data.ActionActive ?? false), 
+        actionId: (data.actionId ?? data.ActionId ?? ''), 
+        getActionStepDtos: (data.getActionStepDtos ?? data.GetActionStepDtos ?? []),
+        createdBy: data.createdBy ?? data.CreatedBy,
+        createdByName: data.createdByName ?? data.CreatedByName ?? data.createdByName ?? data.CreatedByName,
+        createdOn: data.createdOn ?? data.CreatedOn,
+        lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy,
+        lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? data.lastModifiedByName ?? data.LastModifiedByName,
+        lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn,
+        personId: data.personId ?? data.PersonId
+      }];
     }));
-    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => (a.id !== undefined && a.id !== null && (data.actionId ?? data.ActionId ?? data.id) !== undefined && (data.actionId ?? data.ActionId ?? data.id) !== null) && a.id.toString() === (data.actionId ?? data.ActionId ?? data.id).toString() ? { ...a, ...data } : a)));
+    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => {
+      const dataId = data.id ?? data.Id ?? data.actionId ?? data.ActionId;
+      if (a.id !== undefined && a.id !== null && dataId !== undefined && dataId !== null && a.id.toString() === dataId.toString()) {
+        return { 
+          ...a, 
+          ...data,
+          actionName: data.actionName ?? data.ActionName ?? data.name ?? a.actionName,
+          actionDescription: data.actionDescription ?? data.ActionDescription ?? data.description ?? data.Description ?? a.actionDescription,
+          actionActive: data.actionActive ?? data.ActionActive ?? a.actionActive,
+          actionId: data.actionId ?? data.ActionId ?? a.actionId,
+          getActionStepDtos: data.getActionStepDtos ?? data.GetActionStepDtos ?? a.getActionStepDtos,
+          createdBy: data.createdBy ?? data.CreatedBy ?? a.createdBy,
+          createdByName: data.createdByName ?? data.CreatedByName ?? a.createdByName,
+          createdOn: data.createdOn ?? data.CreatedOn ?? a.createdOn,
+          lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy ?? a.lastModifiedBy,
+          lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? a.lastModifiedByName,
+          lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn ?? a.lastModifiedOn,
+          personId: data.personId ?? data.PersonId ?? a.personId
+        };
+      }
+      return a;
+    })));
     hs.on("ActionActivationChanged", (data) => {
       const actId = data.actionId ?? data.ActionId ?? data.id ?? data.Id;
       const isActive = data.isActive ?? data.IsActive ?? data.actionActive ?? data.ActionActive;
@@ -6516,13 +6562,22 @@ export default function App() {
         { id: 'facility-externals', name: 'Externals', icon: Radio, type: 'externals' },
       ].sort((a, b) => a.name.localeCompare(b.name));
 
-      // Swap the positions of Sections and Rooms as requested
+      // Swap the positions of Rooms and Windows as requested
+      const windowsIndex = facilityCategories.findIndex(c => c.id === 'facility-windows');
       const roomsIndex = facilityCategories.findIndex(c => c.id === 'facility-rooms');
+      if (windowsIndex !== -1 && roomsIndex !== -1) {
+        const temp = facilityCategories[windowsIndex];
+        facilityCategories[windowsIndex] = facilityCategories[roomsIndex];
+        facilityCategories[roomsIndex] = temp;
+      }
+
+      // Swap the positions of Rooms and Sections as requested to make Rooms next to Sections, with Sections last
       const sectionsIndex = facilityCategories.findIndex(c => c.id === 'facility-sections');
-      if (roomsIndex !== -1 && sectionsIndex !== -1) {
-        const temp = facilityCategories[roomsIndex];
-        facilityCategories[roomsIndex] = facilityCategories[sectionsIndex];
-        facilityCategories[sectionsIndex] = temp;
+      const roomsIndex2 = facilityCategories.findIndex(c => c.id === 'facility-rooms');
+      if (sectionsIndex !== -1 && roomsIndex2 !== -1) {
+        const temp = facilityCategories[sectionsIndex];
+        facilityCategories[sectionsIndex] = facilityCategories[roomsIndex2];
+        facilityCategories[roomsIndex2] = temp;
       }
 
       return (
@@ -6953,40 +7008,43 @@ export default function App() {
           </div>
 
           {contactView === 'overview' ? (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 items-start">
-              <Card className={cn("p-6 md:col-span-1 h-fit transition-all duration-300 bg-white border border-slate-200 shadow-sm", (!contactCategories || contactCategories.length === 0) && "max-h-[240px]")}>
+            <div className="flex flex-col gap-6 items-start w-full">
+              <Card className="p-6 w-full h-fit transition-all duration-300 bg-white border border-slate-200 shadow-sm">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <h3 className="text-lg font-bold flex items-center gap-2">
                     <Tag className="h-4 w-4 text-slate-500" />
                     Categories
                   </h3>
-                  <Button variant="outline" size="sm" onClick={() => setIsAddCategoryOpen(true)} className="h-8 py-1 px-3 flex items-center gap-1.5 shadow-sm text-xs font-medium">
-                    <Plus className="h-3.5 w-3.5" /> Add Category
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">({contactCategories?.length || 0} categories)</span>
+                    <Button variant="outline" size="sm" onClick={() => setIsAddCategoryOpen(true)} className="h-8 py-1 px-3 flex items-center gap-1.5 shadow-sm text-xs font-medium">
+                      <Plus className="h-3.5 w-3.5" /> Add Category
+                    </Button>
+                  </div>
                 </div>
-                <div className="space-y-2">
+                <div className="flex overflow-x-auto gap-4 pb-2 snap-x" style={{ scrollbarWidth: 'thin' }}>
                   {contactCategories && contactCategories.length > 0 ? (
                     contactCategories.map(cat => {
                       const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
                       return (
-                        <div key={cat.id} className="group relative">
-                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                        <div key={cat.id} className="group relative flex-[0_0_30%] max-w-[30%] min-w-[200px] snap-start">
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors h-full">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
                                 <CategoryIcon className="h-4 w-4" />
                               </div>
-                              <div>
-                                <p className="text-sm font-bold">{cat.name}</p>
-                                {cat.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{cat.description}</p>}
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold truncate">{cat.name}</p>
+                                {cat.description && <p className="text-[10px] text-muted-foreground truncate">{cat.description}</p>}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary" className="h-5">{contacts.filter(c => c.getContactCategoryDto.id === cat.id).length}</Badge>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-2 shrink-0 ml-2">
+                              <Badge variant="secondary" className="h-5 group-hover:hidden">{contacts.filter(c => c.getContactCategoryDto.id === cat.id).length}</Badge>
+                              <div className="hidden group-hover:flex items-center gap-1">
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                  className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-100 bg-white shadow-sm"
                                   onClick={() => {
                                     setEditingCategory(cat);
                                     setNewCategoryName(cat.name);
@@ -7000,7 +7058,7 @@ export default function App() {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-100 bg-white shadow-sm"
                                   onClick={() => handleDeleteCategory(cat.id)}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -7012,7 +7070,7 @@ export default function App() {
                       );
                     })
                   ) : (
-                    <div className="py-6 px-4 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center gap-1">
+                    <div className="w-full py-6 px-4 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center gap-1">
                       <p className="text-slate-500 font-medium text-sm">No contact categories found</p>
                       <p className="text-slate-400 text-xs">Create a custom category to group your contacts.</p>
                     </div>
@@ -7020,12 +7078,12 @@ export default function App() {
                 </div>
               </Card>
 
-              <Card className="p-6 md:col-span-2 bg-white border border-slate-200 shadow-sm">
+              <Card className="p-6 w-full bg-white border border-slate-200 shadow-sm">
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <Users className="h-5 w-5 text-slate-500" />
                   Recent Contacts
                 </h3>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {contacts && contacts.length > 0 ? (
                     contacts.slice(0, 4).map(contact => (
                       <div 
@@ -7069,7 +7127,11 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <Select value={contactSortCategory} onValueChange={setContactSortCategory}>
                     <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All Categories" />
+                      <SelectValue placeholder="All Categories">
+                        {contactSortCategory === 'all' 
+                          ? 'All Categories' 
+                          : ((contactCategories || []).find(cat => cat.id.toString() === contactSortCategory)?.name || contactSortCategory)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
@@ -8369,45 +8431,45 @@ export default function App() {
                     setIsViewActionOpen(true);
                   }}
                 >
-                  <div className="flex items-start justify-end relative z-10">
-                    <div className="flex gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className={cn(
-                          "h-8 w-8 transition-colors",
-                          action.actionActive ? "text-green-500 hover:bg-green-50" : "text-slate-400 hover:bg-slate-50"
-                        )}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          const originalActive = action.actionActive;
-                          // Optimistic update
-                          setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: !a.actionActive } : a));
-                          try {
-                            await apiFetch(`/Action/ActivateDeactivateAction?id=${action.id}`, {
-                              method: 'POST',
-                              body: ''
-                            });
-                            toast.success(`Action updated successfully!`);
-                          } catch (err: any) {
-                            console.error("Failed to activate/deactivate action", err);
-                            toast.error(`Failed to update action: ${err.message}`);
-                            // Revert on failure
-                            setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: originalActive } : a));
-                          }
-                        }}
-                      >
-                        {action.actionActive ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="space-y-1 relative z-10 -mt-8">
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-5 w-5 text-primary shrink-0" />
-                      <h3 className="text-xl font-bold tracking-tight">{action.actionName}</h3>
-                      <Badge variant={action.actionActive ? "default" : "secondary"} className="text-[10px] h-4">
-                        {action.actionActive ? "Active" : "Disabled"}
-                      </Badge>
+                  <div className="flex flex-col relative z-10 gap-2">
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-primary shrink-0" />
+                        <h3 className="text-xl font-bold tracking-tight">{action.actionName}</h3>
+                        <Badge variant={action.actionActive ? "default" : "secondary"} className="text-[10px] h-4">
+                          {action.actionActive ? "Active" : "Disabled"}
+                        </Badge>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn(
+                            "h-8 w-8 transition-colors",
+                            action.actionActive ? "text-green-500 hover:bg-green-50" : "text-slate-400 hover:bg-slate-50"
+                          )}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const originalActive = action.actionActive;
+                            // Optimistic update
+                            setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: !a.actionActive } : a));
+                            try {
+                              await apiFetch(`/Action/ActivateDeactivateAction?id=${action.id}`, {
+                                method: 'POST',
+                                body: ''
+                              });
+                              toast.success(`Action updated successfully!`);
+                            } catch (err: any) {
+                              console.error("Failed to activate/deactivate action", err);
+                              toast.error(`Failed to update action: ${err.message}`);
+                              // Revert on failure
+                              setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: originalActive } : a));
+                            }
+                          }}
+                        >
+                          {action.actionActive ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
+                        </Button>
+                      </div>
                     </div>
                     <p className="text-sm text-muted-foreground line-clamp-2">{action.actionDescription}</p>
                   </div>
@@ -13957,9 +14019,14 @@ export default function App() {
                     <UserCircle className="h-5 w-5" />
                   </div>
                   <div className="font-bold text-slate-700 dark:text-slate-200">
-                    {getUserNameById(getProp(selectedAction, 'createdBy')) || getProp(selectedAction, 'createdByName') || 'System'}
+                    {getProp(selectedAction, 'createdByName') || getUserNameById(getProp(selectedAction, 'createdBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">{getProp(selectedAction, 'createdOn') ? format(new Date(getProp(selectedAction, 'createdOn')), 'PP') : 'N/A'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">
+                    {(() => {
+                      const cOn = getProp(selectedAction, 'createdOn') || getProp(selectedAction, 'createdDate') || getProp(selectedAction, 'createdTime') || getProp(selectedAction, 'createdAt');
+                      return cOn ? format(new Date(cOn), 'PP') : 'N/A';
+                    })()}
+                  </div>
                 </div>
               </div>
               <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
@@ -13969,9 +14036,14 @@ export default function App() {
                     <Settings2 className="h-5 w-5" />
                   </div>
                   <div className="font-bold text-slate-700 dark:text-slate-200">
-                    {getUserNameById(getProp(selectedAction, 'lastModifiedBy')) || getProp(selectedAction, 'lastModifiedByName') || 'System'}
+                    {getProp(selectedAction, 'lastModifiedByName') || getUserNameById(getProp(selectedAction, 'lastModifiedBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">{getProp(selectedAction, 'lastModifiedOn') ? format(new Date(getProp(selectedAction, 'lastModifiedOn')), 'PP') : 'N/A'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">
+                    {(() => {
+                      const mOn = getProp(selectedAction, 'lastModifiedOn') || getProp(selectedAction, 'lastModifiedTime') || getProp(selectedAction, 'lastModifiedDate') || getProp(selectedAction, 'updatedAt');
+                      return mOn ? format(new Date(mOn), 'PP') : 'N/A';
+                    })()}
+                  </div>
                 </div>
               </div>
             </div>
@@ -15785,8 +15857,12 @@ export default function App() {
                           onClick={() => startDirectChat(user)}
                           className="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
                         >
-                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50">
-                            <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50 flex items-center justify-center bg-primary/10 text-primary font-bold">
+                            {user.getPersonDetailsDto.imageUrl ? (
+                              <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-sm uppercase">{user.getPersonDetailsDto.firstName ? user.getPersonDetailsDto.firstName[0] : '?'}</span>
+                            )}
                           </div>
                           <span className="text-[10px] font-bold text-slate-700 group-hover:text-primary transition-colors truncate w-full text-center">
                             {user.getPersonDetailsDto.firstName}
@@ -15800,7 +15876,7 @@ export default function App() {
                     <Button 
                       variant="outline" 
                       className="rounded-full bg-white border-2 border-slate-100 text-[#54656f] font-bold h-12 px-8 hover:bg-slate-50 transition-all hover:scale-105 active:scale-95"
-                      onClick={() => setIsNewChatOpen(true)}
+                      onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}
                     >
                       <PlusCircle className="mr-2 h-5 w-5" />
                       New Conversation
@@ -16449,7 +16525,6 @@ export default function App() {
       <Dialog open={isNewChatOpen} onOpenChange={(open) => {
         setIsNewChatOpen(open);
         if (!open) {
-          setIsGroupMode(false);
           setSelectedParticipants([]);
           setNewGroupName("");
           setNewGroupDescription("");
@@ -16459,10 +16534,10 @@ export default function App() {
         <DialogContent 
           showCloseButton={false} 
           className={cn(
-            "p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col transition-all duration-300", 
+            "p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col", 
             isGroupMode 
-              ? "max-w-4xl w-[90vw] data-closed:animate-none data-closed:transition-none duration-0 transition-none" 
-              : "max-w-md w-[90vw]"
+              ? "max-w-4xl w-[90vw] duration-0 transition-none animate-none data-open:animate-none data-closed:animate-none data-open:transition-none data-closed:transition-none" 
+              : "max-w-md w-[90vw] transition-all duration-300"
           )}
         >
           <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 mb-0">
@@ -16549,14 +16624,23 @@ export default function App() {
                       </h3>
                       
                       {/* Search bar with search icon for group members selection */}
-                      <div className="mb-4 relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <div className="mb-4 relative flex items-center">
+                        <Search className="absolute left-3.5 h-4 w-4 text-slate-400 z-10 pointer-events-none" />
                         <Input 
                           placeholder="Search members to add..." 
                           value={homeMemberSearchQuery}
                           onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                          className="pl-9 h-10 bg-white border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                          className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm placeholder:text-slate-400/70 transition-all w-full"
                         />
+                        {homeMemberSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setHomeMemberSearchQuery("")}
+                            className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -16660,15 +16744,24 @@ export default function App() {
               </div>
             ) : (
               <div className="flex-1 overflow-hidden flex flex-col min-h-0 w-full">
-                <div className="p-4 bg-slate-50 border-b shrink-0">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <div className="px-4 py-2.5 bg-white border-b shrink-0">
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-3.5 h-4 w-4 text-slate-400 z-10 pointer-events-none" />
                     <Input 
                       placeholder="Search home members..." 
                       value={homeMemberSearchQuery}
                       onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                      className="pl-9 h-10 bg-white border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                      className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm placeholder:text-slate-400/70 transition-all w-full"
                     />
+                    {homeMemberSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setHomeMemberSearchQuery("")}
+                        className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
