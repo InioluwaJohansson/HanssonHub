@@ -401,6 +401,19 @@ const mapSection = (s: any): Section => {
   } as Section;
 };
 
+const resolveDoorType = (typeVal: any): number => {
+  if (typeVal === undefined || typeVal === null) return 1;
+  if (typeof typeVal === 'number') {
+    if (isNaN(typeVal) || typeVal === 0) return 1;
+    return typeVal;
+  }
+  const strVal = typeVal.toString().trim().toLowerCase();
+  if (strVal === 'interior' || strVal === '1') return 1;
+  if (strVal === 'exterior' || strVal === '2') return 2;
+  if (strVal === 'gate' || strVal === '3') return 3;
+  return 1;
+};
+
 const getProp = (obj: any, propName: string) => {
   if (!obj) return undefined;
   const lowerProp = propName.toLowerCase();
@@ -2373,6 +2386,29 @@ export default function App() {
         .catch(err => console.error("Failed to preload actions", err));
     }
 
+    // 1.5. Facilities Overview Reload
+    if (activeView === 'facilities' || activeView === 'facility-overview') {
+      apiFetch('/Section/GetAllSections', { method: 'POST' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); })
+        .catch(err => console.error("Failed to reload sections for overview", err));
+
+      apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); })
+        .catch(err => console.error("Failed to reload hardwares for overview", err));
+
+      apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
+        .catch(err => console.error("Failed to reload actions for overview", err));
+
+      apiFetch('/Room/GetAllRooms', { method: 'POST' })
+        .then((res: any) => { 
+          if (res && res.data && Array.isArray(res.data)) {
+            setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
+          }
+        })
+        .catch(err => console.error("Failed to reload rooms for overview", err));
+    }
+
     // 2. All Users (Persons) Page
     if (activeView === 'all-users') {
       if (!fetchedViewsRef.current['all-users']) {
@@ -3166,6 +3202,7 @@ export default function App() {
   }, [activeChatId]);
 
   const loadMyChats = async (force = false) => {
+    if (hasLoadedChats && !force) return;
     // Try to load cached chats from localStorage
     const cachedChatsStr = localStorage.getItem('chats_cache');
     let cachedChats: ChatDto[] = [];
@@ -4808,11 +4845,7 @@ export default function App() {
       for (const door of doorsInRoom) {
         try {
           const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
-          if (nextState) {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          } else {
-            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-          }
+          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
         } catch (e) {
            console.error("Failed to toggle door in room lock", e);
         }
@@ -5257,6 +5290,7 @@ export default function App() {
             }, 800);
           } else {
             setAuthError(true);
+            setAuthCode(''); // Clear the inputted code on verification failure
             toast.error(response.message || "Invalid Authorization Code");
           }
         } catch (err: any) {
@@ -5271,6 +5305,8 @@ export default function App() {
              setAuthCode('');
              setAuthError(false);
              setOnAuthSuccess(null);
+          } else {
+             setAuthCode(''); // Clear the inputted code on error when fallback is not matched
           }
         }
       }
@@ -5350,11 +5386,10 @@ export default function App() {
 
       try {
         if (d.type === 'door') {
+          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
           if (d.status === 'locked') {
-            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
             setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: false } : item));
           } else {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
             setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: true } : item));
           }
         } else if (d.type === 'light') {
@@ -5465,7 +5500,7 @@ export default function App() {
               sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
               isHidden: getProp(doorDto, 'isHidden') ?? false,
               doorName: getProp(doorDto, 'doorName') || d.name,
-              doorType: parseInt(getProp(doorDto, 'doorType')?.toString() || '1'),
+              doorType: resolveDoorType(getProp(doorDto, 'doorType')),
               isLocked: true,
               isOpen: false,
               openedBy: 0,
@@ -5477,11 +5512,11 @@ export default function App() {
           if (action === 'lock') {
             await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
           } else if (action === 'unlock') {
-            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
           } else if (action === 'open') {
             await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
           } else if (action === 'close') {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
           }
         }
         setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
@@ -5490,33 +5525,10 @@ export default function App() {
           isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       } else if (d.type === 'window') {
-        const windowDto = (windows || []).find(x => x.id.toString() === rawId.toString());
-        if (action === 'lock' && isCurrentlyOpen) {
-          await apiFetch('/Window/UpdateWindow', {
-            method: 'PUT',
-            body: JSON.stringify({
-              id: Number(rawId),
-              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
-              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
-              isHidden: getProp(windowDto, 'isHidden') ?? false,
-              windowName: getProp(windowDto, 'windowName') || d.name,
-              isLocked: true,
-              isOpen: false,
-              openedBy: 0,
-              lockedBy: 0,
-              unlockedBy: 0
-            })
-          });
-        } else {
-          if (action === 'lock') {
-            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'unlock') {
-            await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'open') {
-            await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'close') {
-            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-          }
+        if (action === 'lock' || action === 'unlock') {
+          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open' || action === 'close') {
+          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
         }
         setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
@@ -5749,7 +5761,7 @@ export default function App() {
                 sectionId: finalSectionId,
                 isHidden: false,
                 doorName: editingDevice.name,
-                doorType: parseInt(editingDevice.doorType?.toString() || '1'),
+                doorType: resolveDoorType(editingDevice.doorType),
                 isLocked: editingDevice.status === 'locked' || editingDevice.status === 'open-locked',
                 isOpen: editingDevice.status === 'open' || editingDevice.status === 'open-locked',
                 openedBy: 0,
@@ -5967,7 +5979,7 @@ export default function App() {
             sectionId: resolveSectionId(newDevice.section, sections),
             isHidden: true,
             doorName: newDevice.name,
-            doorType: 1,
+            doorType: resolveDoorType(newDevice.doorType),
             isLocked: true,
             isOpen: false,
             openedBy: 0,
@@ -6504,6 +6516,15 @@ export default function App() {
         { id: 'facility-externals', name: 'Externals', icon: Radio, type: 'externals' },
       ].sort((a, b) => a.name.localeCompare(b.name));
 
+      // Swap the positions of Sections and Rooms as requested
+      const roomsIndex = facilityCategories.findIndex(c => c.id === 'facility-rooms');
+      const sectionsIndex = facilityCategories.findIndex(c => c.id === 'facility-sections');
+      if (roomsIndex !== -1 && sectionsIndex !== -1) {
+        const temp = facilityCategories[roomsIndex];
+        facilityCategories[roomsIndex] = facilityCategories[sectionsIndex];
+        facilityCategories[sectionsIndex] = temp;
+      }
+
       return (
         <motion.div
           key="facilities-overview"
@@ -6532,9 +6553,9 @@ export default function App() {
                 active = total; // always full except if 0
                 statusSummary = `${total} Total Rooms`;
               } else if (cat.type === 'action') {
-                total = scenes.length;
-                active = scenes.length; // all are available to activate
-                statusSummary = `${total} Active Actions`;
+                total = actions.length;
+                active = actions.filter(a => a.actionActive).length;
+                statusSummary = `${active} Active Actions`;
               } else if (cat.type === 'hardware') {
                 total = hardwares.length;
                 active = hardwares.filter(h => h.isActive).length;
@@ -8001,26 +8022,28 @@ export default function App() {
                 </div>
               </div>
             </Card>
-            <Card 
-              className={cn(
-                "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
-                roomLocked 
-                  ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
-                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
-              )}
-              onClick={() => toggleRoomLock(userRoomId)}
-            >
-              <div className={cn(
-                "rounded-full p-4 transition-transform group-hover:scale-110",
-                roomLocked ? "bg-red-500/10" : "bg-green-500/10"
-              )}>
-                {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
-                <p className="text-[10px] text-muted-foreground font-medium">Click to toggle security</p>
-              </div>
-            </Card>
+            {doors.length > 0 && (
+              <Card 
+                className={cn(
+                  "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
+                  roomLocked 
+                    ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
+                    : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
+                )}
+                onClick={() => toggleRoomLock(userRoomId)}
+              >
+                <div className={cn(
+                  "rounded-full p-4 transition-transform group-hover:scale-110",
+                  roomLocked ? "bg-red-500/10" : "bg-green-500/10"
+                )}>
+                  {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
+                  <p className="text-[10px] text-muted-foreground font-medium">Click to toggle security</p>
+                </div>
+              </Card>
+            )}
           </div>
 
           <div className="flex flex-col lg:flex-row gap-12">
@@ -8340,16 +8363,13 @@ export default function App() {
               (filteredActions || []).map(action => (
                 <Card 
                   key={action.id} 
-                  className="p-6 flex flex-col gap-4 hover:shadow-md transition-all border-l-4 border-l-primary cursor-pointer group relative overflow-hidden"
+                  className="p-6 flex flex-col gap-4 hover:shadow-md transition-all cursor-pointer group relative overflow-hidden"
                   onClick={() => {
                     setSelectedAction(action);
                     setIsViewActionOpen(true);
                   }}
                 >
-                  <div className="flex items-start justify-between relative z-10">
-                    <div className="p-3 bg-primary/10 text-primary rounded-xl group-hover:bg-primary group-hover:text-white transition-colors">
-                      <Zap className="h-6 w-6" />
-                    </div>
+                  <div className="flex items-start justify-end relative z-10">
                     <div className="flex gap-1">
                       <Button 
                         variant="ghost" 
@@ -8381,9 +8401,9 @@ export default function App() {
                       </Button>
                     </div>
                   </div>
-
-                  <div className="space-y-1 relative z-10">
+                  <div className="space-y-1 relative z-10 -mt-8">
                     <div className="flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-primary shrink-0" />
                       <h3 className="text-xl font-bold tracking-tight">{action.actionName}</h3>
                       <Badge variant={action.actionActive ? "default" : "secondary"} className="text-[10px] h-4">
                         {action.actionActive ? "Active" : "Disabled"}
@@ -9362,7 +9382,9 @@ export default function App() {
                   onValueChange={(v) => setNewDevice(prev => ({ ...prev, applianceType: parseInt(v) }))}
                 >
                   <SelectTrigger id="appliance-type">
-                    <SelectValue placeholder="Select appliance type" />
+                    <SelectValue placeholder="Select appliance type">
+                      {((appNamesDetailList?.applianceType || []).find((t: any) => t.id.toString() === (newDevice.applianceType?.toString() || '1'))?.name) || 'Select appliance type'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(appNamesDetailList?.applianceType || []).map(t => (
@@ -9455,7 +9477,9 @@ export default function App() {
                   onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: parseInt(v) }))}
                 >
                   <SelectTrigger id="door-type">
-                    <SelectValue placeholder="Select type" />
+                    <SelectValue placeholder="Select type">
+                      {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (newDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(appNamesDetailList?.doorType || []).map((dt: any) => (
@@ -9476,7 +9500,11 @@ export default function App() {
               <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
               >
                 <SelectTrigger id="section">
-                  <SelectValue placeholder="Select section" />
+                  <SelectValue placeholder="Select section">
+                    {newDevice.section && newDevice.section !== 'none'
+                      ? ((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Select section')
+                      : 'No Section'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
@@ -9491,14 +9519,50 @@ export default function App() {
                 <Sofa className="h-3 w-3 text-muted-foreground" />
                 Room Name (Optional)
               </Label>
-              <Select value={newDevice.room || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, room: v === 'none' ? undefined : v }))}
+              <Select 
+                value={newDevice.room || 'none'} 
+                onValueChange={(v) => {
+                  if (v === 'none') {
+                    setNewDevice(prev => ({ ...prev, room: undefined }));
+                  } else {
+                    const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
+                    const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
+                    const foundSection = (sections || []).find(s => 
+                      s.id.toString() === sectId || 
+                      s.name.toLowerCase() === sectId.toLowerCase() ||
+                      (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
+                    );
+                    const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                    setNewDevice(prev => ({ 
+                      ...prev, 
+                      room: v,
+                      section: finalSectId
+                    }));
+                  }
+                }}
               >
                 <SelectTrigger id="room">
-                  <SelectValue placeholder="Select room" />
+                  <SelectValue placeholder="Select room">
+                    {newDevice.room && newDevice.room !== 'none'
+                      ? ((rooms || []).find(r => r.id.toString() === newDevice.room?.toString())?.name || 'Select room')
+                      : 'No Room'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Room</SelectItem>
-                  {rooms.filter(r => !newDevice.section || r.section === newDevice.section).map(room => (
+                  {rooms.filter(r => {
+                    if (!newDevice.section || newDevice.section === 'none') return true;
+                    const sId = newDevice.section.toString();
+                    const sectionObj = (sections || []).find(s => s.id.toString() === sId);
+                    const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
+                    if (!roomSectRef) return false;
+                    if (roomSectRef === sId) return true;
+                    if (sectionObj) {
+                      if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
+                      if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
+                    }
+                    return false;
+                  }).map(room => (
                     <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -9562,7 +9626,14 @@ export default function App() {
                 onValueChange={(v) => setNewRoom(prev => ({ ...prev, personId: v === 'none' ? undefined : parseInt(v) }))}
               >
                 <SelectTrigger id="room-person">
-                  <SelectValue placeholder="Select person" />
+                  <SelectValue placeholder="Select person">
+                    {newRoom.personId && newRoom.personId !== 'none'
+                      ? (() => {
+                          const u = (allUsers || []).find(user => user.id.toString() === newRoom.personId?.toString());
+                          return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
+                        })()
+                      : 'No Person Assigned'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Person Assigned</SelectItem>
@@ -9592,7 +9663,11 @@ export default function App() {
               <Select value={newRoom.section || 'none'} onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
               >
                 <SelectTrigger id="room-section">
-                  <SelectValue placeholder="Select section" />
+                  <SelectValue placeholder="Select section">
+                    {newRoom.section && newRoom.section !== 'none'
+                      ? ((sections || []).find(s => s.id.toString() === newRoom.section?.toString())?.name || 'Select section')
+                      : 'No Section'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Section</SelectItem>
@@ -9689,7 +9764,18 @@ export default function App() {
               if (editingSection?.id && editingSection.name) {
                 requestAuth(async () => {
                   try {
-                    const idVal = Number(editingSection.id);
+                    let idVal = editingSection.dbId;
+                    if (!idVal && editingSection.id) {
+                      const match = editingSection.id.toString().match(/\d+/);
+                      if (match) idVal = parseInt(match[0], 10);
+                    }
+                    if (!idVal) {
+                      const matchedSec = (sections || []).find(s => s.id?.toString() === editingSection.id?.toString() || s.name === editingSection.name);
+                      if (matchedSec) idVal = matchedSec.dbId;
+                    }
+                    if (!idVal) {
+                      idVal = Number(editingSection.id);
+                    }
                     const nameVal = encodeURIComponent(editingSection.name);
                     const isHiddenVal = editingSection.isHidden ? 'true' : 'false';
                     const url = `/Section/UpdateSection?Id=${idVal}&SectionName=${nameVal}&IsHidden=${isHiddenVal}`;
@@ -10000,7 +10086,15 @@ export default function App() {
                     <Label htmlFor="p-gender">Gender</Label>
                     <Select value={newPerson.createPersonDetailsDto.gender.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, gender: parseInt(v) } }))}>
                       <SelectTrigger id="p-gender">
-                        <SelectValue placeholder="Select gender" />
+                        <SelectValue placeholder="Select gender">
+                          {(() => {
+                            const g = newPerson.createPersonDetailsDto.gender.toString();
+                            if (g === '1') return 'Male';
+                            if (g === '2') return 'Female';
+                            if (g === '3') return 'Other';
+                            return 'Select gender';
+                          })()}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="1">Male</SelectItem>
@@ -10030,7 +10124,11 @@ export default function App() {
                     <Label htmlFor="p-role">System Role</Label>
                     <Select value={newPerson.createUserDto.role.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, role: parseInt(v) } }))}>
                       <SelectTrigger id="p-role">
-                        <SelectValue placeholder="Select role" />
+                        <SelectValue placeholder="Select role">
+                          {newPerson.createUserDto.role !== undefined
+                            ? ((appNamesDetailList?.role || []).find(r => r.id.toString() === newPerson.createUserDto.role.toString())?.name || 'Select role')
+                            : 'Select role'}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="2">Wife</SelectItem>
@@ -10138,7 +10236,11 @@ export default function App() {
               </Label>
               <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
                 <SelectTrigger id="edit-role-select" className="bg-transparent text-black border-primary/20">
-                  <SelectValue placeholder="Select role" />
+                  <SelectValue placeholder="Select role">
+                    {updateUserRoleData.role !== undefined
+                      ? ((appNamesDetailList?.role || []).find(r => r.id.toString() === updateUserRoleData.role?.toString())?.name || 'Select role')
+                      : 'Select role'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {(appNamesDetailList?.role || []).map(r => (
@@ -10572,7 +10674,11 @@ export default function App() {
                   onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select Category" />
+                    <SelectValue placeholder="Select Category">
+                      {newContact.contactCategory
+                        ? ((appNamesDetailList?.contactCategoryIdNames || []).find(cat => cat.id.toString() === newContact.contactCategory.toString())?.name || 'Select Category')
+                        : 'Select Category'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(appNamesDetailList?.contactCategoryIdNames || []).map(cat => (
@@ -11120,7 +11226,9 @@ export default function App() {
                     onValueChange={(v: any) => setEditingDevice({ ...editingDevice, applianceType: parseInt(v) })}
                   >
                     <SelectTrigger id="edit-appliance-type">
-                      <SelectValue placeholder="Select type" />
+                      <SelectValue placeholder="Select type">
+                        {((appNamesDetailList?.applianceType || []).find((t: any) => t.id.toString() === (editingDevice.applianceType?.toString() || '1'))?.name) || 'Select type'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(appNamesDetailList?.applianceType || []).map(t => (
@@ -11142,7 +11250,9 @@ export default function App() {
                     onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: parseInt(v) })}
                   >
                     <SelectTrigger id="edit-door-type">
-                      <SelectValue placeholder="Select type" />
+                      <SelectValue placeholder="Select type">
+                        {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (editingDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(appNamesDetailList?.doorType || []).map((dt: any) => (
@@ -11162,15 +11272,49 @@ export default function App() {
                 </Label>
                 <Select 
                   value={editingDevice.room || 'none'} 
-                  onValueChange={(v) => setEditingDevice({ ...editingDevice, room: v === 'none' ? undefined : v })}
+                  onValueChange={(v) => {
+                    if (v === 'none') {
+                      setEditingDevice({ ...editingDevice, room: undefined });
+                    } else {
+                      const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
+                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
+                      const foundSection = (sections || []).find(s => 
+                        s.id.toString() === sectId || 
+                        s.name.toLowerCase() === sectId.toLowerCase() ||
+                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
+                      );
+                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                      setEditingDevice({
+                        ...editingDevice,
+                        room: v,
+                        section: finalSectId
+                      });
+                    }
+                  }}
                 >
                   <SelectTrigger id="edit-device-room">
-                    <SelectValue placeholder="Select room" />
+                    <SelectValue placeholder="Select room">
+                      {editingDevice.room && editingDevice.room !== 'none'
+                        ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
+                        : 'No Room (Section Level)'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room (Section Level)</SelectItem>
                     {(rooms || [])
-                      .filter(r => !editingDevice.section || r.section?.toString() === editingDevice.section?.toString())
+                      .filter(r => {
+                        if (!editingDevice.section || editingDevice.section === 'none') return true;
+                        const sId = editingDevice.section.toString();
+                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
+                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
+                        if (!roomSectRef) return false;
+                        if (roomSectRef === sId) return true;
+                        if (sectionObj) {
+                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
+                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
+                        }
+                        return false;
+                      })
                       .map(r => (
                         <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
                       ))
@@ -11192,7 +11336,11 @@ export default function App() {
                   })}
                 >
                   <SelectTrigger id="edit-device-section">
-                    <SelectValue placeholder="Select section" />
+                    <SelectValue placeholder="Select section">
+                      {editingDevice.section && editingDevice.section !== 'none'
+                        ? ((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Select section')
+                        : 'No Section'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Section</SelectItem>
@@ -11388,7 +11536,11 @@ export default function App() {
                   onValueChange={(v) => setEditingRoom({ ...editingRoom, section: v })}
                 >
                   <SelectTrigger id="edit-room-section">
-                    <SelectValue placeholder="Select section" />
+                    <SelectValue placeholder="Select section">
+                      {editingRoom.section && editingRoom.section !== 'none'
+                        ? ((sections || []).find(s => s.id.toString() === editingRoom.section?.toString())?.name || 'Select section')
+                        : 'Select section'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(sections || []).map(s => (
@@ -11429,7 +11581,14 @@ export default function App() {
                   onValueChange={(v) => setEditingRoom({ ...editingRoom, personId: v === 'none' ? undefined : parseInt(v) })}
                 >
                   <SelectTrigger id="edit-room-person">
-                    <SelectValue placeholder="Select person" />
+                    <SelectValue placeholder="Select person">
+                      {editingRoom.personId && editingRoom.personId !== 'none'
+                        ? (() => {
+                            const u = (allUsers || []).find(user => user.id.toString() === editingRoom.personId?.toString());
+                            return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
+                          })()
+                        : 'No Person Assigned'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Person Assigned</SelectItem>
@@ -12158,10 +12317,18 @@ export default function App() {
                 </Label>
                 <Select 
                   value={externalForm.sectionId?.toString() || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, sectionId: val === 'none' ? undefined : val }))}
+                  onValueChange={(val) => setExternalForm(prev => ({ 
+                    ...prev, 
+                    sectionId: val === 'none' ? undefined : val,
+                    roomId: undefined
+                  }))}
                 >
                   <SelectTrigger id="ext-section">
-                    <SelectValue placeholder="Select section" />
+                    <SelectValue placeholder="Select section">
+                      {externalForm.sectionId && externalForm.sectionId !== 'none'
+                        ? ((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Select section')
+                        : 'No Section'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Section</SelectItem>
@@ -12178,16 +12345,53 @@ export default function App() {
                 </Label>
                 <Select 
                   value={externalForm.roomId?.toString() || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, roomId: val === 'none' ? undefined : parseInt(val) }))}
+                  onValueChange={(val) => {
+                    if (val === 'none') {
+                      setExternalForm(prev => ({ ...prev, roomId: undefined }));
+                    } else {
+                      const selectedRoom = rooms.find(r => r.id.toString() === val.toString());
+                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
+                      const foundSection = (sections || []).find(s => 
+                        s.id.toString() === sectId || 
+                        s.name.toLowerCase() === sectId.toLowerCase() ||
+                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
+                      );
+                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                      setExternalForm(prev => ({
+                        ...prev,
+                        roomId: parseInt(val),
+                        sectionId: finalSectId
+                      }));
+                    }
+                  }}
                 >
                   <SelectTrigger id="ext-room">
-                    <SelectValue placeholder="Select room" />
+                    <SelectValue placeholder="Select room">
+                      {externalForm.roomId && externalForm.roomId !== 'none'
+                        ? ((rooms || []).find(r => r.id.toString() === externalForm.roomId?.toString())?.name || 'Select room')
+                        : 'No Room'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room</SelectItem>
-                    {(rooms || []).map(room => (
-                      <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                    ))}
+                    {(rooms || [])
+                      .filter(r => {
+                        if (!externalForm.sectionId || externalForm.sectionId === 'none') return true;
+                        const sId = externalForm.sectionId.toString();
+                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
+                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
+                        if (!roomSectRef) return false;
+                        if (roomSectRef === sId) return true;
+                        if (sectionObj) {
+                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
+                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
+                        }
+                        return false;
+                      })
+                      .map(room => (
+                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                      ))
+                    }
                   </SelectContent>
                 </Select>
               </div>
@@ -12430,10 +12634,18 @@ export default function App() {
                 </Label>
                 <Select 
                   value={externalForm.section || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, section: val === 'none' ? undefined : val }))}
+                  onValueChange={(val) => setExternalForm(prev => ({ 
+                    ...prev, 
+                    section: val === 'none' ? undefined : val,
+                    room: undefined
+                  }))}
                 >
                   <SelectTrigger id="edit-ext-section">
-                    <SelectValue placeholder="Select section" />
+                    <SelectValue placeholder="Select section">
+                      {externalForm.section && externalForm.section !== 'none'
+                        ? ((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Select section')
+                        : 'No Section'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Section</SelectItem>
@@ -12450,16 +12662,53 @@ export default function App() {
                 </Label>
                 <Select 
                   value={externalForm.room || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ ...prev, room: val === 'none' ? undefined : val }))}
+                  onValueChange={(val) => {
+                    if (val === 'none') {
+                      setExternalForm(prev => ({ ...prev, room: undefined }));
+                    } else {
+                      const selectedRoom = rooms.find(r => r.id.toString() === val.toString());
+                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
+                      const foundSection = (sections || []).find(s => 
+                        s.id.toString() === sectId || 
+                        s.name.toLowerCase() === sectId.toLowerCase() ||
+                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
+                      );
+                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                      setExternalForm(prev => ({
+                        ...prev,
+                        room: val,
+                        section: finalSectId
+                      }));
+                    }
+                  }}
                 >
                   <SelectTrigger id="edit-ext-room">
-                    <SelectValue placeholder="Select room" />
+                    <SelectValue placeholder="Select room">
+                      {externalForm.room && externalForm.room !== 'none'
+                        ? ((rooms || []).find(r => r.id.toString() === externalForm.room?.toString())?.name || 'Select room')
+                        : 'No Room'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room</SelectItem>
-                    {(rooms || []).map(room => (
-                      <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                    ))}
+                    {(rooms || [])
+                      .filter(r => {
+                        if (!externalForm.section || externalForm.section === 'none') return true;
+                        const sId = externalForm.section.toString();
+                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
+                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
+                        if (!roomSectRef) return false;
+                        if (roomSectRef === sId) return true;
+                        if (sectionObj) {
+                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
+                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
+                        }
+                        return false;
+                      })
+                      .map(room => (
+                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                      ))
+                    }
                   </SelectContent>
                 </Select>
               </div>
@@ -13708,9 +13957,9 @@ export default function App() {
                     <UserCircle className="h-5 w-5" />
                   </div>
                   <div className="font-bold text-slate-700 dark:text-slate-200">
-                    {getUserNameById(selectedAction?.createdBy) || selectedAction?.createdByName || 'System'}
+                    {getUserNameById(getProp(selectedAction, 'createdBy')) || getProp(selectedAction, 'createdByName') || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">{selectedAction?.createdOn ? format(new Date(selectedAction.createdOn), 'PP') : 'N/A'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">{getProp(selectedAction, 'createdOn') ? format(new Date(getProp(selectedAction, 'createdOn')), 'PP') : 'N/A'}</div>
                 </div>
               </div>
               <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
@@ -13720,9 +13969,9 @@ export default function App() {
                     <Settings2 className="h-5 w-5" />
                   </div>
                   <div className="font-bold text-slate-700 dark:text-slate-200">
-                    {getUserNameById(selectedAction?.lastModifiedBy) || selectedAction?.lastModifiedByName || 'System'}
+                    {getUserNameById(getProp(selectedAction, 'lastModifiedBy')) || getProp(selectedAction, 'lastModifiedByName') || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">{selectedAction?.lastModifiedOn ? format(new Date(selectedAction.lastModifiedOn), 'PP') : 'N/A'}</div>
+                  <div className="text-xs text-slate-400 ml-auto">{getProp(selectedAction, 'lastModifiedOn') ? format(new Date(getProp(selectedAction, 'lastModifiedOn')), 'PP') : 'N/A'}</div>
                 </div>
               </div>
             </div>
@@ -14210,8 +14459,8 @@ export default function App() {
                 }
               }}
             >
-              <Save className="h-5 w-5" />
-              Update Action Step
+              <CheckCheck className="h-5 w-5" />
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -14355,9 +14604,6 @@ export default function App() {
                               return chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <span>{displayInitial}</span>;
                             })()}
                           </div>
-                          {isOnline && (
-                            <span className="absolute bottom-2 right-0 h-3.5 w-3.5 bg-[#25d366] border-[3px] border-white rounded-full" />
-                          )}
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
                           <div className="flex justify-between items-center mb-0.5">
@@ -14438,9 +14684,6 @@ export default function App() {
                               return chat.isGroup ? <Users className="h-5 w-5" /> : <span>{displayInitial}</span>;
                             })()}
                           </div>
-                          {isOnline && (
-                            <span className="absolute bottom-0 right-0 h-3 w-3 bg-[#25d366] border-2 border-[#f0f2f5] rounded-full" />
-                          )}
                         </div>
                         <div>
                           <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px]">
@@ -15583,7 +15826,10 @@ export default function App() {
                 </div>
                 <div>
                   <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
-                    Group Details
+                    {(() => {
+                      const currentChat = chats.find(c => c.id === activeChatId || c.id === editingGroupId);
+                      return currentChat?.isGroup ? "Group Details" : "Chat Details";
+                    })()}
                   </DialogTitle>
                   <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
                     View description and members
@@ -16295,12 +16541,24 @@ export default function App() {
 
                 {/* Right Side: 60% */}
                 <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
-                  <ScrollArea className="flex-1 no-scrollbar [&>[data-slot='scroll-area-viewport']]:no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                  <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
                     <div className="p-6">
                       <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
                         <Users className="h-4 w-4 text-emerald-600" />
                         Select Members
                       </h3>
+                      
+                      {/* Search bar with search icon for group members selection */}
+                      <div className="mb-4 relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <Input 
+                          placeholder="Search members to add..." 
+                          value={homeMemberSearchQuery}
+                          onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
+                          className="pl-9 h-10 bg-white border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                        />
+                      </div>
+
                       <div className="grid grid-cols-2 gap-3">
                         {(() => {
                           const loggedInMember = {
@@ -16319,9 +16577,13 @@ export default function App() {
                                 id: item.id,
                                 name: item.name,
                                 imageUrl: item.imageUrl,
-                                isOnline: item.isOnline ?? (u ? (u.isOnline ?? !u.disabled) : false),
+                                isOnline: !!(u?.isOnline),
                                 role: u?.getUserDto?.roleName || 'Member'
                               };
+                            })
+                            .filter((item: any) => {
+                              if (!homeMemberSearchQuery.trim()) return true;
+                              return item.name.toLowerCase().includes(homeMemberSearchQuery.toLowerCase());
                             });
 
                           const allCreatableMembers = [loggedInMember, ...otherMembers];
@@ -16393,7 +16655,7 @@ export default function App() {
                         })()}
                       </div>
                     </div>
-                  </ScrollArea>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -16410,7 +16672,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <ScrollArea className="flex-1 no-scrollbar [&>[data-slot='scroll-area-viewport']]:no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
+                <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
                   <div className="p-4">
                     <div className="space-y-3">
                       {(() => {
@@ -16424,7 +16686,7 @@ export default function App() {
                         });
                         
                         return filteredUsers.map((user) => {
-                          const isOnline = user.isOnline ?? !user.disabled;
+                          const isOnline = !!user.isOnline;
                           return (
                             <button
                               key={user.id}
@@ -16469,7 +16731,7 @@ export default function App() {
                       })()}
                     </div>
                   </div>
-                </ScrollArea>
+                </div>
               </div>
             )}
           </div>
@@ -16858,7 +17120,14 @@ export default function App() {
                   </label>
                   <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
                     <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Chose a user" />
+                      <SelectValue placeholder="Chose a user">
+                        {selectedFingerprintUserId
+                          ? (() => {
+                              const u = (allUsers || []).find(user => user.id.toString() === selectedFingerprintUserId.toString());
+                              return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Chose a user';
+                            })()
+                          : 'Chose a user'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(allUsers || []).map((u) => (
@@ -16876,7 +17145,11 @@ export default function App() {
                   </label>
                   <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
                     <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Chose a hardware" />
+                      <SelectValue placeholder="Chose a hardware">
+                        {selectedFingerprintHardwareId
+                          ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedFingerprintHardwareId.toString())?.name || 'Chose a hardware')
+                          : 'Chose a hardware'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {appNamesDetailList?.hardwareIdNames?.map((h) => (
@@ -17092,7 +17365,14 @@ export default function App() {
                 </label>
                 <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Choose a user" />
+                    <SelectValue placeholder="Choose a user">
+                      {selectedNfidUserId
+                        ? (() => {
+                            const u = (allUsers || []).find(user => user.id.toString() === selectedNfidUserId.toString());
+                            return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Choose a user';
+                          })()
+                        : 'Choose a user'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(allUsers || []).map((u) => (
@@ -17110,7 +17390,11 @@ export default function App() {
                 </label>
                 <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Choose hardware" />
+                    <SelectValue placeholder="Choose hardware">
+                      {selectedNfidHardwareId
+                        ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedNfidHardwareId.toString())?.name || 'Choose hardware')
+                        : 'Choose hardware'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {appNamesDetailList?.hardwareIdNames?.map((h) => (
