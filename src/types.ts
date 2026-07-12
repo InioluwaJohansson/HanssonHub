@@ -107,6 +107,7 @@ export interface Room {
   section: string;
   icon: string;
   isHidden?: boolean;
+  personId?: number | string;
 }
 
 export interface Section {
