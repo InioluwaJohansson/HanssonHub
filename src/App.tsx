@@ -9224,7 +9224,15 @@ export default function App() {
             <div className="shrink-0 pt-1">
               <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                 <TitleIcon className="h-3 w-3" />
-                {filteredDevices.length} {filteredDevices.length === 1 ? 'Device' : 'Devices'}
+                {filteredDevices.length}{' '}
+                {(() => {
+                  if (activeView === 'facility-appliances') return 'APPLIANCES';
+                  if (activeView === 'facility-doors') return 'DOORS';
+                  if (activeView === 'facility-windows') return 'WINDOWS';
+                  if (activeView === 'facility-cameras') return 'CAMERAS';
+                  if (activeView === 'facility-lights') return 'LIGHTS';
+                  return filteredDevices.length === 1 ? 'Device' : 'Devices';
+                })()}
               </Badge>
             </div>
           </div>
