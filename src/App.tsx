@@ -2155,6 +2155,58 @@ export default function App() {
     return found ? { fullName: found.name, profileImageUrl: found.imageUrl } : null;
   }, [appNamesDetailList]);
 
+  const getRoomSectionId = React.useCallback((roomId: string | number | undefined | null) => {
+    if (!roomId || roomId === 'none' || roomId === 0) return null;
+    
+    const r = (rooms || []).find(room => room.id?.toString() === roomId.toString());
+    const rSectId = r?.sectionId || r?.SectionId || (r as any)?.Section || r?.section;
+    const rSectName = (r as any)?.sectionName || (r as any)?.SectionName || r?.section;
+    
+    const roomNames = appNamesDetailList?.roomIdNames || appNamesDetailList?.RoomIdNames || [];
+    const rNameItem = roomNames.find((x: any) => x.id?.toString() === roomId.toString());
+    const rNameSectId = rNameItem?.sectionId ?? rNameItem?.SectionId ?? rNameItem?.section;
+    const rNameSectName = rNameItem?.sectionName ?? rNameItem?.SectionName ?? rNameItem?.section;
+
+    const possibleIds = [rSectId, rNameSectId].filter(x => x !== undefined && x !== null && x !== 'none' && x !== '');
+    const possibleNames = [rSectName, rNameSectName].filter(x => x !== undefined && x !== null && x !== 'none' && x !== '');
+
+    if (sections && sections.length > 0) {
+      const foundSection = sections.find(s => {
+        const sId = s.id?.toString().toLowerCase();
+        const sDbId = s.dbId?.toString().toLowerCase();
+        const sSecId = s.sectionId?.toString().toLowerCase();
+        const sName = s.name?.toLowerCase();
+        const sSectName = s.sectionName?.toLowerCase();
+
+        for (const pId of possibleIds) {
+          const pIdStr = pId.toString().toLowerCase();
+          if (sId === pIdStr || sDbId === pIdStr || sSecId === pIdStr) {
+            return true;
+          }
+        }
+
+        for (const pName of possibleNames) {
+          const pNameStr = pName.toString().toLowerCase();
+          if (sName === pNameStr || sSectName === pNameStr) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (foundSection) {
+        return foundSection.id.toString();
+      }
+    }
+
+    for (const pId of possibleIds) {
+      if (pId && pId !== 'none') return pId.toString();
+    }
+
+    return null;
+  }, [rooms, sections, appNamesDetailList]);
+
   const getChatDisplayName = React.useCallback((chat: ChatDto) => {
     if (chat.isGroup) return chat.name;
     const otherParticipant = chat.participants?.find(p => p.personId !== userProfile?.id);
@@ -9614,7 +9666,7 @@ export default function App() {
                 <Layers className="h-3 w-3 text-muted-foreground" />
                 Section Name (Optional)
               </Label>
-              <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: '' }))}
+              <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
               >
                 <SelectTrigger id="section">
                   <SelectValue placeholder="Select section">
@@ -9643,17 +9695,11 @@ export default function App() {
                     setNewDevice(prev => ({ ...prev, room: undefined }));
                   } else {
                     const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                    const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
-                    const foundSection = (sections || []).find(s => 
-                      s.id.toString() === sectId || 
-                      s.name.toLowerCase() === sectId.toLowerCase() ||
-                      (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
-                    );
-                    const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                    const sectId = getRoomSectionId(v);
                     setNewDevice(prev => ({ 
                       ...prev, 
                       room: v,
-                      section: finalSectId
+                      section: sectId || undefined
                     }));
                   }
                 }}
@@ -9667,23 +9713,32 @@ export default function App() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Room</SelectItem>
-                  {rooms.filter(r => {
-                    if (!newDevice.section || newDevice.section === 'none') return true;
-                    const sId = newDevice.section.toString();
-                    const sectionObj = (sections || []).find(s => s.id.toString() === sId);
-                    const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
-                    if (!roomSectRef) return false;
-                    if (roomSectRef === sId) return true;
-                    if (sectionObj) {
-                      if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
-                      if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
-                    }
-                    return false;
-                  }).map(room => (
-                    <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                  ))}
+                  {newDevice.section && newDevice.section !== 'none' ? (
+                    <>
+                      <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
+                      </div>
+                      {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
+                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        Unassigned Rooms
+                      </div>
+                      {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectContent>
               </Select>
+              {!newDevice.section || newDevice.section === 'none' ? (
+                <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+              ) : (
+                <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'section')}</span>
+              )}
             </div>
           </div>
           </div>
@@ -10750,6 +10805,28 @@ export default function App() {
                       onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
                     />
                   </div>
+                  <div className="grid gap-2">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      <Layers className="h-3 w-3" /> Category
+                    </Label>
+                    <Select 
+                      value={newContact.contactCategory.toString()} 
+                      onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
+                    >
+                      <SelectTrigger className="h-10 bg-transparent text-black">
+                        <SelectValue placeholder="Select Category">
+                          {newContact.contactCategory
+                            ? ((appNamesDetailList?.contactCategoryIdNames || []).find(cat => cat.id.toString() === newContact.contactCategory.toString())?.name || 'Select Category')
+                            : 'Select Category'}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(appNamesDetailList?.contactCategoryIdNames || []).map(cat => (
+                          <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="flex flex-col items-center gap-3">
@@ -10780,29 +10857,6 @@ export default function App() {
                     onChange={(e) => handleImageSelect(e, 'contact')}
                   />
                 </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="flex items-center gap-2">
-                  <Layers className="h-4 w-4" /> Category
-                </Label>
-                <Select 
-                  value={newContact.contactCategory.toString()} 
-                  onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Category">
-                      {newContact.contactCategory
-                        ? ((appNamesDetailList?.contactCategoryIdNames || []).find(cat => cat.id.toString() === newContact.contactCategory.toString())?.name || 'Select Category')
-                        : 'Select Category'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(appNamesDetailList?.contactCategoryIdNames || []).map(cat => (
-                      <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
               <div className="space-y-4">
@@ -11383,63 +11437,6 @@ export default function App() {
               )}
 
               <div className="grid gap-2">
-                <Label htmlFor="edit-device-room" className="flex items-center gap-2">
-                  <Sofa className="h-3 w-3 text-muted-foreground" />
-                  Room
-                </Label>
-                <Select 
-                  value={editingDevice.room || 'none'} 
-                  onValueChange={(v) => {
-                    if (v === 'none') {
-                      setEditingDevice({ ...editingDevice, room: undefined });
-                    } else {
-                      const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
-                      const foundSection = (sections || []).find(s => 
-                        s.id.toString() === sectId || 
-                        s.name.toLowerCase() === sectId.toLowerCase() ||
-                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
-                      );
-                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
-                      setEditingDevice({
-                        ...editingDevice,
-                        room: v,
-                        section: finalSectId
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger id="edit-device-room">
-                    <SelectValue placeholder="Select room">
-                      {editingDevice.room && editingDevice.room !== 'none'
-                        ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
-                        : 'No Room (Section Level)'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Room (Section Level)</SelectItem>
-                    {(rooms || [])
-                      .filter(r => {
-                        if (!editingDevice.section || editingDevice.section === 'none') return true;
-                        const sId = editingDevice.section.toString();
-                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
-                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
-                        if (!roomSectRef) return false;
-                        if (roomSectRef === sId) return true;
-                        if (sectionObj) {
-                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
-                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
-                        }
-                        return false;
-                      })
-                      .map(r => (
-                        <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
                 <Label htmlFor="edit-device-section" className="flex items-center gap-2">
                   <Layers className="h-3 w-3 text-muted-foreground" />
                   Section
@@ -11466,6 +11463,64 @@ export default function App() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-device-room" className="flex items-center gap-2">
+                  <Sofa className="h-3 w-3 text-muted-foreground" />
+                  Room
+                </Label>
+                <Select 
+                  value={editingDevice.room || 'none'} 
+                  onValueChange={(v) => {
+                    if (v === 'none') {
+                      setEditingDevice({ ...editingDevice, room: undefined });
+                    } else {
+                      const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
+                      const sectId = getRoomSectionId(v);
+                      setEditingDevice({
+                        ...editingDevice,
+                        room: v,
+                        section: sectId || undefined
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger id="edit-device-room">
+                    <SelectValue placeholder="Select room">
+                      {editingDevice.room && editingDevice.room !== 'none'
+                        ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
+                        : 'No Room (Section Level)'}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Room</SelectItem>
+                    {editingDevice.section && editingDevice.section !== 'none' ? (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
+                        </div>
+                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Unassigned Rooms
+                        </div>
+                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+                {!editingDevice.section || editingDevice.section === 'none' ? (
+                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+                ) : (
+                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'section')}</span>
+                )}
               </div>
             </div>
           )}
@@ -12466,18 +12521,11 @@ export default function App() {
                     if (val === 'none') {
                       setExternalForm(prev => ({ ...prev, roomId: undefined }));
                     } else {
-                      const selectedRoom = rooms.find(r => r.id.toString() === val.toString());
-                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
-                      const foundSection = (sections || []).find(s => 
-                        s.id.toString() === sectId || 
-                        s.name.toLowerCase() === sectId.toLowerCase() ||
-                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
-                      );
-                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                      const sectId = getRoomSectionId(val);
                       setExternalForm(prev => ({
                         ...prev,
-                        roomId: parseInt(val),
-                        sectionId: finalSectId
+                        roomId: parseInt(val, 10),
+                        sectionId: sectId || undefined
                       }));
                     }
                   }}
@@ -12491,26 +12539,32 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room</SelectItem>
-                    {(rooms || [])
-                      .filter(r => {
-                        if (!externalForm.sectionId || externalForm.sectionId === 'none') return true;
-                        const sId = externalForm.sectionId.toString();
-                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
-                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
-                        if (!roomSectRef) return false;
-                        if (roomSectRef === sId) return true;
-                        if (sectionObj) {
-                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
-                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
-                        }
-                        return false;
-                      })
-                      .map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                      ))
-                    }
+                    {externalForm.sectionId && externalForm.sectionId !== 'none' ? (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Selected Section')}
+                        </div>
+                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.sectionId?.toString()).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Unassigned Rooms
+                        </div>
+                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
+                {!externalForm.sectionId || externalForm.sectionId === 'none' ? (
+                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+                ) : (
+                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'section')}</span>
+                )}
               </div>
             </div>
 
@@ -12783,18 +12837,11 @@ export default function App() {
                     if (val === 'none') {
                       setExternalForm(prev => ({ ...prev, room: undefined }));
                     } else {
-                      const selectedRoom = rooms.find(r => r.id.toString() === val.toString());
-                      const sectId = selectedRoom?.sectionId?.toString() || selectedRoom?.SectionId?.toString() || selectedRoom?.section?.toString() || '';
-                      const foundSection = (sections || []).find(s => 
-                        s.id.toString() === sectId || 
-                        s.name.toLowerCase() === sectId.toLowerCase() ||
-                        (s.sectionName && s.sectionName.toLowerCase() === sectId.toLowerCase())
-                      );
-                      const finalSectId = foundSection ? foundSection.id.toString() : (sectId || undefined);
+                      const sectId = getRoomSectionId(val);
                       setExternalForm(prev => ({
                         ...prev,
                         room: val,
-                        section: finalSectId
+                        section: sectId || undefined
                       }));
                     }
                   }}
@@ -12808,26 +12855,32 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No Room</SelectItem>
-                    {(rooms || [])
-                      .filter(r => {
-                        if (!externalForm.section || externalForm.section === 'none') return true;
-                        const sId = externalForm.section.toString();
-                        const sectionObj = (sections || []).find(s => s.id.toString() === sId);
-                        const roomSectRef = r.sectionId?.toString() || r.SectionId?.toString() || r.section?.toString() || r.Section?.toString() || '';
-                        if (!roomSectRef) return false;
-                        if (roomSectRef === sId) return true;
-                        if (sectionObj) {
-                          if (roomSectRef.toLowerCase() === sectionObj.name.toLowerCase()) return true;
-                          if (sectionObj.sectionName && roomSectRef.toLowerCase() === sectionObj.sectionName.toLowerCase()) return true;
-                        }
-                        return false;
-                      })
-                      .map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                      ))
-                    }
+                    {externalForm.section && externalForm.section !== 'none' ? (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Selected Section')}
+                        </div>
+                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.section?.toString()).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                          Unassigned Rooms
+                        </div>
+                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
+                {!externalForm.section || externalForm.section === 'none' ? (
+                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+                ) : (
+                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'section')}</span>
+                )}
               </div>
             </div>
 
