@@ -453,6 +453,10 @@ export const INITIAL_CAMERAS: GetCameraDto[] = [
     cameraName: "Front Door Camera",
     cameraId: "CAM-FD-14",
     liveStreamUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    ipAddress: "192.168.1.14",
+    username: "admin",
+    streamPath: "/live/h264",
+    port: 80,
     recordings: [
       {
         filePath: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
@@ -476,6 +480,10 @@ export const INITIAL_CAMERAS: GetCameraDto[] = [
     cameraName: "Bedroom Camera",
     cameraId: "CAM-BR-01",
     liveStreamUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    ipAddress: "192.168.1.1",
+    username: "admin",
+    streamPath: "/live/h264",
+    port: 80,
     recordings: [
       {
         filePath: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
@@ -489,6 +497,10 @@ export const INITIAL_CAMERAS: GetCameraDto[] = [
     cameraName: "Gate Camera",
     cameraId: "CAM-GT-02",
     liveStreamUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+    ipAddress: "192.168.1.102",
+    username: "admin",
+    streamPath: "/live/h264",
+    port: 80,
     recordings: [
       {
         filePath: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
@@ -502,6 +514,10 @@ export const INITIAL_CAMERAS: GetCameraDto[] = [
     cameraName: "Porch Camera",
     cameraId: "CAM-PR-03",
     liveStreamUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    ipAddress: "192.168.1.103",
+    username: "admin",
+    streamPath: "/live/h264",
+    port: 80,
     recordings: [
       {
         filePath: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",

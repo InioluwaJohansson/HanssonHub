@@ -96,7 +96,21 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
 
   const firstName = userProfile?.getPersonDetailsDto?.firstName || '';
   const lastName = userProfile?.getPersonDetailsDto?.lastName || '';
-  const firstInitial = (firstName || userProfile?.getUserDto?.userName || 'U').charAt(0).toUpperCase();
+  const userName = userProfile?.getUserDto?.userName || '';
+  
+  const userInitials = React.useMemo(() => {
+    if (firstName && lastName) {
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    }
+    if (firstName) {
+      return firstName.charAt(0).toUpperCase();
+    }
+    if (userName) {
+      return userName.slice(0, 2).toUpperCase();
+    }
+    return 'U';
+  }, [firstName, lastName, userName]);
+
   const roleName = userProfile?.getUserDto?.roleName || '';
 
   const hasMultipleRooms = rooms.length > 1;
@@ -242,11 +256,11 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           )}
           title={isCollapsed ? "Profile" : undefined}
         >
-          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden shrink-0 font-bold text-primary text-sm">
+          <div className="h-8 w-8 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center justify-center overflow-hidden shrink-0 font-bold text-xs tracking-wider uppercase shadow-2xs">
             {userProfile?.getPersonDetailsDto?.imageUrl ? (
               <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Profile" className="h-full w-full object-cover" />
             ) : (
-              firstInitial
+              userInitials
             )}
           </div>
           {!isCollapsed && (

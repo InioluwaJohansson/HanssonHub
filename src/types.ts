@@ -76,6 +76,7 @@ export interface Device {
   type: DeviceType;
   status: string; // Using string to accommodate various statuses
   value?: number; // For dimmers, volume, etc.
+  liveStreamUrl?: string;
   room?: string; // Optional if attached directly to a section
   section?: string;
   doorType?: 'exterior' | 'interior';
@@ -745,8 +746,8 @@ export interface UpdateExternalDto extends CreateBaseDefaultDto {
 export interface CreateCameraDto extends CreateBaseDefaultDto {
   cameraName: string;
   ipAddress: string;
-  username: string;
-  password?: string;
+  username: string | null;
+  password?: string | null;
   streamPath: string;
   port: number;
 }
@@ -756,8 +757,8 @@ export interface UpdateCameraDto extends CreateBaseDefaultDto {
   cameraName: string;
   isActive: boolean;
   ipAddress: string;
-  username: string;
-  password?: string;
+  username: string | null;
+  password?: string | null;
   streamPath: string;
   port: number;
 }
@@ -767,6 +768,11 @@ export interface GetCameraDto extends BaseDefaultDto {
   cameraName: string;
   cameraId: string;
   liveStreamUrl: string;
+  ipAddress: string;
+  username: string | null;
+  password?: string | null;
+  streamPath: string;
+  port: number;
   recordings: GetRecordingDto[];
 }
 
@@ -934,5 +940,145 @@ export interface MessageQueryDto {
   page: number;
   pageSize: number;
 }
+
+export enum CallType {
+  Audio = 1,
+  Video = 2,
+  Voice = 1,
+}
+
+export enum CallStatus {
+  Ringing = 1,
+  Connected = 2,
+  Ended = 3,
+  Missed = 4,
+  Rejected = 5,
+  TimedOut = 6,
+}
+
+export enum CallParticipantStatus {
+  Ringing = 0,
+  Connected = 1,
+  Declined = 2,
+  Left = 3,
+  Missed = 4,
+}
+
+export interface CallParticipantDto {
+  personId: number;
+  fullName: string;
+  profileImage: string;
+  isMuted: boolean;
+  isCameraEnabled: boolean;
+  isScreenSharing: boolean;
+  status: CallParticipantStatus;
+}
+
+export interface CallDto {
+  id: number;
+  chatId: number;
+  callerPersonId: number;
+  type: CallType;
+  status: CallStatus;
+  startedAt: string;
+  answeredAt?: string;
+  endedAt?: string;
+  participants: CallParticipantDto[];
+}
+
+export interface CallLogDto {
+  id?: number;
+  callId: number;
+  chatId: number;
+  chatName: string;
+  type: CallType;
+  status: CallStatus;
+  startedAt: string;
+  answeredAt?: string;
+  endedAt?: string;
+  duration: string;
+  isIncoming: boolean;
+  callerPersonId: number;
+  isMissed: boolean;
+  participants?: CallParticipantDto[];
+}
+
+export interface StartCallDto {
+  chatId: number;
+  type: CallType;
+}
+
+export interface OfferDto {
+  callId: number;
+  CallId?: number;
+  chatId: number;
+  ChatId?: number;
+  personId?: number;
+  PersonId?: number;
+  sdp: string;
+  Sdp?: string;
+}
+
+export interface AnswerDto {
+  callId: number;
+  CallId?: number;
+  chatId: number;
+  ChatId?: number;
+  personId?: number;
+  PersonId?: number;
+  sdp: string;
+  Sdp?: string;
+}
+
+export interface RejectDto {
+  callId: number;
+  chatId: number;
+}
+
+export interface IceCandidateDto {
+  callId: number;
+  CallId?: number;
+  chatId: number;
+  ChatId?: number;
+  personId?: number;
+  PersonId?: number;
+  candidate: string;
+  Candidate?: string;
+  sdpMid?: string;
+  SdpMid?: string;
+  sdpMLineIndex?: number;
+  SdpMLineIndex?: number;
+}
+
+export interface ToggleMicrophoneDto {
+  callId: number;
+  isMuted: boolean;
+}
+
+export interface ToggleCameraDto {
+  callId: number;
+  isCameraEnabled: boolean;
+}
+
+export interface ScreenShareDto {
+  callId: number;
+  isSharing: boolean;
+}
+
+export interface ToggleCallItemsDto {
+  callId: number;
+  chatId: number;
+  personId: number;
+  isMuted: boolean;
+  isCameraEnabled: boolean;
+  isSharing: boolean;
+  CallId?: number;
+  ChatId?: number;
+  PersonId?: number;
+  IsMuted?: boolean;
+  IsCameraEnabled?: boolean;
+  IsSharing?: boolean;
+}
+
 
 

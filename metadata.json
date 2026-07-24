@@ -2,6 +2,7 @@
   "name": "HanssonHub",
   "description": "A smart home control dashboard.",
   "requestFramePermissions": [
-    "microphone"
+    "microphone",
+    "camera"
   ]
 }

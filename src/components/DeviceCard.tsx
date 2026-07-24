@@ -5,6 +5,7 @@ import { Switch } from './ui/switch';
 import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { HlsVideo } from './HlsVideo';
 import { 
   Lightbulb, 
   LightbulbOff,
@@ -29,6 +30,15 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
+
+const resolveCameraUrl = (url?: string | null): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) {
+    return url;
+  }
+  const relativePath = url.startsWith('/') ? url.substring(1) : url;
+  return `https://kv5zhpcr-7190.uks1.devtunnels.ms/storage/${relativePath}`;
+};
 
 interface DeviceCardProps {
   key?: string | number;
@@ -267,29 +277,39 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
               </div>
             )}
 
-            {device.type === 'camera' && isActive && (
+            {device.type === 'camera' && (
               <div 
-                className="relative mt-2 aspect-video overflow-hidden rounded-lg bg-black cursor-pointer group/camera"
+                className="relative mt-2 aspect-video overflow-hidden rounded-xl bg-slate-900 cursor-pointer group/camera border border-slate-800 shadow-inner"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClick?.(device);
                 }}
               >
-                <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover/camera:opacity-100 transition-opacity bg-black/40">
-                  <div className="rounded-full bg-white/20 p-3 backdrop-blur-sm">
+                <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover/camera:opacity-100 transition-opacity bg-black/40 backdrop-blur-[1px]">
+                  <div className="rounded-full bg-white/20 p-3 backdrop-blur-md shadow-lg border border-white/20">
                     <Maximize2 className="h-6 w-6 text-white" />
                   </div>
                 </div>
-                <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-2 py-1 backdrop-blur-md">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-                  <span className="text-[8px] font-bold text-white uppercase tracking-wider">Live Feed</span>
+                <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-md border border-white/10">
+                  <div className={cn("h-1.5 w-1.5 rounded-full", isActive ? "bg-red-500 animate-pulse" : "bg-slate-400")} />
+                  <span className="text-[8px] font-bold text-white uppercase tracking-wider font-mono">
+                    {isActive ? "Live Feed" : "Camera Standby"}
+                  </span>
                 </div>
-                <img 
-                  src={`https://picsum.photos/seed/${device.id}/400/225`} 
-                  alt="Camera Feed" 
-                  className="h-full w-full object-cover opacity-60 grayscale group-hover/camera:scale-105 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
-                />
+                {(() => {
+                  const rawUrl = device.liveStreamUrl || device.streamPath;
+                  const feedUrl = rawUrl ? resolveCameraUrl(rawUrl) : "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+                  return (
+                    <HlsVideo 
+                      src={feedUrl} 
+                      autoPlay 
+                      muted 
+                      loop 
+                      playsInline 
+                      className="h-full w-full object-cover opacity-90 group-hover/camera:scale-105 transition-transform duration-500 pointer-events-none" 
+                    />
+                  );
+                })()}
               </div>
             )}
           </div>

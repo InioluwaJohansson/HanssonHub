@@ -80,7 +80,19 @@ import {
   MessageQueryDto,
   RemoveParticipantDto,
   AddParticipantsDto,
-  RealtimeMessageDto
+  RealtimeMessageDto,
+  CallType,
+  CallStatus,
+  CallParticipantStatus,
+  CallParticipantDto,
+  CallDto,
+  CallLogDto,
+  StartCallDto,
+  OfferDto,
+  AnswerDto,
+  RejectDto,
+  IceCandidateDto,
+  ToggleCallItemsDto
 } from './types';
 import { INITIAL_CHATS, INITIAL_CHAT_MESSAGES } from './chatData';
 import { toast, Toaster } from 'sonner';
@@ -183,6 +195,8 @@ import {
   Send,
   Paperclip,
   Mic,
+  MicOff,
+  PhoneOff,
   Image as ImageIcon,
   FileText,
   Download,
@@ -227,7 +241,11 @@ import {
   Code2,
   UserMinus,
   ChevronDown,
-  Ban
+  Ban,
+  Volume1,
+  PhoneIncoming,
+  PhoneOutgoing,
+  ArrowDownUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
@@ -243,6 +261,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from './components/ui/dropdown-menu';
 
 const iconMap: Record<string, any> = {
@@ -281,6 +303,15 @@ const getRawId = (id: string | number | undefined): string => {
   if (id === undefined || id === null) return '';
   const s = id.toString();
   return s.includes('-') ? s.split('-')[1] : s;
+};
+
+const resolveCameraUrl = (url?: string | null): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) {
+    return url;
+  }
+  const relativePath = url.startsWith('/') ? url.substring(1) : url;
+  return `https://kv5zhpcr-7190.uks1.devtunnels.ms/storage/${relativePath}`;
 };
 
 const dataURLtoFile = (dataurl: string, filename: string): File => {
@@ -1522,6 +1553,341 @@ const playImessageReceivedSynth = () => {
   }
 };
 
+const LocalVideoFeed = () => {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  React.useEffect(() => {
+    let stream: MediaStream | null = null;
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        .then(s => {
+          stream = s;
+          if (videoRef.current) {
+            videoRef.current.srcObject = s;
+          }
+        })
+        .catch(err => console.warn("Failed to get local video feed:", err));
+    }
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
+  return <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover rounded-xl" />;
+};
+
+const LocalCallSoundwave = ({ isMuted }: { isMuted: boolean }) => {
+  const [volumes, setVolumes] = React.useState<number[]>([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+
+  React.useEffect(() => {
+    if (isMuted) {
+      setVolumes([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+      return;
+    }
+
+    let audioContext: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let source: MediaStreamAudioSourceNode | null = null;
+    let stream: MediaStream | null = null;
+    let animationFrameId: number;
+
+    const startAnalysis = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 32; // small fft size to analyze 16 frequency bins
+        source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        const update = () => {
+          if (!analyser) return;
+          analyser.getByteFrequencyData(dataArray);
+
+          // Map frequency bins to 9 bars
+          const newVolumes = Array.from({ length: 9 }).map((_, i) => {
+            const dataIndex = Math.floor((i / 8) * (dataArray.length - 1));
+            const val = dataArray[dataIndex] || 0;
+            // Scale to a nice display height (minimum 4px, max 18px)
+            const height = 4 + (val / 255) * 14;
+            return height;
+          });
+
+          setVolumes(newVolumes);
+          animationFrameId = requestAnimationFrame(update);
+        };
+
+        update();
+      } catch (err) {
+        console.warn("Could not get microphone stream for call soundwave", err);
+        // Fall back to elegant procedural simulation if blocked or denied
+        const simulate = () => {
+          const time = Date.now() * 0.005;
+          const newVolumes = Array.from({ length: 9 }).map((_, i) => {
+            const wave = Math.sin(time + i * 0.5) * Math.cos(time * 0.7 + i * 0.3);
+            return 4 + Math.max(0, wave) * 12;
+          });
+          setVolumes(newVolumes);
+          animationFrameId = requestAnimationFrame(simulate);
+        };
+        simulate();
+      }
+    };
+
+    startAnalysis();
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      if (source) {
+        source.disconnect();
+      }
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(() => {});
+      }
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isMuted]);
+
+  if (isMuted) {
+    return (
+      <div className="flex flex-col items-center justify-center pt-1" title="Muted">
+        <MicOff className="h-4 w-4 text-rose-500" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1.5 pt-0.5 w-full">
+      <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase animate-pulse">Speaking</span>
+      <div className="flex items-end justify-center gap-0.5 h-5 w-full">
+        {volumes.map((h, i) => (
+          <div 
+            key={i} 
+            className="w-0.5 bg-emerald-400 rounded-full transition-all duration-75"
+            style={{ height: `${h}px` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RemoteCallSoundwave = ({ isMuted }: { isMuted: boolean }) => {
+  const [volumes, setVolumes] = React.useState<number[]>([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+
+  React.useEffect(() => {
+    if (isMuted) {
+      setVolumes([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+      return;
+    }
+
+    let animationFrameId: number;
+
+    const update = () => {
+      const time = Date.now() * 0.008;
+      // Procedurally generate active speech envelope with pauses
+      const voiceEnvelope = Math.max(0, Math.sin(time * 0.2) * 0.8 + Math.cos(time * 0.07) * 0.4);
+      
+      const newVolumes = Array.from({ length: 9 }).map((_, i) => {
+        const fastWave = Math.sin(time + i * 0.8) * Math.sin(time * 2.3 + i * 0.4);
+        const noise = Math.sin(time * 4.1 - i * 1.2) * 0.3;
+        const rawVal = Math.max(0.1, (fastWave + noise + 1) / 2);
+        const val = rawVal * voiceEnvelope;
+        const height = 4 + val * 14;
+        return height;
+      });
+
+      setVolumes(newVolumes);
+      animationFrameId = requestAnimationFrame(update);
+    };
+
+    update();
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [isMuted]);
+
+  if (isMuted) {
+    return (
+      <div className="flex flex-col items-center justify-center pt-1" title="Muted">
+        <MicOff className="h-4 w-4 text-rose-500" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1.5 pt-0.5 w-full">
+      <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase animate-pulse font-medium">Active</span>
+      <div className="flex items-end justify-center gap-0.5 h-5 w-full">
+        {volumes.map((h, i) => (
+          <div 
+            key={i} 
+            className="w-0.5 bg-emerald-400 rounded-full transition-all duration-75"
+            style={{ height: `${h}px` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+function mapToCallDto(raw: any): CallDto {
+  if (!raw) return raw;
+  const id = raw.id ?? raw.Id;
+  const chatId = raw.chatId ?? raw.ChatId;
+  const callerPersonId = raw.callerPersonId ?? raw.CallerPersonId;
+  const type = raw.type ?? raw.Type;
+  const status = raw.status ?? raw.Status;
+  const startedAt = raw.startedAt ?? raw.StartedAt;
+  const answeredAt = raw.answeredAt ?? raw.AnsweredAt;
+  const endedAt = raw.endedAt ?? raw.EndedAt;
+  const participantsRaw = raw.participants ?? raw.Participants ?? [];
+  const participants = Array.isArray(participantsRaw) ? participantsRaw.map((p: any) => ({
+    personId: p.personId ?? p.PersonId,
+    fullName: p.fullName ?? p.FullName,
+    profileImage: p.profileImage ?? p.ProfileImage,
+    isMuted: p.isMuted ?? p.IsMuted,
+    isCameraEnabled: p.isCameraEnabled ?? p.IsCameraEnabled,
+    isScreenSharing: p.isScreenSharing ?? p.IsScreenSharing,
+    status: p.status ?? p.Status,
+  })) : [];
+  return {
+    id,
+    chatId,
+    callerPersonId,
+    type,
+    status,
+    startedAt,
+    answeredAt,
+    endedAt,
+    participants,
+  };
+}
+
+function parseTimestamp(dateInput: string | Date | number | undefined | null): number {
+  if (!dateInput) return Date.now();
+  if (typeof dateInput === 'number') return dateInput;
+  if (dateInput instanceof Date) return dateInput.getTime();
+  
+  let str = String(dateInput).trim();
+  if (!str) return Date.now();
+  
+  if (str.includes('T') && !str.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(str)) {
+    str += 'Z';
+  } else if (!str.includes('T') && str.includes(' ') && !str.endsWith('Z')) {
+    str = str.replace(' ', 'T') + 'Z';
+  }
+  
+  const parsed = new Date(str).getTime();
+  return isNaN(parsed) ? Date.now() : parsed;
+}
+
+function formatCallDuration(startedAt: string | Date | undefined | null, endedAt: string | Date | undefined | null, answeredAt?: string | Date | undefined | null): string {
+  const startToUse = answeredAt || startedAt;
+  if (!startToUse) return "0s";
+  const start = parseTimestamp(startToUse);
+  const end = endedAt ? parseTimestamp(endedAt) : Date.now();
+  const diffMs = end - start;
+  if (diffMs <= 0) return "0s";
+  
+  const totalSecs = Math.floor(diffMs / 1000);
+  const secs = totalSecs % 60;
+  const totalMins = Math.floor(totalSecs / 60);
+  const mins = totalMins % 60;
+  const hrs = Math.floor(totalMins / 60);
+  
+  if (hrs > 0) {
+    return `${hrs}h ${mins}m ${secs}s`;
+  } else if (mins > 0) {
+    return `${mins}m ${secs}s`;
+  } else {
+    return `${secs}s`;
+  }
+}
+
+function mapCallDtoToCallLogDto(call: CallDto, currentUserId: number, chatName: string): CallLogDto {
+  const isIncoming = call.callerPersonId !== currentUserId;
+  
+  const isEndedStatus = call.status === CallStatus.Ended || 
+                        call.status === CallStatus.Rejected || 
+                        call.status === CallStatus.Missed || 
+                        call.status === CallStatus.TimedOut;
+  const endedAt = call.endedAt || (isEndedStatus ? new Date().toISOString() : undefined);
+
+  // Calculate duration in a friendly format (e.g. "12s", "1m 45s", "2h 15m")
+  const duration = formatCallDuration(call.startedAt, endedAt, call.answeredAt);
+
+  // Check if current user has missed the call
+  const userParticipant = call.participants?.find(p => p.personId === currentUserId);
+  const isMissed = call.status === CallStatus.Missed || 
+                   (isIncoming && call.status === CallStatus.Rejected) || 
+                   (userParticipant?.status === CallParticipantStatus.Missed);
+
+  return {
+    callId: call.id,
+    chatId: call.chatId,
+    chatName: chatName,
+    type: call.type,
+    status: call.status,
+    startedAt: call.startedAt,
+    endedAt: endedAt,
+    duration: duration,
+    isIncoming: isIncoming,
+    callerPersonId: call.callerPersonId,
+    isMissed: isMissed,
+    participants: call.participants?.map(p => ({
+      personId: p.personId,
+      fullName: p.fullName,
+      profileImage: p.profileImage,
+      status: p.status,
+      isMuted: p.isMuted,
+      isCameraEnabled: p.isCameraEnabled,
+      isScreenSharing: p.isScreenSharing
+    }))
+  };
+}
+
+function parseCallUpdate(payload: any): { callDto: CallDto; isLegacy: boolean; legacyData?: any } {
+  if (!payload) return { callDto: {} as any, isLegacy: false };
+  
+  // Check if it's the full callDto (has callerPersonId, participants, or startedAt)
+  const isFullCallDto = (payload.callerPersonId !== undefined || payload.CallerPersonId !== undefined || Array.isArray(payload.participants) || Array.isArray(payload.Participants));
+  
+  if (isFullCallDto) {
+    return { callDto: mapToCallDto(payload), isLegacy: false };
+  } else {
+    // Legacy format
+    const callId = payload.callId ?? payload.CallId ?? 0;
+    const personId = payload.personId ?? payload.PersonId ?? 0;
+    const participantStatus = payload.status ?? payload.Status ?? 0;
+    const callStatus = payload.callStatus ?? payload.CallStatus ?? 0;
+    
+    return {
+      callDto: {
+        id: callId,
+        chatId: payload.chatId ?? payload.ChatId ?? 0,
+        callerPersonId: payload.callerPersonId ?? payload.CallerPersonId ?? 0,
+        type: payload.type ?? payload.Type ?? CallType.Audio,
+        status: callStatus,
+        startedAt: payload.startedAt ?? payload.StartedAt ?? new Date().toISOString(),
+        endedAt: (callStatus === CallStatus.Ended || callStatus === CallStatus.Rejected || callStatus === CallStatus.Missed) ? new Date().toISOString() : undefined,
+        participants: []
+      },
+      isLegacy: true,
+      legacyData: { callId, personId, participantStatus, callStatus }
+    };
+  }
+}
+
 export default function App() {
   const [devices, setDevices] = React.useState<Device[]>([]);
   const [scenes, setScenes] = React.useState<Scene[]>([]);
@@ -1753,7 +2119,13 @@ export default function App() {
             type: 'camera',
             status: isPropActive(item) ? 'active' : 'inactive',
             room: roomStr,
-            section: sectionStr
+            section: sectionStr,
+            liveStreamUrl: item.liveStreamUrl || item.streamPath || item.url,
+            streamPath: item.streamPath,
+            ipAddress: item.ipAddress,
+            username: item.username,
+            password: item.password,
+            port: item.port
           } as Device;
         }
         if (type === 'door') {
@@ -1804,6 +2176,8 @@ export default function App() {
   const [selectedLog, setSelectedLog] = React.useState<GetLogDto | null>(null);
   const [isViewLogOpen, setIsViewLogOpen] = React.useState<boolean>(false);
   const loaderRef = React.useRef<HTMLDivElement>(null);
+  const callLogsLoaderRef = React.useRef<HTMLDivElement>(null);
+  const sideCallLogsLoaderRef = React.useRef<HTMLDivElement>(null);
   const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
   const [globalFetching, setGlobalFetching] = React.useState(0);
 
@@ -1824,6 +2198,10 @@ export default function App() {
   const fetchedViewsRef = React.useRef<Record<string, boolean>>({});
   const [userDto, setUserDto] = React.useState<GetUserDto | null>(null);
   const [userProfile, setUserProfile] = React.useState<UserProfile | null>(null);
+  const userProfileRef = React.useRef<UserProfile | null>(null);
+  React.useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
 
   // Auto-login removed as requested to ensure no requests run before explicit login success
   React.useEffect(() => {
@@ -2038,13 +2416,31 @@ export default function App() {
   // Pre-select room/section when opening Add Device dialog
   React.useEffect(() => {
     if (isAddDeviceOpen) {
+      let initialRoom = '';
+      let initialSection = '';
+      
       if (activeView.startsWith('room-')) {
-        const roomId = activeView.replace('room-', '');
-        const room = (rooms || []).find(r => r.id.toString() === roomId.toString());
-        setNewDevice(prev => ({ ...prev, room: roomId, section: room?.section || '' }));
+        initialRoom = activeView.replace('room-', '');
+        const room = (rooms || []).find(r => r.id.toString() === initialRoom.toString());
+        initialSection = room?.section || '';
       } else if (activeView === 'user-room') {
-        setNewDevice(prev => ({ ...prev, room: 'bedroom', section: 'indoor' }));
+        initialRoom = 'bedroom';
+        initialSection = 'indoor';
       }
+
+      setNewDevice({
+        name: '',
+        type: 'light',
+        room: initialRoom,
+        section: initialSection,
+        doorType: 1,
+        ipAddress: '',
+        username: '',
+        password: '',
+        streamPath: '',
+        port: 80,
+        applianceType: 1
+      });
     }
   }, [isAddDeviceOpen, activeView, rooms]);
 
@@ -2888,10 +3284,659 @@ export default function App() {
   const [modalCurrentTime, setModalCurrentTime] = React.useState(new Date());
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
+  const [isRestartingCamera, setIsRestartingCamera] = React.useState(false);
   const [isScreensaverOpen, setIsScreensaverOpen] = React.useState(false);
   const videoContainerRef = React.useRef<HTMLDivElement>(null);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const inactivityTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Call-related States
+  const [activeCall, setActiveCall] = React.useState<CallDto | null>(null);
+  const [isCallModalOpen, setIsCallModalOpen] = React.useState(false);
+  const [isIncomingCall, setIsIncomingCall] = React.useState(false);
+  const [isCallMuted, setIsCallMuted] = React.useState(false);
+  const [isCallCameraEnabled, setIsCallCameraEnabled] = React.useState(false);
+  const [isCallScreenSharing, setIsCallScreenSharing] = React.useState(false);
+  const [isCallSpeakerEnabled, setIsCallSpeakerEnabled] = React.useState(false);
+  const [callLogs, setCallLogs] = React.useState<CallLogDto[]>([]);
+  const [isCallLogsOpen, setIsCallLogsOpen] = React.useState(false);
+  const [isCallLogsLoading, setIsCallLogsLoading] = React.useState(false);
+  const [hasLoadedCallLogs, setHasLoadedCallLogs] = React.useState(false);
+  const [callLogPage, setCallLogPage] = React.useState<number>(1);
+  const [hasMoreCallLogs, setHasMoreCallLogs] = React.useState<boolean>(true);
+  const [isFetchingMoreCallLogs, setIsFetchingMoreCallLogs] = React.useState<boolean>(false);
+  const [callLogFilter, setCallLogFilter] = React.useState<'all' | 'missed' | 'received' | 'rejected' | 'outgoing'>('all');
+  const [callLogSort, setCallLogSort] = React.useState<'newest' | 'oldest' | 'duration' | 'type_video' | 'type_voice'>('newest');
+
+  const [isChatCallHistoryOpen, setIsChatCallHistoryOpen] = React.useState(true);
+
+  const getUserCallStatus = React.useCallback((log: CallLogDto, userId?: number) => {
+    if (!userId) return 'missed';
+
+    const rawCallerId = log.callerPersonId ?? (log as any).CallerPersonId;
+    const rawIsIncoming = log.isIncoming ?? (log as any).IsIncoming;
+
+    // 1. Check if the call was initiated by the logged in user
+    const isCaller = (rawCallerId !== undefined && rawCallerId !== null && Number(rawCallerId) === Number(userId)) || rawIsIncoming === false;
+    if (isCaller) {
+      return 'outgoing';
+    }
+
+    // 2. Call was NOT initiated by the user (Incoming Call)
+    const rawStatus = log.status ?? (log as any).Status;
+    const rawEndedAt = log.endedAt ?? (log as any).EndedAt;
+
+    const isCallEnded = rawStatus === CallStatus.Ended || rawStatus === 3 || rawStatus === '3' ||
+      (typeof rawStatus === 'string' && rawStatus.toLowerCase() === 'ended') ||
+      rawStatus === CallStatus.Missed || rawStatus === CallStatus.Rejected || rawStatus === CallStatus.TimedOut ||
+      !!rawEndedAt;
+
+    const participantsList = log.participants || (log as any).Participants || [];
+    const userParticipant = participantsList.find((p: any) => {
+      const pId = p.personId ?? p.PersonId;
+      return pId !== undefined && pId !== null && Number(pId) === Number(userId);
+    });
+
+    const pStatus = userParticipant ? (userParticipant.status ?? userParticipant.Status) : undefined;
+
+    const isLeftOrConnected = (s: any) => {
+      if (s === undefined || s === null) return false;
+      if (s === CallParticipantStatus.Connected || s === CallParticipantStatus.Left) return true;
+      if (s === 1 || s === 3 || s === '1' || s === '3') return true;
+      if (typeof s === 'string') {
+        const lower = s.toLowerCase();
+        return lower === 'connected' || lower === 'left' || lower === 'joined';
+      }
+      return false;
+    };
+
+    const isRingingStatus = (s: any) => {
+      if (s === undefined || s === null) return false;
+      if (s === CallParticipantStatus.Ringing || s === 0 || s === '0') return true;
+      if (typeof s === 'string' && s.toLowerCase() === 'ringing') return true;
+      return false;
+    };
+
+    const isDeclinedOrRejected = (s: any) => {
+      if (s === undefined || s === null) return false;
+      if (s === CallParticipantStatus.Declined || s === 2 || s === '2') return true;
+      if (typeof s === 'string' && s.toLowerCase() === 'declined') return true;
+      return false;
+    };
+
+    // Check if duration is non-zero (e.g., "00:01:23")
+    const hasNonZeroDuration = (() => {
+      if (log.duration && typeof log.duration === 'string' && log.duration.trim() !== '') {
+        const parts = log.duration.split(':');
+        if (parts.length >= 2) {
+          const totalSecs = parts.reduce((acc, time) => (60 * acc) + (+time || 0), 0);
+          return totalSecs > 0;
+        }
+      }
+      return false;
+    })();
+
+    const userIsLeftOrConnected = (userParticipant && isLeftOrConnected(pStatus)) ||
+      !!(log.answeredAt ?? (log as any).AnsweredAt) ||
+      hasNonZeroDuration ||
+      log.isMissed === false;
+
+    // Active ringing call check
+    if (!isCallEnded && userParticipant && isRingingStatus(pStatus)) {
+      return 'ringing';
+    }
+
+    // Rejection check
+    if (rawStatus === CallStatus.Rejected || (userParticipant && isDeclinedOrRejected(pStatus))) {
+      return 'rejected';
+    }
+
+    // When call status is ended and user status is Left/Connected (or answered):
+    // Call is marked as RECEIVED (falls under received badge)
+    // Else: marked as MISSED
+    if (isCallEnded) {
+      if (userIsLeftOrConnected) {
+        return 'received';
+      }
+      return 'missed';
+    }
+
+    // Ongoing call where user joined
+    if (userIsLeftOrConnected) {
+      return 'received';
+    }
+
+    return 'missed';
+  }, []);
+
+  const filteredAndSortedCallLogs = React.useMemo(() => {
+    if (!callLogs) return [];
+    
+    let result = [...callLogs];
+
+    if (callLogFilter !== 'all') {
+      result = result.filter(log => {
+        const userStatus = getUserCallStatus(log, userProfile?.id);
+        if (callLogFilter === 'missed') return userStatus === 'missed';
+        if (callLogFilter === 'received') return userStatus === 'received';
+        if (callLogFilter === 'rejected') return userStatus === 'rejected';
+        if (callLogFilter === 'outgoing') return userStatus === 'outgoing';
+        return true;
+      });
+    }
+
+    result.sort((a, b) => {
+      if (callLogSort === 'oldest') {
+        return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+      }
+      if (callLogSort === 'duration') {
+        const getSec = (log: CallLogDto) => {
+          if (!log.startedAt || !log.endedAt) return 0;
+          return (new Date(log.endedAt).getTime() - new Date(log.startedAt).getTime()) / 1000;
+        };
+        return getSec(b) - getSec(a);
+      }
+      if (callLogSort === 'type_video') {
+        if (a.type !== b.type) {
+          return (b.type === CallType.Video ? 1 : 0) - (a.type === CallType.Video ? 1 : 0);
+        }
+        return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+      }
+      if (callLogSort === 'type_voice') {
+        if (a.type !== b.type) {
+          return (b.type === CallType.Audio ? 1 : 0) - (a.type === CallType.Audio ? 1 : 0);
+        }
+        return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+      }
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    });
+
+    return result;
+  }, [callLogs, callLogFilter, callLogSort, userProfile?.id, getUserCallStatus]);
+
+  const callLogCounts = React.useMemo(() => {
+    const counts = { all: callLogs.length, missed: 0, received: 0, rejected: 0, outgoing: 0 };
+    callLogs.forEach(log => {
+      const userStatus = getUserCallStatus(log, userProfile?.id);
+      if (userStatus === 'missed') counts.missed++;
+      else if (userStatus === 'rejected') counts.rejected++;
+      else if (userStatus === 'received') counts.received++;
+      else if (userStatus === 'outgoing') counts.outgoing++;
+    });
+    return counts;
+  }, [callLogs, userProfile?.id, getUserCallStatus]);
+
+  // Live Ticker for call durations & real-time updates (updates every 1000ms)
+  const [liveTimestamp, setLiveTimestamp] = React.useState<number>(Date.now());
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setLiveTimestamp(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Call Duration Timer
+  const [callDurationSeconds, setCallDurationSeconds] = React.useState(0);
+  React.useEffect(() => {
+    if (!activeCall) {
+      setCallDurationSeconds(0);
+      return;
+    }
+    const isCallEnded = activeCall.status === CallStatus.Ended || 
+                        activeCall.status === CallStatus.Rejected || 
+                        activeCall.status === CallStatus.Missed || 
+                        activeCall.status === CallStatus.TimedOut || 
+                        !!activeCall.endedAt;
+
+    const startMs = parseTimestamp(activeCall.answeredAt || activeCall.startedAt);
+    const endMs = isCallEnded 
+      ? parseTimestamp(activeCall.endedAt || activeCall.answeredAt || activeCall.startedAt) 
+      : liveTimestamp;
+    const secs = Math.max(0, Math.floor((endMs - startMs) / 1000));
+    setCallDurationSeconds(secs);
+  }, [activeCall, activeCall?.status, activeCall?.startedAt, activeCall?.answeredAt, activeCall?.endedAt, liveTimestamp]);
+
+  const formatCallTimer = React.useCallback((totalSeconds: number) => {
+    if (isNaN(totalSeconds) || totalSeconds < 0) totalSeconds = 0;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    const pad = (num: number) => num.toString().padStart(2, '0');
+    if (hours > 0) {
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    }
+    return `${pad(minutes)}:${pad(seconds)}`;
+  }, []);
+
+  // WebRTC Peer Connection and signaling handlers
+  const pcRef = React.useRef<RTCPeerConnection | null>(null);
+
+  const cleanupPeerConnection = React.useCallback(() => {
+    if (pcRef.current) {
+      console.log("Cleaning up RTCPeerConnection");
+      pcRef.current.onicecandidate = null;
+      pcRef.current.ontrack = null;
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!activeCall) {
+      cleanupPeerConnection();
+    }
+    return () => {
+      cleanupPeerConnection();
+    };
+  }, [activeCall, cleanupPeerConnection]);
+
+  const initPeerConnection = React.useCallback((callId: number, chatId: number) => {
+    console.log("Initializing RTCPeerConnection for call", callId, chatId);
+    if (pcRef.current) {
+      cleanupPeerConnection();
+    }
+    
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+    });
+    
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const conn = signalRConnectionRef.current;
+        if (conn && conn.state === "Connected") {
+          const token = localStorage.getItem('token') || '';
+          const currentUserId = userProfileRef.current?.id || 0;
+          const iceDto: IceCandidateDto = {
+            callId,
+            chatId,
+            personId: currentUserId,
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid || undefined,
+            sdpMLineIndex: event.candidate.sdpMLineIndex !== null ? event.candidate.sdpMLineIndex : undefined
+          };
+          conn.invoke("IceCandidate", iceDto, token).catch(err => {
+            console.error("Failed to send IceCandidate via SignalR", err);
+          });
+        }
+      }
+    };
+    
+    pc.oniceconnectionstatechange = () => {
+      console.log("ICE Connection State changed:", pc.iceConnectionState);
+    };
+    
+    pcRef.current = pc;
+    return pc;
+  }, [cleanupPeerConnection]);
+
+  const handleOfferEvent = React.useCallback(async (dto: OfferDto) => {
+    if (!dto) return;
+    const currentUserId = userProfileRef.current?.id;
+    const senderId = dto.personId ?? dto.PersonId;
+    if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("Ignoring own Offer signaling event", dto);
+      return;
+    }
+    
+    console.log("Processing Offer signaling event", dto);
+    try {
+      const sdpStr = dto.sdp || dto.Sdp || "";
+      if (!sdpStr) return;
+      
+      // Initialize connection if not already created
+      if (!pcRef.current) {
+        initPeerConnection(dto.callId ?? dto.CallId ?? 0, dto.chatId ?? dto.ChatId ?? 0);
+      }
+      
+      const pc = pcRef.current;
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription({
+          type: 'offer',
+          sdp: sdpStr
+        }));
+        
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        
+        const conn = signalRConnectionRef.current;
+        if (conn && conn.state === "Connected") {
+          const token = localStorage.getItem('token') || '';
+          const answerDto: AnswerDto = {
+            callId: dto.callId ?? dto.CallId ?? 0,
+            chatId: dto.chatId ?? dto.ChatId ?? 0,
+            personId: currentUserId || 0,
+            sdp: answer.sdp || ""
+          };
+          await conn.invoke("Answer", answerDto, token);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to handle offer event", err);
+    }
+  }, [initPeerConnection]);
+
+  const handleAnswerEvent = React.useCallback(async (dto: AnswerDto) => {
+    if (!dto) return;
+    const currentUserId = userProfileRef.current?.id;
+    const senderId = dto.personId ?? dto.PersonId;
+    if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("Ignoring own Answer signaling event", dto);
+      return;
+    }
+    
+    console.log("Processing Answer signaling event", dto);
+    try {
+      const sdpStr = dto.sdp || dto.Sdp || "";
+      if (!sdpStr) return;
+      
+      const pc = pcRef.current;
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription({
+          type: 'answer',
+          sdp: sdpStr
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to handle answer event", err);
+    }
+  }, []);
+
+  const handleIceCandidateEvent = React.useCallback(async (dto: IceCandidateDto) => {
+    if (!dto) return;
+    const currentUserId = userProfileRef.current?.id;
+    const senderId = dto.personId ?? dto.PersonId;
+    if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("Ignoring own IceCandidate signaling event", dto);
+      return;
+    }
+    
+    console.log("Processing IceCandidate signaling event", dto);
+    try {
+      const candidateStr = dto.candidate || dto.Candidate || "";
+      if (!candidateStr) return;
+      
+      const pc = pcRef.current;
+      if (pc) {
+        await pc.addIceCandidate(new RTCIceCandidate({
+          candidate: candidateStr,
+          sdpMid: dto.sdpMid || dto.SdpMid || undefined,
+          sdpMLineIndex: dto.sdpMLineIndex ?? dto.SdpMLineIndex ?? undefined
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to handle IceCandidate event", err);
+    }
+  }, []);
+
+  const handleToggleCallItemsEvent = React.useCallback((dto: ToggleCallItemsDto) => {
+    if (!dto) return;
+    const currentUserId = userProfileRef.current?.id;
+    const senderId = dto.personId ?? dto.PersonId;
+    if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("Ignoring own ToggleCallItems signaling event", dto);
+      return;
+    }
+    
+    console.log("Processing ToggleCallItems signaling event", dto);
+    
+    const callId = dto.callId ?? dto.CallId;
+    const isMuted = dto.isMuted ?? dto.IsMuted ?? false;
+    const isCameraEnabled = dto.isCameraEnabled ?? dto.IsCameraEnabled ?? false;
+    const isSharing = dto.isSharing ?? dto.IsSharing ?? false;
+    
+    setActiveCall(prev => {
+      if (!prev || prev.id !== callId) return prev;
+      
+      return {
+        ...prev,
+        participants: prev.participants.map(p => {
+          if (p.personId === senderId) {
+            return {
+              ...p,
+              isMuted,
+              isCameraEnabled,
+              isScreenSharing: isSharing
+            };
+          }
+          return p;
+        })
+      };
+    });
+  }, []);
+
+  const handleCallStatusUpdate = React.useCallback((eventName: "IncomingCall" | "CallAccepted" | "CallRejected" | "CallEnded" | "CallTimedOut" | "ParticipantLeft", payload: any) => {
+    if (!payload) return;
+    
+    const { callDto, isLegacy, legacyData } = parseCallUpdate(payload);
+    const currentUserId = userProfileRef.current?.id ?? 0;
+    
+    console.log(`=== SIGNALR DIAGNOSTIC: handleCallStatusUpdate [${eventName}] ===`, { callDto, isLegacy, legacyData, currentUserId });
+    
+    // 1. Update activeCall state
+    if (eventName === "IncomingCall") {
+      setActiveCall(callDto);
+      setIsIncomingCall(true);
+      setIsCallModalOpen(true);
+      setIsScreensaverOpen(false);
+      setIsCallMuted(false);
+      setIsCallCameraEnabled(callDto.type === CallType.Video);
+      setIsCallScreenSharing(false);
+      toast.info(`Incoming ${callDto.type === CallType.Video ? 'video' : 'voice'} call...`);
+    } else if (eventName === "CallAccepted") {
+      setActiveCall(callDto);
+      setIsIncomingCall(false);
+      toast.success("Call answered");
+
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        const token = localStorage.getItem('token') || '';
+        const currentUserId = userProfileRef.current?.id || 0;
+        
+        (async () => {
+          try {
+            let pc = pcRef.current;
+            if (!pc) {
+              pc = initPeerConnection(callDto.id, callDto.chatId);
+              pc.createDataChannel("signaling");
+            }
+            if (!pc.localDescription) {
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              const offerDto: OfferDto = {
+                callId: callDto.id,
+                CallId: callDto.id,
+                chatId: callDto.chatId,
+                ChatId: callDto.chatId,
+                personId: currentUserId,
+                PersonId: currentUserId,
+                sdp: offer.sdp || "",
+                Sdp: offer.sdp || ""
+              };
+              await conn.invoke("Offer", offerDto, token);
+            }
+
+            const toggleDto: ToggleCallItemsDto = {
+              callId: callDto.id,
+              chatId: callDto.chatId,
+              personId: currentUserId,
+              isMuted: isCallMuted,
+              isCameraEnabled: isCallCameraEnabled,
+              isSharing: isCallScreenSharing,
+              CallId: callDto.id,
+              ChatId: callDto.chatId,
+              PersonId: currentUserId,
+              IsMuted: isCallMuted,
+              IsCameraEnabled: isCallCameraEnabled,
+              IsSharing: isCallScreenSharing
+            };
+            await conn.invoke("ToggleCallItems", toggleDto, token);
+          } catch (err) {
+            console.warn("Error invoking Offer/ToggleCallItems on CallAccepted event:", err);
+          }
+        })();
+      }
+    } else if (eventName === "CallRejected" || eventName === "ParticipantLeft") {
+      if (isLegacy && legacyData) {
+        const data = legacyData;
+        setActiveCall(prev => {
+          if (!prev || prev.id !== data.callId) return prev;
+          if (data.callStatus === CallStatus.Ended || data.callStatus === CallStatus.Rejected) {
+            setIsCallModalOpen(false);
+            setIsCallCameraEnabled(false);
+            toast.info("Call ended/rejected");
+            return null;
+          }
+          toast.info("A participant left the call");
+          return {
+            ...prev,
+            status: data.callStatus,
+            participants: prev.participants.map(p => 
+              p.personId === data.personId ? { ...p, status: data.status } : p
+            )
+          };
+        });
+      } else {
+        // It's a full CallDto
+        setActiveCall(prev => {
+          if (!prev || prev.id !== callDto.id) return prev;
+          
+          // If overall status is ended/rejected, or if current user declined/left, close call modal
+          const isUserActive = callDto.participants?.some(p => p.personId === currentUserId && (p.status === CallParticipantStatus.Connected || p.status === CallParticipantStatus.Ringing));
+          if (callDto.status === CallStatus.Ended || callDto.status === CallStatus.Rejected || !isUserActive) {
+            setIsCallModalOpen(false);
+            setIsCallCameraEnabled(false);
+            toast.info("Call ended/rejected");
+            return null;
+          }
+          toast.info("A participant left the call");
+          return callDto;
+        });
+      }
+    } else if (eventName === "CallEnded") {
+      if (isLegacy && legacyData) {
+        const data = legacyData;
+        setActiveCall(prev => {
+          if (!prev || prev.id !== data.callId) return prev;
+          setIsCallModalOpen(false);
+          setIsCallCameraEnabled(false);
+          toast.info("Call ended");
+          return null;
+        });
+      } else {
+        // It's a full CallDto
+        setActiveCall(prev => {
+          if (!prev || prev.id !== callDto.id) return prev;
+          setIsCallModalOpen(false);
+          setIsCallCameraEnabled(false);
+          toast.info("Call ended");
+          return null;
+        });
+      }
+    } else if (eventName === "CallTimedOut") {
+      setIsCallModalOpen(false);
+      setIsIncomingCall(false);
+      setIsCallCameraEnabled(false);
+      
+      const targetStatus = CallStatus.Missed;
+      callDto.status = targetStatus;
+      if (isLegacy && legacyData) {
+        legacyData.callStatus = targetStatus;
+      }
+      
+      setActiveCall(prev => {
+        if (!prev || prev.id !== callDto.id) return prev;
+        toast.info("Call timed out / missed");
+        return null;
+      });
+    }
+
+    // 2. Update callLogs history list!
+    setCallLogs(prev => {
+      // Find matching log by callId or id
+      const targetCallId = callDto.id;
+      const existingIndex = prev.findIndex(log => log.callId === targetCallId || log.id === targetCallId);
+      
+      // We need chatName for CallLogDto
+      const logChat = chatsRef.current.find(c => c.id === callDto.chatId);
+      const chatName = logChat ? getChatDisplayName(logChat) : `Call #${targetCallId}`;
+      
+      if (existingIndex > -1) {
+        // Update existing log
+        const updated = [...prev];
+        const existing = prev[existingIndex];
+        
+        // Merge properties
+        const updatedStatus = isLegacy && legacyData ? legacyData.callStatus : callDto.status;
+        const isEndedStatus = updatedStatus === CallStatus.Ended || 
+                              updatedStatus === CallStatus.Rejected || 
+                              updatedStatus === CallStatus.Missed || 
+                              updatedStatus === CallStatus.TimedOut;
+
+        const updatedEndedAt = (isLegacy && legacyData) ? 
+          ((legacyData.callStatus === CallStatus.Ended || legacyData.callStatus === CallStatus.Rejected) ? (existing.endedAt || new Date().toISOString()) : existing.endedAt) 
+          : (callDto.endedAt || (isEndedStatus ? (existing.endedAt || new Date().toISOString()) : existing.endedAt));
+        
+        // Calculate duration
+        const startStr = callDto.startedAt || existing.startedAt;
+        const duration = formatCallDuration(startStr, updatedEndedAt);
+
+        // Merge participants
+        let mergedParticipants = existing.participants || [];
+        if (!isLegacy && callDto.participants && callDto.participants.length > 0) {
+          mergedParticipants = callDto.participants.map(p => ({
+            personId: p.personId,
+            fullName: p.fullName,
+            profileImage: p.profileImage,
+            status: p.status,
+            isMuted: p.isMuted,
+            isCameraEnabled: p.isCameraEnabled,
+            isScreenSharing: p.isScreenSharing
+          }));
+        } else if (isLegacy && legacyData) {
+          // Update specific participant status
+          mergedParticipants = mergedParticipants.map(p => 
+            p.personId === legacyData.personId ? { ...p, status: legacyData.status } : p
+          );
+        }
+
+        const isIncoming = callDto.callerPersonId ? (callDto.callerPersonId !== currentUserId) : existing.isIncoming;
+        const userParticipant = mergedParticipants?.find(p => p.personId === currentUserId);
+        const isMissed = updatedStatus === CallStatus.Missed || 
+                         (isIncoming && updatedStatus === CallStatus.Rejected) || 
+                         (userParticipant?.status === CallParticipantStatus.Missed);
+
+        updated[existingIndex] = {
+          ...existing,
+          status: updatedStatus,
+          endedAt: updatedEndedAt,
+          duration: duration,
+          participants: mergedParticipants,
+          isIncoming,
+          isMissed
+        };
+        
+        return updated;
+      } else {
+        // Add new log to the top of the history list
+        const newLog = mapCallDtoToCallLogDto(callDto, currentUserId, chatName);
+        // Ensure we set status properly if legacy
+        if (isLegacy && legacyData) {
+          newLog.status = legacyData.callStatus;
+        }
+        return [
+          {
+            ...newLog,
+            id: targetCallId
+          },
+          ...prev
+        ];
+      }
+    });
+  }, []);
 
   // Inactivity Logic
   const resetInactivityTimer = React.useCallback(() => {
@@ -3123,6 +4168,9 @@ export default function App() {
   const activeChatIdRef = React.useRef<number | null>(null);
   React.useEffect(() => {
     activeChatIdRef.current = activeChatId;
+    if (activeChatId) {
+      setIsCallLogsOpen(false);
+    }
   }, [activeChatId]);
 
   React.useEffect(() => {
@@ -3134,11 +4182,6 @@ export default function App() {
       });
     }
   }, [chatMessages]);
-
-  const userProfileRef = React.useRef<any>(null);
-  React.useEffect(() => {
-    userProfileRef.current = userProfile;
-  }, [userProfile]);
 
   const signalRConnectionRef = React.useRef<any>(null);
 
@@ -3256,6 +4299,11 @@ export default function App() {
   };
 
   const chatsRef = React.useRef<ChatDto[]>([]);
+  const callLogsRef = React.useRef<CallLogDto[]>([]);
+  React.useEffect(() => {
+    callLogsRef.current = callLogs;
+  }, [callLogs]);
+
   React.useEffect(() => {
     chatsRef.current = chats;
     const conn = signalRConnectionRef.current;
@@ -3278,6 +4326,480 @@ export default function App() {
       setActiveChatUnreadCount(0);
     }
   }, [activeChatId]);
+
+  // Call Actions
+  const handleStartCall = React.useCallback(async (chatId: number, type: CallType) => {
+    try {
+      const token = localStorage.getItem('token');
+      const payload: StartCallDto = { chatId, type };
+      const res = await apiFetch<any>('/Call/StartCall', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      console.log("StartCall Response:", res);
+      let callData: CallDto = res?.data ?? res;
+      if (callData && callData.id) {
+        const nowIso = new Date().toISOString();
+        const chatObj = chatsRef.current.find(c => c.id === chatId);
+        const currentUserId = userProfileRef.current?.id;
+
+        let participants = callData.participants || [];
+        if (chatObj && (!participants || participants.length === 0)) {
+          participants = (chatObj.participants || []).map(p => ({
+            personId: p.personId,
+            fullName: p.fullName || 'User',
+            profileImage: p.profileImageUrl || '',
+            isMuted: false,
+            isCameraEnabled: type === CallType.Video,
+            isScreenSharing: false,
+            status: p.personId === currentUserId ? CallParticipantStatus.Connected : CallParticipantStatus.Ringing
+          }));
+        } else {
+          participants = participants.map(p => ({
+            ...p,
+            status: p.personId === currentUserId ? CallParticipantStatus.Connected : (p.status ?? CallParticipantStatus.Ringing)
+          }));
+        }
+
+        callData = {
+          ...callData,
+          startedAt: callData.startedAt || nowIso,
+          participants
+        };
+
+        setActiveCall(callData);
+        setIsIncomingCall(false);
+        setIsCallMuted(false);
+        setIsCallCameraEnabled(type === CallType.Video);
+        setIsCallScreenSharing(false);
+        setIsCallModalOpen(true);
+        toast.success(`Outgoing ${type === CallType.Video ? 'video' : 'voice'} call started...`);
+      } else {
+        toast.error("Failed to start call");
+      }
+    } catch (err) {
+      console.error("Failed to start call", err);
+      toast.error("Failed to start call due to error");
+    }
+  }, []);
+
+  const handleEndCall = React.useCallback(async (callId: number) => {
+    try {
+      const nowIso = new Date().toISOString();
+      setCallLogs(prev => prev.map(log => {
+        if (log.callId === callId || log.id === callId) {
+          const endedAt = log.endedAt || nowIso;
+          return {
+            ...log,
+            status: CallStatus.Ended,
+            endedAt,
+            duration: formatCallDuration(log.startedAt, endedAt)
+          };
+        }
+        return log;
+      }));
+      const token = localStorage.getItem('token');
+      await apiFetch<any>(`/Call/EndCall?callId=${callId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: ''
+      });
+      setActiveCall(null);
+      setIsCallModalOpen(false);
+      setIsCallCameraEnabled(false);
+      toast.info("Call ended");
+    } catch (err) {
+      console.error("Failed to end call", err);
+      setActiveCall(null);
+      setIsCallModalOpen(false);
+      setIsCallCameraEnabled(false);
+    }
+  }, []);
+
+  const handleRejectCall = React.useCallback(async (callId: number, chatId: number) => {
+    try {
+      const nowIso = new Date().toISOString();
+      setCallLogs(prev => prev.map(log => {
+        if (log.callId === callId || log.id === callId) {
+          const endedAt = log.endedAt || nowIso;
+          return {
+            ...log,
+            status: CallStatus.Rejected,
+            endedAt,
+            duration: formatCallDuration(log.startedAt, endedAt)
+          };
+        }
+        return log;
+      }));
+      const token = localStorage.getItem('token') || '';
+      await apiFetch<any>(`/Call/RejectCall?callId=${callId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: ''
+      });
+      setActiveCall(null);
+      setIsCallModalOpen(false);
+      setIsCallCameraEnabled(false);
+      toast.info("Call rejected/left");
+    } catch (err) {
+      console.error("Failed to reject/leave call", err);
+      setActiveCall(null);
+      setIsCallModalOpen(false);
+      setIsCallCameraEnabled(false);
+    }
+  }, []);
+
+  const handleTerminateCall = React.useCallback(() => {
+    if (!activeCall) return;
+    if (activeCall.status === CallStatus.Connected) {
+      handleEndCall(activeCall.id);
+    } else {
+      if (activeCall.callerPersonId === userProfile?.id) {
+        handleEndCall(activeCall.id);
+      } else {
+        handleRejectCall(activeCall.id, activeCall.chatId);
+      }
+    }
+  }, [activeCall, handleEndCall, handleRejectCall, userProfile]);
+
+  const handleAcceptCall = React.useCallback(async (callId: number, chatId: number) => {
+    try {
+      const targetCall = callLogs.find(l => (l as any).callId === callId || l.id === callId) || (activeCall?.id === callId ? activeCall : null);
+      if (targetCall && getUserCallStatus(targetCall as any, userProfile?.id) === 'missed') {
+        toast.error("You cannot join a missed call.");
+        return;
+      }
+
+      const token = localStorage.getItem('token') || '';
+      
+      // Send accept call API request
+      try {
+        await apiFetch<any>(`/Call/AcceptCall?callId=${callId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: ''
+        });
+      } catch (apiErr) {
+        console.warn("Accept call API response warning:", apiErr);
+      }
+
+      // 1. Immediately open the Call Modal Card
+      setIsCallModalOpen(true);
+      setIsScreensaverOpen(false);
+      setIsIncomingCall(false);
+
+      const currentUserId = userProfileRef.current?.id || 0;
+      const callChat = chatsRef.current.find(c => c.id === chatId);
+      const targetLog = callLogsRef.current.find(l => l.callId === callId || (l as any).id === callId);
+
+      // 2. Set or update activeCall state
+      setActiveCall(prev => {
+        if (prev && prev.id === callId) {
+          const updatedParticipants = (prev.participants || []).map(p => 
+            p.personId === currentUserId ? { ...p, status: CallParticipantStatus.Connected } : p
+          );
+          if (!updatedParticipants.some(p => p.personId === currentUserId)) {
+            updatedParticipants.push({
+              personId: currentUserId,
+              fullName: userProfileRef.current?.getPersonDetailsDto?.firstName ? `${userProfileRef.current.getPersonDetailsDto.firstName} ${userProfileRef.current.getPersonDetailsDto.lastName || ''}`.trim() : 'You',
+              profileImage: userProfileRef.current?.getPersonDetailsDto?.imageUrl || '',
+              isMuted: false,
+              isCameraEnabled: false,
+              isScreenSharing: false,
+              status: CallParticipantStatus.Connected
+            });
+          }
+          return {
+            ...prev,
+            status: CallStatus.Connected,
+            answeredAt: prev.answeredAt || new Date().toISOString(),
+            participants: updatedParticipants
+          };
+        }
+
+        const callType = targetLog?.type ?? (targetLog as any)?.callType ?? CallType.Voice;
+        let participants: CallParticipantDto[] = (callChat?.participants || []).map(p => ({
+          personId: p.personId,
+          fullName: p.fullName || 'User',
+          profileImage: p.profileImageUrl || '',
+          isMuted: false,
+          isCameraEnabled: false,
+          isScreenSharing: false,
+          status: p.personId === currentUserId ? CallParticipantStatus.Connected : CallParticipantStatus.Ringing
+        }));
+
+        if (!participants.some(p => p.personId === currentUserId)) {
+          participants.push({
+            personId: currentUserId,
+            fullName: userProfileRef.current?.getPersonDetailsDto?.firstName ? `${userProfileRef.current.getPersonDetailsDto.firstName} ${userProfileRef.current.getPersonDetailsDto.lastName || ''}`.trim() : 'You',
+            profileImage: userProfileRef.current?.getPersonDetailsDto?.imageUrl || '',
+            isMuted: false,
+            isCameraEnabled: false,
+            isScreenSharing: false,
+            status: CallParticipantStatus.Connected
+          });
+        }
+
+        return {
+          id: callId,
+          chatId: chatId,
+          callerPersonId: targetLog?.callerPersonId || (callChat?.participants?.[0]?.personId ?? 0),
+          type: callType,
+          status: CallStatus.Connected,
+          startedAt: targetLog?.startedAt || new Date().toISOString(),
+          answeredAt: new Date().toISOString(),
+          endedAt: null,
+          participants
+        };
+      });
+
+      setIsCallMuted(false);
+      setIsCallScreenSharing(false);
+
+      // 3. Perform SignalR/WebRTC signaling safely
+      try {
+        const conn = signalRConnectionRef.current;
+        if (conn && conn.state === "Connected") {
+          const pc = initPeerConnection(callId, chatId);
+          pc.createDataChannel("signaling");
+          
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          
+          const offerDto: OfferDto = {
+            callId,
+            CallId: callId,
+            chatId,
+            ChatId: chatId,
+            personId: currentUserId,
+            PersonId: currentUserId,
+            sdp: offer.sdp || "",
+            Sdp: offer.sdp || ""
+          };
+          
+          await conn.invoke("Offer", offerDto, token);
+
+          const toggleCallItemsDto: ToggleCallItemsDto = {
+            callId,
+            chatId,
+            personId: currentUserId,
+            isMuted: false,
+            isCameraEnabled: false,
+            isSharing: false,
+            CallId: callId,
+            ChatId: chatId,
+            PersonId: currentUserId,
+            IsMuted: false,
+            IsCameraEnabled: false,
+            IsSharing: false
+          };
+          await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch(err => {
+            console.warn("Failed to invoke ToggleCallItems after accept call:", err);
+          });
+        }
+      } catch (webrtcErr) {
+        console.warn("WebRTC/SignalR offer warning during join call:", webrtcErr);
+      }
+
+      toast.success("Joined call");
+    } catch (err) {
+      console.error("Failed to accept call", err);
+      toast.error("Failed to accept call");
+    }
+  }, [initPeerConnection]);
+
+  const handleToggleCallMicrophone = React.useCallback(async () => {
+    if (!activeCall) return;
+    const nextMuted = !isCallMuted;
+    setIsCallMuted(nextMuted);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        await conn.invoke("ToggleMicrophone", { callId: activeCall.id, isMuted: nextMuted }, token);
+        
+        const toggleCallItemsDto: ToggleCallItemsDto = {
+          callId: activeCall.id,
+          chatId: activeCall.chatId,
+          personId: userProfileRef.current?.id || 0,
+          isMuted: nextMuted,
+          isCameraEnabled: isCallCameraEnabled,
+          isSharing: isCallScreenSharing,
+          CallId: activeCall.id,
+          ChatId: activeCall.chatId,
+          PersonId: userProfileRef.current?.id || 0,
+          IsMuted: nextMuted,
+          IsCameraEnabled: isCallCameraEnabled,
+          IsSharing: isCallScreenSharing
+        };
+        await conn.invoke("ToggleCallItems", toggleCallItemsDto, token);
+      }
+    } catch (err) {
+      console.warn("Failed to notify microphone toggle on server", err);
+    }
+  }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing]);
+
+  const handleToggleCallCamera = React.useCallback(async () => {
+    if (!activeCall) return;
+    const nextCam = !isCallCameraEnabled;
+    setIsCallCameraEnabled(nextCam);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        await conn.invoke("ToggleCamera", { callId: activeCall.id, isCameraEnabled: nextCam }, token);
+        
+        const toggleCallItemsDto: ToggleCallItemsDto = {
+          callId: activeCall.id,
+          chatId: activeCall.chatId,
+          personId: userProfileRef.current?.id || 0,
+          isMuted: isCallMuted,
+          isCameraEnabled: nextCam,
+          isSharing: isCallScreenSharing,
+          CallId: activeCall.id,
+          ChatId: activeCall.chatId,
+          PersonId: userProfileRef.current?.id || 0,
+          IsMuted: isCallMuted,
+          IsCameraEnabled: nextCam,
+          IsSharing: isCallScreenSharing
+        };
+        await conn.invoke("ToggleCallItems", toggleCallItemsDto, token);
+      }
+    } catch (err) {
+      console.warn("Failed to notify camera toggle on server", err);
+    }
+  }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing]);
+
+  const handleToggleCallScreenShare = React.useCallback(async () => {
+    if (!activeCall) return;
+    const nextShare = !isCallScreenSharing;
+    setIsCallScreenSharing(nextShare);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        await conn.invoke("ScreenShare", { callId: activeCall.id, isSharing: nextShare }, token);
+        
+        const toggleCallItemsDto: ToggleCallItemsDto = {
+          callId: activeCall.id,
+          chatId: activeCall.chatId,
+          personId: userProfileRef.current?.id || 0,
+          isMuted: isCallMuted,
+          isCameraEnabled: isCallCameraEnabled,
+          isSharing: nextShare,
+          CallId: activeCall.id,
+          ChatId: activeCall.chatId,
+          PersonId: userProfileRef.current?.id || 0,
+          IsMuted: isCallMuted,
+          IsCameraEnabled: isCallCameraEnabled,
+          IsSharing: nextShare
+        };
+        await conn.invoke("ToggleCallItems", toggleCallItemsDto, token);
+      }
+    } catch (err) {
+      console.warn("Failed to notify screen share toggle on server", err);
+    }
+  }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing]);
+
+  const handleToggleCallSpeaker = React.useCallback(() => {
+    if (!activeCall) return;
+    setIsCallSpeakerEnabled(prev => !prev);
+  }, [activeCall]);
+
+  const fetchCallLogs = React.useCallback(async (force = false) => {
+    if (hasLoadedCallLogs && !force) return;
+    setIsCallLogsLoading(true);
+    setCallLogPage(1);
+    setHasMoreCallLogs(true);
+    try {
+       const token = localStorage.getItem('token');
+       const res = await apiFetch<any>('/Call/GetCallLogs?page=1&pageSize=50', { 
+         method: 'GET',
+         headers: {
+           'Authorization': `Bearer ${token}`
+         }
+       });
+       const rawData = (res && res.data && Array.isArray(res.data)) ? res.data : (Array.isArray(res) ? res : []);
+       const formatted = rawData.map((log: any) => {
+         const uStatus = getUserCallStatus(log, userProfile?.id);
+         const isMissed = uStatus === 'missed' || uStatus === 'rejected' || log.status === CallStatus.Missed;
+         return {
+           ...log,
+           duration: isMissed ? "0s" : formatCallDuration(log.startedAt, log.endedAt, log.answeredAt)
+         };
+       });
+       setCallLogs(formatted);
+       setHasLoadedCallLogs(true);
+       if (rawData.length < 50) {
+         setHasMoreCallLogs(false);
+       }
+     } catch (err) {
+       console.error("Failed to load call logs", err);
+       setCallLogs([]);
+     } finally {
+       setIsCallLogsLoading(false);
+     }
+  }, [hasLoadedCallLogs, getUserCallStatus, userProfile?.id]);
+
+  const fetchMoreCallLogs = React.useCallback(async () => {
+    if (isFetchingMoreCallLogs || !hasMoreCallLogs || isCallLogsLoading) return;
+    setIsFetchingMoreCallLogs(true);
+    try {
+      const token = localStorage.getItem('token');
+      const nextPage = callLogPage + 1;
+      const res = await apiFetch<any>(`/Call/GetCallLogs?page=${nextPage}&pageSize=50`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const rawData = (res && res.data && Array.isArray(res.data)) ? res.data : (Array.isArray(res) ? res : []);
+      const formatted = rawData.map((log: any) => {
+        const uStatus = getUserCallStatus(log, userProfile?.id);
+        const isMissed = uStatus === 'missed' || uStatus === 'rejected' || log.status === CallStatus.Missed;
+        return {
+          ...log,
+          duration: isMissed ? "0s" : formatCallDuration(log.startedAt, log.endedAt, log.answeredAt)
+        };
+      });
+
+      if (formatted.length > 0) {
+        setCallLogs(prev => {
+          const existingKeys = new Set(prev.map(l => l.id || l.callId));
+          const newUnique = formatted.filter((l: any) => !existingKeys.has(l.id || l.callId));
+          return [...prev, ...newUnique];
+        });
+        setCallLogPage(nextPage);
+      }
+
+      if (rawData.length < 50) {
+        setHasMoreCallLogs(false);
+      }
+    } catch (err) {
+      console.error("Failed to load more call logs", err);
+    } finally {
+      setIsFetchingMoreCallLogs(false);
+    }
+  }, [callLogPage, hasMoreCallLogs, isFetchingMoreCallLogs, isCallLogsLoading, getUserCallStatus, userProfile?.id]);
+
+  const handleCallLogsScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 150) {
+      if (hasMoreCallLogs && !isFetchingMoreCallLogs && !isCallLogsLoading) {
+        fetchMoreCallLogs();
+      }
+    }
+  }, [hasMoreCallLogs, isFetchingMoreCallLogs, isCallLogsLoading, fetchMoreCallLogs]);
 
   const loadMyChats = async (force = false) => {
     if (hasLoadedChats && !force) return;
@@ -4042,6 +5564,26 @@ export default function App() {
               .catch(err => console.warn(`Failed to join chat ${chat.id} from UpdateChat:`, err));
           }
         }
+      } else if (eventName === "IncomingCall") {
+        handleCallStatusUpdate("IncomingCall", payload);
+      } else if (eventName === "CallAccepted") {
+        handleCallStatusUpdate("CallAccepted", payload);
+      } else if (eventName === "CallRejected") {
+        handleCallStatusUpdate("CallRejected", payload);
+      } else if (eventName === "CallEnded") {
+        handleCallStatusUpdate("CallEnded", payload);
+      } else if (eventName === "CallTimedOut") {
+        handleCallStatusUpdate("CallTimedOut", payload);
+      } else if (eventName === "ParticipantLeft") {
+        handleCallStatusUpdate("ParticipantLeft", payload);
+      } else if (eventName === "Offer") {
+        handleOfferEvent(payload);
+      } else if (eventName === "Answer") {
+        handleAnswerEvent(payload);
+      } else if (eventName === "IceCandidate") {
+        handleIceCandidateEvent(payload);
+      } else if (eventName === "ToggleCallItems") {
+        handleToggleCallItemsEvent(payload);
       } else if (eventName === "MessageDeleted" || (payload && (payload.messageId ?? payload.MessageId))) {
         const cid = payload?.chatId ?? payload?.ChatId;
         const mid = payload?.messageId ?? payload?.MessageId;
@@ -4055,6 +5597,47 @@ export default function App() {
           return c;
         }));
       }
+    });
+
+    // Also bind separate call handlers directly for safety
+    hs.on("IncomingCall", (callDto: any) => {
+      handleCallStatusUpdate("IncomingCall", callDto);
+    });
+
+    hs.on("CallAccepted", (callDto: any) => {
+      handleCallStatusUpdate("CallAccepted", callDto);
+    });
+
+    hs.on("CallRejected", (data: any) => {
+      handleCallStatusUpdate("CallRejected", data);
+    });
+
+    hs.on("CallEnded", (data: any) => {
+      handleCallStatusUpdate("CallEnded", data);
+    });
+
+    hs.on("CallTimedOut", (data: any) => {
+      handleCallStatusUpdate("CallTimedOut", data);
+    });
+
+    hs.on("ParticipantLeft", (data: any) => {
+      handleCallStatusUpdate("ParticipantLeft", data);
+    });
+
+    hs.on("Offer", (offerDto: any) => {
+      handleOfferEvent(offerDto);
+    });
+
+    hs.on("Answer", (answerDto: any) => {
+      handleAnswerEvent(answerDto);
+    });
+
+    hs.on("IceCandidate", (iceDto: any) => {
+      handleIceCandidateEvent(iceDto);
+    });
+
+    hs.on("ToggleCallItems", (dto: any) => {
+      handleToggleCallItemsEvent(dto);
     });
 
     const onUserTyping = (dto: any) => {
@@ -4249,6 +5832,35 @@ export default function App() {
       setAllUsers(prev => prev.map(u => u.id === personId ? { ...u, isOnline: false } : u));
     });
 
+    hs.on("NewRecording", (data: any) => {
+      console.log("=== SIGNALR DIAGNOSTIC: NewRecording Received ===", data);
+      const recCameraId = data.cameraId ?? data.CameraId;
+      const recFilePath = data.filePath ?? data.FilePath;
+      const recStartTime = data.startTime ?? data.StartTime;
+      const recEndTime = data.endTime ?? data.EndTime;
+      
+      if (recCameraId !== undefined && recCameraId !== null) {
+        setCameras(prev => prev.map(c => {
+          if (c.id.toString() === recCameraId.toString()) {
+            const exists = c.recordings?.some(r => r.filePath === recFilePath);
+            if (!exists) {
+              const newRec: GetRecordingDto = {
+                filePath: recFilePath,
+                startTime: recStartTime,
+                endTime: recEndTime
+              };
+              return {
+                ...c,
+                recordings: [newRec, ...(c.recordings || [])]
+              };
+            }
+          }
+          return c;
+        }));
+        toast.info(`New recording received for camera ${recCameraId}`);
+      }
+    });
+
     return () => {
        hs.off("ActionCreated");
        hs.off("ActionUpdated");
@@ -4269,6 +5881,7 @@ export default function App() {
        hs.off("CameraCreated");
        hs.off("CameraUpdated");
        hs.off("CameraDeleted");
+       hs.off("NewRecording");
        hs.off("fingerprint_received");
        hs.off("ExternalsCreated");
        hs.off("ExternalsUpdated");
@@ -4317,6 +5930,16 @@ export default function App() {
        hs.off("MessagesRead");
        hs.off("UserOnline");
        hs.off("UserOffline");
+       hs.off("IncomingCall");
+       hs.off("CallAccepted");
+       hs.off("CallRejected");
+       hs.off("CallEnded");
+       hs.off("CallTimedOut");
+       hs.off("ParticipantLeft");
+       hs.off("Offer");
+       hs.off("Answer");
+       hs.off("IceCandidate");
+       hs.off("ToggleCallItems");
         
         // Clear typing timeouts
         if (typingTimeoutsRef.current) {
@@ -4338,6 +5961,20 @@ export default function App() {
     } else {
       document.exitFullscreen();
       setIsFullscreen(false);
+    }
+  };
+
+  const handleRestartCamera = async (id: number) => {
+    if (isRestartingCamera) return;
+    setIsRestartingCamera(true);
+    const toastId = toast.loading("Restarting camera...");
+    try {
+      await apiFetch(`/Camera/RestartCamera?id=${id}`, { method: 'PUT' });
+      toast.success("Camera restarted successfully", { id: toastId });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to restart camera", { id: toastId });
+    } finally {
+      setIsRestartingCamera(false);
     }
   };
 
@@ -4941,28 +6578,48 @@ export default function App() {
     }
   };
 
-  const handleLogsScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (activeView !== 'logs') return;
-    const target = e.currentTarget;
-    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 120;
-    if (isAtBottom && !isPagingLoading) {
-      const filteredLogsCount = logs.filter(log => {
-        if (!logStartDate && !logEndDate) return true;
-        const logDate = new Date(log.timeOfAction);
-        const start = logStartDate ? new Date(logStartDate) : new Date(0);
-        const end = logEndDate ? new Date(logEndDate) : new Date();
-        return logDate >= start && logDate <= end;
-      }).length;
+  React.useEffect(() => {
+    if (activeView !== 'logs' || !loaderRef.current) return;
+    
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !isPagingLoading) {
+        const filteredLogsCount = logs.filter(log => {
+          if (!logStartDate && !logEndDate) return true;
+          const logDate = new Date(log.timeOfAction);
+          const start = logStartDate ? new Date(logStartDate) : new Date(0);
+          const end = logEndDate ? new Date(logEndDate) : new Date();
+          return logDate >= start && logDate <= end;
+        }).length;
 
-      if (visibleLogsCount < filteredLogsCount) {
-        setIsPagingLoading(true);
-        setTimeout(() => {
-          setVisibleLogsCount(prev => prev + 50);
-          setIsPagingLoading(false);
-        }, 500);
+        if (visibleLogsCount < filteredLogsCount) {
+          setIsPagingLoading(true);
+          setTimeout(() => {
+            setVisibleLogsCount(prev => prev + 50);
+            setIsPagingLoading(false);
+          }, 500);
+        }
       }
-    }
-  };
+    }, { root: null, rootMargin: '100px', threshold: 0.1 });
+
+    observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, [activeView, isPagingLoading, logs, visibleLogsCount, logStartDate, logEndDate]);
+
+  React.useEffect(() => {
+    if (!hasMoreCallLogs || isFetchingMoreCallLogs || isCallLogsLoading) return;
+    
+    const observer = new IntersectionObserver((entries) => {
+      const isIntersecting = entries.some(e => e.isIntersecting);
+      if (isIntersecting && hasMoreCallLogs && !isFetchingMoreCallLogs && !isCallLogsLoading) {
+        fetchMoreCallLogs();
+      }
+    }, { root: null, rootMargin: '150px', threshold: 0.1 });
+
+    if (callLogsLoaderRef.current) observer.observe(callLogsLoaderRef.current);
+    if (sideCallLogsLoaderRef.current) observer.observe(sideCallLogsLoaderRef.current);
+    
+    return () => observer.disconnect();
+  }, [hasMoreCallLogs, isFetchingMoreCallLogs, isCallLogsLoading, fetchMoreCallLogs]);
 
   const handleRefresh = async () => {
     try {
@@ -5583,22 +7240,13 @@ export default function App() {
             body: JSON.stringify(payload)
           });
         } else if (d.type === 'camera') {
-          const camDto = (prevCameras || []).find(c => c.id.toString() === rawId.toString());
-          const payload = { 
-            id: parseInt(rawId), 
-            isActive: nextActive, 
-            cameraName: camDto?.cameraName || d.name,
-            ipAddress: (camDto as any)?.ipAddress || "127.0.0.1",
-            username: (camDto as any)?.username || "admin",
-            streamPath: (camDto as any)?.streamPath || "/",
-            port: (camDto as any)?.port || 80,
-            roomId: resolveRoomId(camDto?.roomId, rooms),
-            sectionId: resolveSectionId(camDto?.sectionId, sections),
-            isHidden: false
-          };
-          await apiFetch('/Camera/UpdateCamera', { 
-            method: 'PUT', 
-            body: JSON.stringify(payload)
+          const token = localStorage.getItem('token');
+          await apiFetch(`/Camera/ToggleCamera?id=${rawId}`, { 
+            method: 'POST', 
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: ''
           });
         } else if (d.type === 'external' as any) {
           const extDto = (prevExternals || []).find(e => e.id.toString() === rawId.toString());
@@ -5828,6 +7476,16 @@ export default function App() {
         const doorTypeItem = (appNamesDetailList?.doorType || []).find((t: any) => t.name === device.doorType);
         finalDevice.doorType = doorTypeItem ? doorTypeItem.id : 1;
       }
+      if (device.type === 'camera') {
+        const camDto = (cameras || []).find(c => c.id.toString() === rawId || c.cameraName === device.name);
+        if (camDto) {
+          finalDevice.ipAddress = camDto.ipAddress;
+          finalDevice.username = camDto.username;
+          finalDevice.password = camDto.password;
+          finalDevice.streamPath = camDto.streamPath;
+          finalDevice.port = camDto.port;
+        }
+      }
       setEditingDevice(finalDevice);
       setIsEditDeviceOpen(true);
     }
@@ -5879,7 +7537,12 @@ export default function App() {
                 sectionId: finalSectionId,
                 isHidden: false,
                 cameraName: editingDevice.name,
-                isActive: true
+                isActive: true,
+                ipAddress: editingDevice.ipAddress || '127.0.0.1',
+                username: (editingDevice.username && editingDevice.username.trim() !== '') ? editingDevice.username : null,
+                password: (editingDevice.password && editingDevice.password.trim() !== '') ? editingDevice.password : null,
+                streamPath: editingDevice.streamPath || '/',
+                port: editingDevice.port !== undefined ? Number(editingDevice.port) : 80
               })
             });
           } else if (editingDevice.type === 'appliance') {
@@ -6108,8 +7771,8 @@ export default function App() {
             isHidden: true,
             cameraName: newDevice.name,
             ipAddress: newDevice.ipAddress || '0.0.0.0',
-            username: newDevice.username || 'admin',
-            password: newDevice.password || '',
+            username: newDevice.username && newDevice.username.trim() !== '' ? newDevice.username : null,
+            password: newDevice.password && newDevice.password.trim() !== '' ? newDevice.password : null,
             streamPath: newDevice.streamPath || '',
             port: newDevice.port ? parseInt(newDevice.port.toString()) : 80
           };
@@ -6205,7 +7868,19 @@ export default function App() {
         }
         
         setIsAddDeviceOpen(false);
-        setNewDevice({ name: '', type: 'light', room: '', section: '', doorType: 1, applianceType: 1 });
+        setNewDevice({
+          name: '',
+          type: 'light',
+          room: '',
+          section: '',
+          doorType: 1,
+          ipAddress: '',
+          username: '',
+          password: '',
+          streamPath: '',
+          port: 80,
+          applianceType: 1
+        });
       } catch (err: any) {
         toast.error(err.message || 'Error occurred while creating the device');
       }
@@ -6382,7 +8057,21 @@ export default function App() {
 
     if (activeView === 'dashboard') {
       const activeDevices = devices.filter(d => d.status === 'on' || d.status === 'active').length;
-      const externalCameras = devices.filter(d => d.type === 'camera' && d.section === 'security');
+      const externalCameras = (dashboardData?.cameraNamesUrls && dashboardData.cameraNamesUrls.length > 0)
+        ? dashboardData.cameraNamesUrls
+        : (cameras && cameras.length > 0)
+          ? cameras.map(c => ({
+              id: c.id,
+              cameraName: c.cameraName || `Camera ${c.id}`,
+              url: c.liveStreamUrl,
+              liveStreamUrl: c.liveStreamUrl
+            }))
+          : devices.filter(d => d.type === 'camera').map(d => ({
+              id: d.id,
+              cameraName: d.name,
+              url: d.liveStreamUrl,
+              liveStreamUrl: d.liveStreamUrl
+            }));
       const totalFacilityCount = (appliances?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0);
       
       return (
@@ -6567,18 +8256,33 @@ export default function App() {
               External Security Cameras
             </h2>
             <div className="flex overflow-x-auto snap-x space-x-6 pb-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-              {(dashboardData?.cameraNamesUrls?.length > 0 || externalCameras?.length > 0) ? (
-                (dashboardData?.cameraNamesUrls || externalCameras || []).map((cam: any) => {
+              {externalCameras.length > 0 ? (
+                externalCameras.map((cam: any) => {
                   const deviceId = cam.id || cam.cameraName;
-                  const name = cam.cameraName || cam.name;
-                  const feedUrl = cam.url || ((cameras || []).find(c => c.id.toString() === cam.id?.toString() || c.cameraName === cam.name)?.liveStreamUrl) || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+                  const name = cam.cameraName || cam.name || `Camera ${cam.id || ''}`;
+                  const rawUrl = cam.url || cam.liveStreamUrl || ((cameras || []).find(c => c.id.toString() === cam.id?.toString() || c.cameraName === cam.name || c.cameraName === cam.cameraName)?.liveStreamUrl);
+                  const feedUrl = rawUrl ? resolveCameraUrl(rawUrl) : "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
                   
                   return (
-                    <div key={deviceId} className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md">
-                      <HlsVideo src={feedUrl || undefined} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80" />
+                    <div 
+                      key={deviceId} 
+                      onClick={() => {
+                        const targetCam = devices.find(d => d.type === 'camera' && (d.id === `camera-${cam.id}` || d.name === name)) || {
+                          id: `camera-${cam.id || '1'}`,
+                          name: name || 'Camera',
+                          type: 'camera',
+                          status: 'active',
+                          liveStreamUrl: rawUrl
+                        };
+                        setSelectedCamera(targetCam as Device);
+                        setIsCameraModalOpen(true);
+                      }}
+                      className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md cursor-pointer group hover:scale-[1.01] transition-transform"
+                    >
+                      <HlsVideo src={feedUrl} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
                       <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white flex justify-between items-end">
                         <span className="font-semibold text-lg tracking-tight">{name}</span>
-                        <span className="text-[10px] bg-red-500 text-white px-2.5 py-1 rounded-full font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
+                        <span className="text-[10px] bg-red-500 text-white px-2.5 py-1 rounded-full font-bold uppercase tracking-widest animate-pulse flex items-center gap-1 shadow-sm">
                           <span className="h-1.5 w-1.5 bg-white rounded-full"></span> Live
                         </span>
                       </div>
@@ -9469,7 +11173,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className="flex-1 min-h-0 overflow-y-auto relative" onScroll={handleLogsScroll}>
+        <div className="flex-1 min-h-0 overflow-y-auto relative">
         <div 
           className={cn(
             "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
@@ -9581,8 +11285,9 @@ export default function App() {
                   </Label>
                   <Input 
                     id="ipAddress" 
+                    type="text"
                     placeholder="e.g. 192.168.1.100"
-                    value={newDevice.ipAddress}
+                    value={newDevice.ipAddress || ''}
                     onChange={(e) => setNewDevice(prev => ({ ...prev, ipAddress: e.target.value }))}
                   />
                 </div>
@@ -9594,8 +11299,9 @@ export default function App() {
                     </Label>
                     <Input 
                       id="username" 
+                      type="text"
                       placeholder="admin"
-                      value={newDevice.username}
+                      value={newDevice.username || ''}
                       onChange={(e) => setNewDevice(prev => ({ ...prev, username: e.target.value }))}
                     />
                   </div>
@@ -9608,7 +11314,7 @@ export default function App() {
                       id="password" 
                       type="password"
                       placeholder="••••••••"
-                      value={newDevice.password}
+                      value={newDevice.password || ''}
                       onChange={(e) => setNewDevice(prev => ({ ...prev, password: e.target.value }))}
                     />
                   </div>
@@ -9621,8 +11327,9 @@ export default function App() {
                     </Label>
                     <Input 
                       id="streamPath" 
+                      type="text"
                       placeholder="/live"
-                      value={newDevice.streamPath}
+                      value={newDevice.streamPath || ''}
                       onChange={(e) => setNewDevice(prev => ({ ...prev, streamPath: e.target.value }))}
                     />
                   </div>
@@ -9635,7 +11342,7 @@ export default function App() {
                       id="port" 
                       type="number"
                       placeholder="80"
-                      value={newDevice.port}
+                      value={newDevice.port !== undefined ? newDevice.port : ''}
                       onChange={(e) => setNewDevice(prev => ({ ...prev, port: parseInt(e.target.value) || 0 }))}
                     />
                   </div>
@@ -12053,7 +13760,7 @@ export default function App() {
                 
                 <div className="space-y-3">
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0}/8 max)</span>
                     {selectedHardware.applianceIdNames && selectedHardware.applianceIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.applianceIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12064,7 +13771,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0}/3 max)</span>
                     {selectedHardware.cameraIdNames && selectedHardware.cameraIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.cameraIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12075,7 +13782,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0}/6 max)</span>
                     {selectedHardware.lightIdNames && selectedHardware.lightIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.lightIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12086,7 +13793,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0}/4 max)</span>
                     {selectedHardware.doorIdNames && selectedHardware.doorIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.doorIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12097,7 +13804,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0}/4 max)</span>
                     {selectedHardware.windowIdNames && selectedHardware.windowIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.windowIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12108,7 +13815,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0})</span>
+                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0}/5 max)</span>
                     {selectedHardware.externalIdNames && selectedHardware.externalIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.externalIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
@@ -12236,165 +13943,249 @@ export default function App() {
                 <div className="space-y-4 pb-4">
                   {/* Appliances Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Connected Appliances</span>
-                <div className="flex flex-wrap gap-2">
-                  {(appliances || []).map(dev => {
-                    const isSelected = hardwareForm.applianceIdNames?.some(x => x.id === dev.id);
-                    return (
-                      <Badge 
-                        key={`app-${dev.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.applianceIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id !== dev.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: dev.id, name: dev.applianceName }] }));
-                          }
-                        }}
-                      >
-                        {dev.applianceName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Connected Appliances ({Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (8 - (hardwareForm.applianceIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(appliances || []).map(dev => {
+                        const isSelected = hardwareForm.applianceIdNames?.some(x => x.id === dev.id);
+                        return (
+                          <Badge 
+                            key={`app-${dev.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.applianceIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id !== dev.id) }));
+                              } else {
+                                if (currentList.length >= 8) {
+                                  toast.error("Limit reached: You cannot add more than 8 appliances to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: dev.id, name: dev.applianceName }] }));
+                              }
+                            }}
+                          >
+                            {dev.applianceName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {/* Cameras Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Assigned Security Cameras</span>
-                <div className="flex flex-wrap gap-2">
-                  {(cameras || []).map(dev => {
-                    const isSelected = hardwareForm.cameraIdNames?.some(x => x.id === dev.id);
-                    return (
-                      <Badge 
-                        key={`cam-${dev.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.cameraIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id !== dev.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: dev.id, name: dev.cameraName }] }));
-                          }
-                        }}
-                      >
-                        {dev.cameraName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* Cameras Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Assigned Security Cameras ({Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (3 - (hardwareForm.cameraIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(cameras || []).map(dev => {
+                        const isSelected = hardwareForm.cameraIdNames?.some(x => x.id === dev.id);
+                        return (
+                          <Badge 
+                            key={`cam-${dev.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.cameraIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id !== dev.id) }));
+                              } else {
+                                if (currentList.length >= 3) {
+                                  toast.error("Limit reached: You cannot add more than 3 cameras to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: dev.id, name: dev.cameraName }] }));
+                              }
+                            }}
+                          >
+                            {dev.cameraName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {/* Lights Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Controlled Lighting</span>
-                <div className="flex flex-wrap gap-2">
-                  {(lights || []).map(dev => {
-                    const isSelected = hardwareForm.lightIdNames?.some(x => x.id === dev.id);
-                    return (
-                      <Badge 
-                        key={`light-${dev.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.lightIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id !== dev.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: dev.id, name: dev.lightName }] }));
-                          }
-                        }}
-                      >
-                        {dev.lightName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* Lights Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Controlled Lighting ({Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (6 - (hardwareForm.lightIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(lights || []).map(dev => {
+                        const isSelected = hardwareForm.lightIdNames?.some(x => x.id === dev.id);
+                        return (
+                          <Badge 
+                            key={`light-${dev.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.lightIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id !== dev.id) }));
+                              } else {
+                                if (currentList.length >= 6) {
+                                  toast.error("Limit reached: You cannot add more than 6 lights to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: dev.id, name: dev.lightName }] }));
+                              }
+                            }}
+                          >
+                            {dev.lightName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {/* Window Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Automated Windows</span>
-                <div className="flex flex-wrap gap-2">
-                  {(windows || []).map(dev => {
-                    const isSelected = hardwareForm.windowIdNames?.some(x => x.id === dev.id);
-                    return (
-                      <Badge 
-                        key={`win-${dev.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.windowIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id !== dev.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: dev.id, name: dev.windowName }] }));
-                          }
-                        }}
-                      >
-                        {dev.windowName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* Window Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Automated Windows ({Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (4 - (hardwareForm.windowIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(windows || []).map(dev => {
+                        const isSelected = hardwareForm.windowIdNames?.some(x => x.id === dev.id);
+                        return (
+                          <Badge 
+                            key={`win-${dev.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.windowIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id !== dev.id) }));
+                              } else {
+                                if (currentList.length >= 4) {
+                                  toast.error("Limit reached: You cannot add more than 4 windows to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: dev.id, name: dev.windowName }] }));
+                              }
+                            }}
+                          >
+                            {dev.windowName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {/* Door Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Automated Doors</span>
-                <div className="flex flex-wrap gap-2">
-                  {(doors || []).map(dev => {
-                    const isSelected = hardwareForm.doorIdNames?.some(x => x.id === dev.id);
-                    return (
-                      <Badge 
-                        key={`door-${dev.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.doorIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id !== dev.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: dev.id, name: dev.doorName }] }));
-                          }
-                        }}
-                      >
-                        {dev.doorName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* Door Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Automated Doors ({Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (4 - (hardwareForm.doorIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(doors || []).map(dev => {
+                        const isSelected = hardwareForm.doorIdNames?.some(x => x.id === dev.id);
+                        return (
+                          <Badge 
+                            key={`door-${dev.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.doorIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id !== dev.id) }));
+                              } else {
+                                if (currentList.length >= 4) {
+                                  toast.error("Limit reached: You cannot add more than 4 doors to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: dev.id, name: dev.doorName }] }));
+                              }
+                            }}
+                          >
+                            {dev.doorName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              {/* Externals Selection */}
-              <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                <span className="text-xs font-bold text-muted-foreground block">Select Peripheral Auxiliaries</span>
-                <div className="flex flex-wrap gap-2">
-                  {(externals || []).map(ext => {
-                    const isSelected = hardwareForm.externalIdNames?.some(x => x.id === ext.id);
-                    return (
-                      <Badge 
-                        key={`ext-${ext.id}`} 
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="cursor-pointer hover:opacity-85"
-                        onClick={() => {
-                          const currentList = hardwareForm.externalIdNames || [];
-                          if (isSelected) {
-                            setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id !== ext.id) }));
-                          } else {
-                            setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalName }] }));
-                          }
-                        }}
-                      >
-                        {ext.externalName} {isSelected && '✓'}
-                      </Badge>
-                    );
-                  })}
-                </div>
-              </div>
+                  {/* Externals Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-muted-foreground">Select Peripheral Auxiliaries ({Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left)</span>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
+                        (5 - (hardwareForm.externalIdNames?.length || 0)) <= 0
+                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                      )}>
+                        {Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(externals || []).map(ext => {
+                        const isSelected = hardwareForm.externalIdNames?.some(x => x.id === ext.id);
+                        return (
+                          <Badge 
+                            key={`ext-${ext.id}`} 
+                            variant={isSelected ? 'default' : 'outline'}
+                            className="cursor-pointer hover:opacity-85"
+                            onClick={() => {
+                              const currentList = hardwareForm.externalIdNames || [];
+                              if (isSelected) {
+                                setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id !== ext.id) }));
+                              } else {
+                                if (currentList.length >= 5) {
+                                  toast.error("Limit reached: You cannot add more than 5 externals to a hardware.");
+                                  return;
+                                }
+                                setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalName }] }));
+                              }
+                            }}
+                          >
+                            {ext.externalName} {isSelected && '✓'}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
             </div>
             </ScrollArea>
           </div>
@@ -12977,9 +14768,13 @@ export default function App() {
           {(() => {
             const rawCamId = selectedCamera ? getRawId(selectedCamera.id) : '';
             const currentCameraDto = (cameras || []).find(c => c.id.toString() === rawCamId || c.cameraName === selectedCamera?.name);
-            const liveStreamUrl = currentCameraDto?.liveStreamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+            const currentDevice = devices.find(d => d.id === selectedCamera?.id);
+            const isCurrentlyActive = currentDevice ? currentDevice.status === 'active' : (selectedCamera?.status === 'active');
+            const liveStreamUrl = currentCameraDto?.liveStreamUrl 
+              ? resolveCameraUrl(currentCameraDto.liveStreamUrl) 
+              : "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
             const isLive = !playingRecordingPath;
-            const currentVideoUrl = playingRecordingPath || liveStreamUrl;
+            const currentVideoUrl = playingRecordingPath ? resolveCameraUrl(playingRecordingPath) : liveStreamUrl;
             const recordingsList = currentCameraDto?.recordings || [];
             
             return (
@@ -12995,9 +14790,9 @@ export default function App() {
                         View {selectedCamera?.name || currentCameraDto?.cameraName || 'Camera'}
                         <Badge variant="secondary" className={cn(
                           "ml-2 text-[10px] py-0 px-2 font-mono uppercase tracking-wider border",
-                          selectedCamera?.status === 'active' ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                          isCurrentlyActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-zinc-100 text-zinc-600 border-zinc-200"
                         )}>
-                          {selectedCamera?.status || 'Active'}
+                          {isCurrentlyActive ? 'Active' : 'Inactive'}
                         </Badge>
                       </h2>
                       <p className="text-xs text-muted-foreground font-mono">
@@ -13067,7 +14862,7 @@ export default function App() {
                       </div>
 
                       {/* Video Player */}
-                      {selectedCamera?.status === 'active' ? (
+                      {(isCurrentlyActive || !isLive) ? (
                         <HlsVideo
                           ref={videoRef}
                           key={currentVideoUrl}
@@ -13127,25 +14922,50 @@ export default function App() {
                     <div className="bg-muted/30 p-5 rounded-2xl border space-y-4 shrink-0">
                       <div className="flex items-center justify-between border-b pb-2">
                         <h3 className="text-sm font-bold text-foreground tracking-widest uppercase font-mono">Stream Configuration</h3>
-                        <Badge variant="outline" className="text-blue-600 border-blue-200 text-[10px]">CCTV CONNECTION</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-blue-600 border-blue-200 text-[10px]">CCTV CONNECTION</Badge>
+                          {selectedCamera && (
+                            <div className="flex items-center gap-1.5 ml-1 border-l pl-2 border-border">
+                              <span className="text-[10px] font-mono text-muted-foreground uppercase">Power</span>
+                              <Switch
+                                id="camera-modal-power-toggle"
+                                checked={isCurrentlyActive}
+                                onCheckedChange={() => handleToggle(selectedCamera.id)}
+                              />
+                            </div>
+                          )}
+                          {currentCameraDto && (
+                            <Button
+                              id="restart-camera-btn"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-all active:scale-95"
+                              onClick={() => handleRestartCamera(currentCameraDto.id)}
+                              disabled={isRestartingCamera}
+                              title="Restart Camera"
+                            >
+                              <RefreshCw className={cn("h-3.5 w-3.5", isRestartingCamera && "animate-spin")} />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">IP Address</span>
-                          <span className="font-semibold text-foreground font-mono">192.168.1.{10 + (currentCameraDto?.id || 10) % 240}</span>
+                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.ipAddress || '127.0.0.1'}</span>
                         </div>
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Port Node</span>
-                          <span className="font-semibold text-foreground font-mono">554 (RTSP)</span>
+                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.port || '80'}</span>
                         </div>
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Username</span>
-                          <span className="font-semibold text-foreground font-mono">sec_operator</span>
+                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.username || 'N/A'}</span>
                         </div>
                         <div className="space-y-1">
                           <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Stream Path</span>
-                          <span className="font-semibold text-foreground font-mono text-ellipsis overflow-hidden block">/live/h264/ch1</span>
+                          <span className="font-semibold text-foreground font-mono text-ellipsis overflow-hidden block">{currentCameraDto?.streamPath || '/'}</span>
                         </div>
                       </div>
 
@@ -14713,7 +16533,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-[85vw] w-[85vw] h-[85vh] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+        <DialogContent showCloseButton={false} className="max-w-[95vw] w-[95vw] h-[92vh] sm:max-w-[95vw] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
           {chats.length === 0 ? (
             <div className="flex flex-row w-full h-full relative">
               <Button 
@@ -14754,8 +16574,8 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* WhatsApp Style Sidebar - List View (30% width) */}
-              <div className="w-[30%] bg-[#ffffff] flex flex-col shrink-0 relative z-10">
+              {/* WhatsApp Style Sidebar - List View (30% width if call history collapsed, 25% if open) */}
+              <div className={cn("bg-[#ffffff] flex flex-col shrink-0 relative z-10 border-r border-slate-200 transition-all duration-300", isChatCallHistoryOpen ? "w-[25%]" : "w-[30%]")}>
             <div className="p-5 bg-[#f0f2f5] shrink-0 border-b space-y-4 w-full" style={{ borderColor: "#060101" }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -14771,6 +16591,20 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Call Logs History Button */}
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-9 w-9 rounded-full text-[#54656f] hover:bg-slate-200" 
+                    onClick={() => {
+                      fetchCallLogs(true);
+                      setIsCallLogsOpen(true);
+                    }}
+                    title="Call History"
+                  >
+                    <History className="h-5 w-5" />
+                  </Button>
+
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button 
@@ -14858,7 +16692,19 @@ export default function App() {
                               "text-[11px] font-medium tracking-tight px-1",
                               chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781]"
                             )}>
-                              {lastMsg ? format(new Date(lastMsg.sentAt), 'HH:mm') : format(new Date(chat.createdAt), 'MMM d')}
+                              {(() => {
+                                const timeStr = lastMsg?.sentAt || chat.createdAt;
+                                if (!timeStr) return '';
+                                const date = new Date(timeStr);
+                                if (isNaN(date.getTime())) return '';
+                                const diffMs = Date.now() - date.getTime();
+                                if (diffMs > 24 * 60 * 60 * 1000) {
+                                  return date.getFullYear() === new Date().getFullYear()
+                                    ? format(date, 'MMM d')
+                                    : format(date, 'MMM d, yyyy');
+                                }
+                                return format(date, 'HH:mm');
+                              })()}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-1">
@@ -14907,8 +16753,327 @@ export default function App() {
               </PullToRefresh>
             </div>
           </div>
-          <div className="flex flex-col bg-[#efeae2] relative overflow-hidden flex-1 h-full transition-all duration-300">
-            {activeChatId ? (
+          <div className="flex flex-col bg-slate-50 relative overflow-hidden flex-1 h-full transition-all duration-300">
+            {isCallLogsOpen ? (
+              /* Call History Panel replacing right side - Clean Light Theme */
+              <div className="flex-1 flex flex-col bg-slate-50 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
+                {/* Header */}
+                <header className="px-5 py-3 border-b border-slate-200/80 flex items-center justify-between bg-white shrink-0 z-20 shadow-xs h-[60px]">
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                      <History className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 leading-none">Call History</h3>
+                      <p className="text-xs text-slate-500 font-normal mt-0.5">
+                        View call logs, filter status, and redial
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => fetchCallLogs(true)} 
+                      className="rounded-full h-9 w-9 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50"
+                      title="Refresh Call History"
+                    >
+                      <RefreshCw className={cn("h-4 w-4", isCallLogsLoading && "animate-spin text-emerald-600")} />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => setIsCallLogsOpen(false)} 
+                      className="rounded-full h-9 w-9 text-slate-500 hover:bg-rose-50 hover:text-rose-600 group/close"
+                      title="Close Call History"
+                    >
+                      <XCircle className="h-5 w-5 group-hover/close:text-rose-600 transition-colors" />
+                    </Button>
+                  </div>
+                </header>
+
+                {/* Filter and Sort Control Bar */}
+                <div className="px-5 py-3 border-b border-slate-200/80 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0 z-10">
+                  {/* Filter Tabs / Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                    {[
+                      { id: 'all', label: 'All', count: callLogCounts.all },
+                      { id: 'missed', label: 'Missed', count: callLogCounts.missed },
+                      { id: 'received', label: 'Received', count: callLogCounts.received },
+                      { id: 'rejected', label: 'Rejected', count: callLogCounts.rejected },
+                      { id: 'outgoing', label: 'Outgoing', count: callLogCounts.outgoing },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setCallLogFilter(tab.id as any)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 border",
+                          callLogFilter === tab.id
+                            ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                            : "bg-slate-100/80 text-slate-600 border-slate-200 hover:bg-slate-200/70"
+                        )}
+                      >
+                        <span>{tab.label}</span>
+                        <span className={cn(
+                          "px-1.5 py-0.2 rounded-full text-[10px] font-bold",
+                          callLogFilter === tab.id
+                            ? "bg-white/20 text-white"
+                            : "bg-slate-200/80 text-slate-600"
+                        )}>
+                          {tab.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Sort Selector with Styled Dropdown */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                      <ArrowDownUp className="h-3 w-3" /> Sort:
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-8 border-slate-200/90 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg px-2.5 flex items-center gap-1.5 shadow-2xs">
+                          <span>
+                            {callLogSort === 'newest' && 'Newest First'}
+                            {callLogSort === 'oldest' && 'Oldest First'}
+                            {callLogSort === 'duration' && 'Longest Duration'}
+                            {callLogSort === 'type_video' && 'Video Calls First'}
+                            {callLogSort === 'type_voice' && 'Voice Calls First'}
+                          </span>
+                          <ChevronDown className="h-3.5 w-3.5 text-slate-400 ml-0.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52 bg-white border border-slate-200 shadow-md rounded-xl p-1 z-50">
+                        <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">Sort Options</DropdownMenuLabel>
+                        <DropdownMenuSeparator className="bg-slate-100" />
+                        <DropdownMenuRadioGroup value={callLogSort} onValueChange={(val) => setCallLogSort(val as any)}>
+                          <DropdownMenuRadioItem value="newest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                            Newest First
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="oldest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                            Oldest First
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="duration" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                            Longest Duration
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuSeparator className="bg-slate-100" />
+                          <DropdownMenuRadioItem value="type_video" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5">
+                            <Video className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>Video Calls First</span>
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="type_voice" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5">
+                            <Phone className="h-3.5 w-3.5 text-blue-600" />
+                            <span>Voice Calls First</span>
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+
+                {/* Body Content with PullToRefresh */}
+                <div className="flex-1 overflow-y-auto no-scrollbar relative bg-slate-50" onScroll={handleCallLogsScroll}>
+                  <PullToRefresh
+                    onRefresh={() => fetchCallLogs(true)}
+                    pullingContent={
+                      <div className="text-center py-3 text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-1.5">
+                        <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Pull down to refresh call logs
+                      </div>
+                    }
+                    refreshingContent={
+                      <div className="text-center py-3 text-xs font-bold text-emerald-600 uppercase tracking-widest flex items-center justify-center gap-1.5">
+                        <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Refreshing call logs...
+                      </div>
+                    }
+                  >
+                    <div className="max-w-2xl mx-auto p-5 space-y-3 min-h-full">
+                      {isCallLogsLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
+                          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+                          <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Loading Call Logs...</span>
+                        </div>
+                      ) : filteredAndSortedCallLogs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3 bg-white rounded-2xl border border-slate-200/80 p-8 shadow-xs text-center">
+                          <div className="h-14 w-14 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                            <Phone className="h-7 w-7" />
+                          </div>
+                          <span className="text-sm font-bold text-slate-700">No Call Logs Found</span>
+                          <p className="text-xs text-slate-400 max-w-xs">
+                            {callLogFilter === 'all'
+                              ? "Your voice and video call history will appear here."
+                              : `No ${callLogFilter} call logs match your current filter.`}
+                          </p>
+                          {callLogFilter !== 'all' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCallLogFilter('all')}
+                              className="mt-2 text-xs"
+                            >
+                              Show All Call Logs
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {filteredAndSortedCallLogs.map((log, index) => {
+                            const logChat = chats.find(c => c.id === log.chatId);
+                            const userStatus = getUserCallStatus(log, userProfile?.id);
+
+                            return (
+                              <div 
+                                key={log.id ? `call-log-${log.id}` : `call-log-${log.callId || index}-${log.startedAt}-${index}`} 
+                                className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 bg-white hover:border-emerald-200 transition-all shadow-xs hover:shadow-md group text-left"
+                              >
+                                <div className="flex items-center gap-3.5">
+                                  {/* Chat Avatar */}
+                                  <div className="h-12 w-12 rounded-full bg-slate-100 border border-slate-200/60 flex items-center justify-center text-slate-600 font-bold overflow-hidden shadow-xs shrink-0">
+                                    {logChat ? (
+                                      (() => {
+                                        const displayImageUrl = getChatDisplayImageUrl(logChat);
+                                        const displayInitial = getChatDisplayInitial(logChat);
+                                        if (displayImageUrl) {
+                                          return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(logChat)} className="h-full w-full object-cover" />;
+                                        }
+                                        return logChat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <span>{displayInitial}</span>;
+                                      })()
+                                    ) : (
+                                      <UserIcon className="h-5 w-5 text-slate-400" />
+                                    )}
+                                  </div>
+
+                                  {/* Log Details */}
+                                  <div className="flex flex-col">
+                                    <h4 className="font-bold text-sm text-slate-900">
+                                      {logChat ? getChatDisplayName(logChat) : `Call log #${log.id}`}
+                                    </h4>
+                                    <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 flex-wrap">
+                                      {userStatus === 'ringing' ? (
+                                        <span className="text-emerald-500 font-bold flex items-center gap-1 animate-pulse">
+                                          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 animate-ping" /> Active (Ringing)
+                                        </span>
+                                      ) : userStatus === 'connected' ? (
+                                        <span className="text-emerald-500 font-bold flex items-center gap-1">
+                                          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" /> Active (Connected)
+                                        </span>
+                                      ) : userStatus === 'missed' ? (
+                                        <span className="text-rose-600 font-semibold flex items-center gap-1 bg-rose-50 px-1.5 py-0.5 rounded-sm border border-rose-100">
+                                          <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
+                                        </span>
+                                      ) : userStatus === 'rejected' ? (
+                                        <span className="text-amber-600 font-semibold flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-100">
+                                          <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
+                                        </span>
+                                      ) : userStatus === 'received' ? (
+                                        <span className="text-emerald-600 font-medium flex items-center gap-1">
+                                          <PhoneIncoming className="h-3 w-3 text-emerald-500" /> Received
+                                        </span>
+                                      ) : (
+                                        <span className="text-blue-600 font-medium flex items-center gap-1">
+                                          <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
+                                        </span>
+                                      )}
+                                      
+                                      <span className="text-slate-300">•</span>
+                                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-500">
+                                        <CalendarDays className="h-3 w-3 text-slate-400" />
+                                        {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+
+                                      <span className="text-slate-300">•</span>
+                                      <span className="flex items-center gap-1 font-mono text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-sm border border-emerald-100 font-bold" title="Duration">
+                                        <Clock className="h-3 w-3 text-emerald-600" />
+                                        {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
+                                          ? "0s"
+                                          : (((log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && !log.endedAt)
+                                            ? formatCallDuration(log.startedAt, new Date(liveTimestamp), log.answeredAt)
+                                            : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
+                                      </span>
+                                    </div>
+                                    {logChat?.isGroup && log.participants && log.participants.length > 0 && (
+                                      <div className="mt-2 text-[10px] text-slate-500 font-medium flex flex-wrap gap-1.5">
+                                        {log.participants.map((p, pIdx) => {
+                                          let statusColor = "text-slate-500 bg-slate-100";
+                                          let statusText = "Ringing";
+                                          if (p.status === CallParticipantStatus.Connected) {
+                                            statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+                                            statusText = "Joined";
+                                          } else if (p.status === CallParticipantStatus.Declined) {
+                                            statusColor = "text-rose-700 bg-rose-50 border-rose-200";
+                                            statusText = "Declined";
+                                          } else if (p.status === CallParticipantStatus.Left) {
+                                            statusColor = "text-slate-600 bg-slate-100";
+                                            statusText = "Left";
+                                          } else if (p.status === CallParticipantStatus.Missed) {
+                                            statusColor = "text-rose-700 bg-rose-50 border-rose-200";
+                                            statusText = "Missed";
+                                          }
+                                          return (
+                                            <span key={p.personId ? `part-${p.personId}` : `part-${pIdx}`} className="flex items-center gap-1 border rounded-md px-1.5 py-0.5 bg-slate-50">
+                                              <span className="font-semibold">{p.fullName || 'User'}</span>
+                                              <span className={cn("text-[9px] px-1 py-0.2 rounded-sm border font-bold", statusColor)}>{statusText}</span>
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Call Type and Redial button */}
+                                <div className="flex items-center gap-3">
+                                  <Badge className={cn(
+                                    "border text-[10px] font-extrabold uppercase tracking-wider py-0.5 px-2 rounded-md",
+                                    log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                  )}>
+                                    {log.type === CallType.Video ? "Video" : "Voice"}
+                                  </Badge>
+                                  
+                                  {(log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && userStatus !== 'missed' ? (
+                                    <Button
+                                      onClick={() => {
+                                        handleAcceptCall(log.callId, log.chatId);
+                                      }}
+                                      className="h-9 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 shrink-0"
+                                      title="Join Active Call"
+                                    >
+                                      <Phone className="h-3 w-3 fill-current text-white shrink-0" />
+                                      <span>Join</span>
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => {
+                                        handleStartCall(log.chatId, log.type);
+                                      }}
+                                      className="h-9 w-9 rounded-full bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 transition-colors shadow-xs shrink-0"
+                                      title="Redial"
+                                    >
+                                      {log.type === CallType.Video ? <Video className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {isFetchingMoreCallLogs && (
+                            <div className="flex items-center justify-center py-4 text-xs font-semibold text-slate-500 gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+                              <span>Loading more call logs...</span>
+                            </div>
+                          )}
+                          {!isFetchingMoreCallLogs && hasMoreCallLogs && (
+                            <div ref={callLogsLoaderRef} className="h-4 w-full" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </PullToRefresh>
+                </div>
+              </div>
+            ) : activeChatId ? (
               <>
                 {(() => {
                   const chat = (chats || []).find(c => c.id === activeChatId);
@@ -14917,7 +17082,24 @@ export default function App() {
 
                   return (
                     <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
-                      <div className="flex items-center gap-3">
+                      <div 
+                        className={cn(
+                          "flex items-center gap-3",
+                          chat.isGroup && "cursor-pointer hover:opacity-85 select-none transition-all duration-150"
+                        )}
+                        onClick={() => {
+                          if (chat.isGroup) {
+                            setEditingGroupId(chat.id);
+                            setNewGroupName(chat.name || "");
+                            setNewGroupDescription(chat.description || "");
+                            setNewGroupImageUrl(chat.imageUrl || "");
+                            setNewGroupRoom(chat.roomId?.toString() || "none");
+                            setNewGroupSection(chat.sectionId?.toString() || "");
+                            setSelectedParticipants((chat.participants || []).map(p => p.personId).filter(id => id !== userProfile.id));
+                            setIsViewGroupOpen(true);
+                          }
+                        }}
+                      >
                         <div className="relative">
                           <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200 text-lg font-bold">
                             {(() => {
@@ -14932,7 +17114,7 @@ export default function App() {
                           </div>
                         </div>
                         <div>
-                          <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px]">
+                          <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px] hover:underline decoration-[#111b21]">
                             {getChatDisplayName(chat)}
                           </h3>
                           <div className="flex items-center gap-1.5 ">
@@ -14971,26 +17153,41 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        {chat.isGroup && (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
-                            onClick={() => {
-                              setEditingGroupId(chat.id);
-                              setNewGroupName(chat.name || "");
-                              setNewGroupDescription(chat.description || "");
-                              setNewGroupImageUrl(chat.imageUrl || "");
-                              setNewGroupRoom(chat.roomId?.toString() || "none");
-                              setNewGroupSection(chat.sectionId?.toString() || "");
-                              setSelectedParticipants((chat.participants || []).map(p => p.personId).filter(id => id !== userProfile.id));
-                              setIsViewGroupOpen(true);
-                            }}
-                            title="View Group Details"
-                          >
-                            <Info className="h-5 w-5" />
-                          </Button>
-                        )}
+                        {/* Toggle Chat Call History Panel Button */}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={cn(
+                            "rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50 transition-colors",
+                            isChatCallHistoryOpen && "bg-emerald-100 text-emerald-700"
+                          )}
+                          onClick={() => setIsChatCallHistoryOpen(prev => !prev)}
+                          title={isChatCallHistoryOpen ? "Collapse Chat Call History" : "Show Chat Call History"}
+                        >
+                          <History className="h-5 w-5 text-emerald-600" />
+                        </Button>
+
+                        {/* Video Call Button */}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
+                          onClick={() => handleStartCall(chat.id, CallType.Video)}
+                          title="Start Video Call"
+                        >
+                          <Video className="h-5 w-5 text-emerald-600" />
+                        </Button>
+
+                        {/* Voice Call Button */}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
+                          onClick={() => handleStartCall(chat.id, CallType.Audio)}
+                          title="Start Voice Call"
+                        >
+                          <Phone className="h-5 w-5 text-emerald-600" />
+                        </Button>
                         {isChatSearchVisible && (
                           <motion.div 
                             initial={{ width: 0, opacity: 0 }}
@@ -15031,6 +17228,59 @@ export default function App() {
                         </Button>
                       </div>
                     </header>
+                  );
+                })()}
+
+                <div className="flex-1 flex flex-row h-full min-h-0 overflow-hidden relative">
+                  {/* CENTER: Conversation Area */}
+                  <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
+                    {/* Active Group Call Banner inside Chat View */}
+                {(() => {
+                  const currentChat = chats.find(c => c.id === activeChatId);
+                  if (!currentChat || !currentChat.isGroup) return null;
+
+                  const activeLog = callLogs.find(l => l.chatId === currentChat.id && (l.status === CallStatus.Ringing || l.status === CallStatus.Connected) && !l.endedAt && getUserCallStatus(l as any, userProfile?.id) !== 'missed') || (activeCall?.chatId === currentChat.id && activeCall.status !== CallStatus.Ended && !activeCall.endedAt && getUserCallStatus(activeCall as any, userProfile?.id) !== 'missed' ? activeCall : null);
+                  if (!activeLog) return null;
+                  const isUserInCall = activeCall?.chatId === currentChat.id && isCallModalOpen;
+                  const isCallActive = activeLog.status === CallStatus.Connected || !!activeLog.answeredAt;
+                  const isLogEnded = activeLog.status === CallStatus.Ended || activeLog.status === CallStatus.Rejected || activeLog.status === CallStatus.Missed || activeLog.status === CallStatus.TimedOut || !!activeLog.endedAt;
+                  const startMs = parseTimestamp(activeLog.answeredAt || activeLog.startedAt);
+                  const endMs = isLogEnded ? parseTimestamp(activeLog.endedAt || activeLog.answeredAt || activeLog.startedAt) : liveTimestamp;
+                  const currentDurationSecs = Math.max(0, Math.floor((endMs - startMs) / 1000));
+
+                  return (
+                    <div className="bg-emerald-900 text-white px-5 py-2.5 flex items-center justify-between border-b border-emerald-800 shadow-md z-30 shrink-0">
+                      <div className="flex items-center gap-3">
+                        <span className="relative flex h-3.5 w-3.5 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-400"></span>
+                        </span>
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs font-bold tracking-wide text-white flex items-center gap-1.5">
+                            <Users className="h-4 w-4 text-emerald-300" /> Active Group Call in Progress
+                          </span>
+                          <span className="text-[11px] text-emerald-200 font-mono font-semibold">
+                            {isCallActive ? `Duration: ${formatCallTimer(currentDurationSecs)}` : "Status: Ringing..."}
+                          </span>
+                        </div>
+                      </div>
+                      {!isUserInCall ? (
+                        <Button
+                          onClick={() => handleAcceptCall((activeLog as any).callId || (activeLog as any).id, currentChat.id)}
+                          className="h-8 px-4 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-xs shadow-md flex items-center gap-1.5 transition-transform hover:scale-105 shrink-0"
+                        >
+                          <Phone className="h-3.5 w-3.5 fill-current" />
+                          <span>Join Call</span>
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={() => setIsCallModalOpen(true)}
+                          className="h-8 px-3.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs shadow-xs flex items-center gap-1 shrink-0"
+                        >
+                          <span>Open Call Window</span>
+                        </Button>
+                      )}
+                    </div>
                   );
                 })()}
 
@@ -16001,6 +18251,154 @@ export default function App() {
                   </div>
                 </div>
               </footer>
+                  </div>
+
+                  {/* RIGHT: Collapsible Call History Side Panel for Selected Chat */}
+                  <AnimatePresence initial={false}>
+                    {isChatCallHistoryOpen && (
+                      <motion.div
+                        initial={{ width: 0, opacity: 0 }}
+                        animate={{ width: 320, opacity: 1 }}
+                        exit={{ width: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="w-[320px] shrink-0 border-l border-slate-200 bg-white flex flex-col h-full overflow-hidden shadow-xs relative z-20"
+                      >
+                        {/* Header */}
+                        <div className="px-4 py-3 border-b border-slate-200 bg-[#f0f2f5] flex items-center justify-between shrink-0 h-[60px]">
+                          <div className="flex items-center gap-2.5 text-left min-w-0">
+                            <div className="h-9 w-9 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 shadow-xs">
+                              <History className="h-4.5 w-4.5 text-emerald-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-bold text-slate-900 truncate leading-tight">Chat Call History</h4>
+                              <p className="text-[10px] text-slate-500 font-medium truncate">Logs for this conversation</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full text-slate-500 hover:text-slate-700 hover:bg-slate-200/60"
+                              onClick={() => setIsChatCallHistoryOpen(false)}
+                              title="Collapse Call History Panel"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Logs List */}
+                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2.5 bg-slate-50/50" onScroll={handleCallLogsScroll}>
+                          {(() => {
+                            const chatCallLogs = callLogs.filter(l => l.chatId === activeChatId);
+                            const sortedLogs = [...chatCallLogs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+
+                            if (sortedLogs.length === 0) {
+                              return (
+                                <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs">
+                                  <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-2">
+                                    <Phone className="h-5 w-5" />
+                                  </div>
+                                  <p className="text-xs font-bold text-slate-700">No Call History</p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5 mb-3">Calls made in this chat will appear here.</p>
+                                  <Button
+                                    size="sm"
+                                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 font-semibold shadow-2xs flex items-center gap-1.5"
+                                    onClick={() => handleStartCall(activeChatId, CallType.Audio)}
+                                  >
+                                    <Phone className="h-3 w-3" /> Start Voice Call
+                                  </Button>
+                                </div>
+                              );
+                            }
+
+                            return sortedLogs.map((log, idx) => {
+                              const userStatus = getUserCallStatus(log, userProfile?.id);
+                              return (
+                                <div key={log.id ? `side-log-${log.id}` : `side-log-${log.callId || idx}-${log.startedAt}-${idx}`} className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs hover:border-emerald-300 transition-all text-left space-y-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <Badge className={cn(
+                                        "text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-md border shrink-0",
+                                        log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                      )}>
+                                        {log.type === CallType.Video ? "Video" : "Voice"}
+                                      </Badge>
+
+                                      {userStatus === 'ringing' || userStatus === 'connected' ? (
+                                        <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 animate-pulse">
+                                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" /> Active
+                                        </span>
+                                      ) : userStatus === 'missed' ? (
+                                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded-sm border border-rose-100 flex items-center gap-1">
+                                          <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
+                                        </span>
+                                      ) : userStatus === 'rejected' ? (
+                                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.2 rounded-sm border border-amber-100 flex items-center gap-1">
+                                          <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
+                                        </span>
+                                      ) : userStatus === 'received' ? (
+                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-sm border border-emerald-100 flex items-center gap-1">
+                                          <PhoneIncoming className="h-3 w-3 text-emerald-600" /> Received
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded-sm border border-blue-100 flex items-center gap-1">
+                                          <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <span className="text-[10px] font-mono font-semibold text-slate-500 shrink-0">
+                                      {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
+                                        ? "0s"
+                                        : (((log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && !log.endedAt)
+                                          ? formatCallDuration(log.startedAt, new Date(liveTimestamp), log.answeredAt)
+                                          : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1.5 border-t border-slate-100">
+                                    <span className="font-mono text-slate-400">
+                                      {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+
+                                    {(log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && userStatus !== 'missed' ? (
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleAcceptCall(log.callId, log.chatId)}
+                                        className="h-6 px-2 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-md shadow-2xs"
+                                      >
+                                        Join
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleStartCall(log.chatId, log.type)}
+                                        className="h-6 w-6 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 rounded-md shrink-0 transition-colors"
+                                        title="Redial"
+                                      >
+                                        {log.type === CallType.Video ? <Video className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                          {isFetchingMoreCallLogs && (
+                            <div className="flex justify-center py-2">
+                              <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+                            </div>
+                          )}
+                          {!isFetchingMoreCallLogs && hasMoreCallLogs && (
+                            <div ref={sideCallLogsLoaderRef} className="h-4 w-full" />
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] text-[#667781] p-12 text-center">
@@ -16261,6 +18659,474 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Call Dialog (WhatsApp style overlay) */}
+      <Dialog open={isCallModalOpen} onOpenChange={(open) => {
+        setIsCallModalOpen(open);
+      }}>
+        <DialogContent 
+          showCloseButton={false} 
+          className="max-w-[500px] w-[95vw] h-[650px] p-0 overflow-hidden rounded-3xl border border-black/40 shadow-2xl bg-[#111b21] text-white flex flex-col justify-between"
+        >
+          {/* Custom style for keyframe animations (sound waves and pulsing) */}
+          <style dangerouslySetInnerHTML={{__html: `
+            @keyframes soundwave {
+              0%, 100% { height: 8px; }
+              50% { height: 42px; }
+            }
+            @keyframes minisoundwave {
+              0%, 100% { height: 4px; }
+              50% { height: 16px; }
+            }
+            .mini-bar {
+              animation: minisoundwave infinite ease-in-out alternate;
+            }
+            @keyframes callripple {
+              0% { transform: scale(0.95); opacity: 0.5; }
+              50% { transform: scale(1.15); opacity: 0.2; }
+              100% { transform: scale(1.3); opacity: 0; }
+            }
+          `}} />
+
+          {activeCall ? (
+            <>
+              {/* Call Header */}
+              <div className="pt-5 px-6 shrink-0 flex flex-col items-center gap-1 z-10 relative">
+                {/* Minimize Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsCallModalOpen(false)}
+                  className="absolute top-2 right-4 rounded-full h-8 w-8 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                  title="Minimize Call"
+                >
+                  <Minimize className="h-5 w-5" />
+                </Button>
+
+                <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold uppercase tracking-[0.15em]">
+                  <Lock className="h-3 w-3 text-emerald-500" />
+                  <span>End-to-End Encrypted</span>
+                </div>
+                <h3 className="text-xl font-black tracking-tight text-white mt-1">
+                  {(() => {
+                    const callChat = chats.find(c => c.id === activeCall.chatId);
+                    return callChat ? getChatDisplayName(callChat) : "HanssonHub Call";
+                  })()}
+                </h3>
+                <span className="text-xs text-slate-400 font-medium tracking-wide">
+                  <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    {activeCall.status === CallStatus.Ringing ? (
+                      <span>Ringing...</span>
+                    ) : (
+                      <>
+                        <span>In progress</span>
+                        <span className="text-slate-500">•</span>
+                        <span className="font-mono text-xs">{formatCallTimer(callDurationSeconds)}</span>
+                      </>
+                    )}
+                  </span>
+                </span>
+              </div>
+
+              {/* Call Body */}
+              <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-10 w-full overflow-hidden">
+                {(() => {
+                  const callChat = chats.find(c => c.id === activeCall.chatId);
+                  const isGroupCall = callChat?.isGroup ?? false;
+                  const otherPersonFromChat = callChat?.participants?.find(p => p.personId !== userProfile?.id);
+                  const chatDisplayName = callChat ? getChatDisplayName(callChat) : "User";
+                  const chatDisplayImage = callChat ? getChatDisplayImageUrl(callChat) : null;
+
+                  let rawParticipants = activeCall.participants.filter(p => {
+                    if (p.personId === userProfile?.id) return false;
+                    if (isGroupCall) {
+                      return p.status === CallParticipantStatus.Connected;
+                    }
+                    return true;
+                  });
+
+                  if (!isGroupCall && rawParticipants.length === 0) {
+                    rawParticipants = [{
+                      personId: otherPersonFromChat?.personId || 0,
+                      fullName: otherPersonFromChat?.fullName || chatDisplayName,
+                      profileImage: otherPersonFromChat?.imageUrl || chatDisplayImage || undefined,
+                      status: activeCall.status === CallStatus.Connected ? CallParticipantStatus.Connected : CallParticipantStatus.Ringing,
+                      isMuted: false,
+                      isCameraEnabled: activeCall.type === CallType.Video,
+                      isSharing: false
+                    }];
+                  }
+
+                  const displayParticipants = rawParticipants.map(p => ({
+                    ...p,
+                    fullName: p.fullName || (otherPersonFromChat?.personId === p.personId || !isGroupCall ? (otherPersonFromChat?.fullName || chatDisplayName) : undefined) || chatDisplayName,
+                    profileImage: p.profileImage || (otherPersonFromChat?.personId === p.personId || !isGroupCall ? (otherPersonFromChat?.imageUrl || chatDisplayImage || undefined) : undefined)
+                  }));
+
+                  if (activeCall.status === CallStatus.Ringing && !isGroupCall) {
+                    /* Single 1-on-1 Ringing State */
+                    return (activeCall.type === CallType.Video && !isIncomingCall) ? (
+                      <div className="flex flex-col items-center justify-center gap-6">
+                        <div className="relative w-64 h-48 md:w-80 md:h-60 bg-slate-900 border-2 border-emerald-500/30 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
+                          {isCallCameraEnabled ? (
+                            <LocalVideoFeed />
+                          ) : (
+                            <div className="flex flex-col items-center gap-2">
+                              <VideoOff className="h-8 w-8 text-slate-500 animate-pulse" />
+                              <span className="text-xs text-slate-400">Camera is off</span>
+                            </div>
+                          )}
+                          
+                          <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/5 text-[10px] font-bold text-emerald-400 z-20">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span>LIVE PREVIEW</span>
+                          </div>
+
+                          <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/5 z-20">
+                            <div className="h-6 w-6 rounded-full bg-slate-800 overflow-hidden flex items-center justify-center text-[10px] font-black text-slate-300">
+                              {(() => {
+                                const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
+                                const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
+                                if (displayImageUrl) {
+                                  return <img src={getFullImageUrl(displayImageUrl)} alt="Target" className="h-full w-full object-cover" />;
+                                }
+                                return <span>{displayInitial}</span>;
+                              })()}
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-300 truncate max-w-[100px]">
+                              {callChat ? getChatDisplayName(callChat) : "Calling..."}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 px-4 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-emerald-400 shadow-sm">
+                          <Video className="h-3.5 w-3.5 animate-pulse" />
+                          <span>Outgoing Video Call...</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-8">
+                        <div className="relative">
+                          <div className="absolute inset-0 bg-emerald-500 rounded-full animate-pulse opacity-25" style={{ animation: 'callripple 2s infinite' }} />
+                          <div className="absolute inset-0 bg-emerald-500 rounded-full animate-pulse opacity-15" style={{ animation: 'callripple 2s infinite 0.7s' }} />
+                          
+                          <div className="h-32 w-32 rounded-full bg-slate-800 border-4 border-slate-700/80 overflow-hidden shadow-2xl relative z-10 flex items-center justify-center text-4xl font-bold">
+                            {(() => {
+                              const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
+                              const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
+                              if (displayImageUrl) {
+                                return <img src={getFullImageUrl(displayImageUrl)} alt="Caller" className="h-full w-full object-cover" />;
+                              }
+                              return <span>{displayInitial}</span>;
+                            })()}
+                          </div>
+                        </div>
+                        
+                        {activeCall.type === CallType.Video && (
+                          <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 px-4 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-emerald-400 shadow-sm">
+                            <Video className="h-3.5 w-3.5 animate-pulse" />
+                            <span>Camera requested</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  /* Connected Call State or Group Call Ringing State */
+                  return (
+                    <div className="h-full w-full flex flex-col justify-center items-center gap-4">
+                      {activeCall.type === CallType.Video ? (
+                        /* Video Grid Layout */
+                        <div className={cn(
+                          "grid gap-3 w-full h-full max-h-[380px] overflow-y-auto custom-scrollbar p-1",
+                          (displayParticipants.length + 1) === 1 ? "grid-cols-1" :
+                          (displayParticipants.length + 1) <= 4 ? "grid-cols-2" :
+                          "grid-cols-3"
+                        )}>
+                          {/* Current User Card */}
+                          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px]">
+                            {isCallCameraEnabled ? (
+                              <LocalVideoFeed />
+                            ) : (
+                              <div className="flex flex-col items-center gap-2">
+                                <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 font-bold text-lg">
+                                  {userProfile?.getPersonDetailsDto?.imageUrl ? (
+                                    <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="You" className="h-full w-full object-cover" />
+                                  ) : (
+                                    <span>{userProfile?.getPersonDetailsDto?.firstName ? userProfile.getPersonDetailsDto.firstName[0] : "Y"}</span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Your Camera Off</span>
+                              </div>
+                            )}
+                            <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-wide text-white border border-white/10 flex items-center gap-1">
+                              <span>You</span>
+                              {isCallMuted && <MicOff className="h-3 w-3 text-rose-400" />}
+                            </div>
+                          </div>
+
+                          {/* Other Participants Cards */}
+                          {displayParticipants.map(p => {
+                            const pStatus = p.status ?? CallParticipantStatus.Ringing;
+                            const isConnected = pStatus === CallParticipantStatus.Connected;
+                            const isDeclined = pStatus === CallParticipantStatus.Declined;
+                            const isLeft = pStatus === CallParticipantStatus.Left;
+
+                            return (
+                              <div key={p.personId} className={cn(
+                                "relative bg-slate-900 border rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px] transition-all",
+                                isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/40 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
+                              )}>
+                                {p.isCameraEnabled && isConnected ? (
+                                  <div className="absolute inset-0 bg-slate-950 flex items-center justify-center overflow-hidden">
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
+                                    <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 text-lg font-bold animate-pulse">
+                                      {p.profileImage ? (
+                                        <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <span>{p.fullName ? p.fullName[0] : "P"}</span>
+                                      )}
+                                    </div>
+                                    <div className="absolute inset-0 flex flex-col justify-center items-center bg-black/40 gap-1.5">
+                                      <div className="relative flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                      </div>
+                                      <span className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">Live Feed</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center gap-2 p-2">
+                                    <div className="h-14 w-14 rounded-full bg-slate-800 border border-slate-700/60 overflow-hidden flex items-center justify-center text-lg font-bold text-slate-300 shadow-md">
+                                      {p.profileImage ? (
+                                        <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <span>{p.fullName ? p.fullName[0] : "P"}</span>
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 truncate max-w-[100px]">
+                                      {p.fullName || "User"}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Participant Status Pill Overlay */}
+                                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold text-white border border-white/10 z-20">
+                                  <span className="truncate max-w-[100px]">{p.fullName || "User"}</span>
+                                  {isGroupCall && (
+                                    isConnected ? (
+                                      <span className="text-[9px] text-emerald-400 font-extrabold flex items-center gap-1">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" /> Joined
+                                      </span>
+                                    ) : isDeclined ? (
+                                      <span className="text-[9px] text-rose-400 font-extrabold">Declined</span>
+                                    ) : isLeft ? (
+                                      <span className="text-[9px] text-slate-400 font-extrabold">Left</span>
+                                    ) : (
+                                      <span className="text-[9px] text-amber-400 font-extrabold flex items-center gap-1">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" /> Ringing...
+                                      </span>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        /* Audio Call Grid */
+                        <div className="w-full flex flex-col items-center justify-start gap-4 py-2 overflow-y-auto custom-scrollbar max-h-[380px]">
+                          <div className="flex flex-wrap justify-center gap-4 items-center w-full px-2">
+                            {/* Local participant card */}
+                            <div className={cn(
+                              "relative bg-[#1f2c34] border border-[#2a3942] rounded-2xl p-4 flex flex-col items-center gap-2 shadow-lg min-w-[130px]",
+                              !isCallMuted && "ring-2 ring-emerald-500/40"
+                            )}>
+                              <div className="h-16 w-16 rounded-full bg-emerald-500/10 border-2 border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-400 font-extrabold text-xl relative shadow-inner">
+                                {userProfile?.getPersonDetailsDto?.imageUrl ? (
+                                  <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="You" className="h-full w-full object-cover" />
+                                ) : (
+                                  <span>{userProfile?.getPersonDetailsDto?.firstName ? userProfile.getPersonDetailsDto.firstName[0] : "Y"}</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-bold text-white">You</span>
+                              <LocalCallSoundwave isMuted={isCallMuted} />
+                            </div>
+
+                            {/* Remote participants cards with status badges */}
+                            {displayParticipants.map(p => {
+                              const pStatus = p.status ?? CallParticipantStatus.Ringing;
+                              const isConnected = pStatus === CallParticipantStatus.Connected;
+                              const isDeclined = pStatus === CallParticipantStatus.Declined;
+                              const isLeft = pStatus === CallParticipantStatus.Left;
+
+                              return (
+                                <div key={p.personId} className={cn(
+                                  "relative bg-[#1f2c34] border rounded-2xl p-4 flex flex-col items-center gap-2 shadow-lg min-w-[130px] transition-all",
+                                  isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/30 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
+                                )}>
+                                  <div className="h-16 w-16 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center text-xl font-extrabold text-slate-300 relative shadow-inner">
+                                    {p.profileImage ? (
+                                      <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
+                                    ) : (
+                                      <span>{p.fullName ? p.fullName[0] : "P"}</span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs font-bold text-white truncate max-w-[100px]">{p.fullName || "User"}</span>
+                                  
+                                  {isConnected ? (
+                                    <RemoteCallSoundwave isMuted={p.isMuted} />
+                                  ) : isGroupCall ? (
+                                    <span className={cn(
+                                      "text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/5",
+                                      isDeclined ? "bg-rose-500/20 text-rose-400" : isLeft ? "bg-slate-800 text-slate-400" : "bg-amber-500/20 text-amber-400 animate-pulse"
+                                    )}>
+                                      {isDeclined ? "Declined" : isLeft ? "Left" : "Ringing..."}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Call Controls Toolbar Footer */}
+              <div className="pb-10 pt-4 px-6 shrink-0 flex items-center justify-center gap-6 bg-gradient-to-t from-black/60 to-transparent z-10">
+                {activeCall.status === CallStatus.Connected ? (
+                  /* Call Controls */
+                  <>
+                    {/* Speaker Toggle */}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleToggleCallSpeaker}
+                      className={cn(
+                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
+                        isCallSpeakerEnabled 
+                          ? "bg-slate-800 text-emerald-400 hover:bg-slate-700/80" 
+                          : "bg-slate-800 text-white hover:bg-slate-700/80"
+                      )}
+                      title={isCallSpeakerEnabled ? "Speaker On" : "Speaker Off"}
+                    >
+                      {isCallSpeakerEnabled ? <Volume2 className="h-5 w-5" /> : <Volume1 className="h-5 w-5 text-slate-400" />}
+                    </Button>
+
+                    {/* Microphone Toggle */}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleToggleCallMicrophone}
+                      className={cn(
+                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
+                        isCallMuted 
+                          ? "bg-rose-500 text-white hover:bg-rose-600" 
+                          : "bg-slate-800 text-white hover:bg-slate-700/80"
+                      )}
+                      title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
+                    >
+                      {isCallMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                    </Button>
+
+                    {/* Camera Toggle */}
+                    {activeCall.type === CallType.Video && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={handleToggleCallCamera}
+                        className={cn(
+                          "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
+                          !isCallCameraEnabled 
+                            ? "bg-rose-500 text-white hover:bg-rose-600" 
+                            : "bg-slate-800 text-white hover:bg-slate-700/80"
+                        )}
+                        title={isCallCameraEnabled ? "Disable Camera" : "Enable Camera"}
+                      >
+                        {isCallCameraEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+                      </Button>
+                    )}
+
+                    {/* Screen Sharing Toggle */}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleToggleCallScreenShare}
+                      className={cn(
+                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
+                        isCallScreenSharing 
+                          ? "bg-emerald-500 text-white hover:bg-emerald-600" 
+                          : "bg-slate-800 text-white hover:bg-slate-700/80"
+                      )}
+                      title={isCallScreenSharing ? "Stop Screen Share" : "Share Screen"}
+                    >
+                      <LayoutGrid className="h-5 w-5" />
+                    </Button>
+
+                    {/* Red Call termination button */}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleTerminateCall}
+                      className="h-14 w-14 rounded-full border-none bg-rose-600 hover:bg-rose-700 text-white shadow-lg flex items-center justify-center transition-all hover:scale-105"
+                      title="End Call"
+                    >
+                      <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
+                    </Button>
+                  </>
+                ) : (
+                  /* Ringing State Actions */
+                  (isIncomingCall && activeCall.callerPersonId !== userProfile.id) ? (
+                    /* Incoming Call Options */
+                    <div className="flex items-center gap-12">
+                      {/* Accept Button */}
+                      <Button
+                        onClick={() => handleAcceptCall(activeCall.id, activeCall.chatId)}
+                        className="h-14 w-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
+                        title="Accept Call"
+                      >
+                        <Phone className="h-6 w-6 fill-current text-white" />
+                      </Button>
+
+                      {/* Reject Button */}
+                      <Button
+                        onClick={() => handleRejectCall(activeCall.id, activeCall.chatId)}
+                        className="h-14 w-14 rounded-full bg-rose-600 hover:bg-rose-700 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
+                        title="Decline Call"
+                      >
+                        <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
+                      </Button>
+                    </div>
+                  ) : (
+                    /* Outgoing Call Options */
+                    <Button
+                      onClick={handleTerminateCall}
+                      className="h-14 w-14 rounded-full bg-rose-600 hover:bg-rose-700 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
+                      title="End Call"
+                    >
+                      <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
+                    </Button>
+                  )
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-slate-400">
+              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+              <span className="text-xs font-semibold uppercase tracking-wider mt-2">Loading call data...</span>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+
 
 <Dialog open={isEditGroupOpen} onOpenChange={(open) => {
         setIsEditGroupOpen(open);
@@ -17765,6 +20631,95 @@ export default function App() {
         </AnimatePresence>
       </div>
 
+      {activeCall && !isCallModalOpen && (
+        <div 
+          onClick={() => setIsCallModalOpen(true)}
+          className="fixed bottom-24 right-6 z-[10000] bg-slate-900/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+        >
+          {/* Pulsing Avatar indicator */}
+          <div className="relative">
+            <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-25" />
+            <div className="h-10 w-10 rounded-full bg-slate-800 border-2 border-emerald-500 overflow-hidden flex items-center justify-center font-bold text-sm shrink-0">
+              {(() => {
+                const callChat = chats.find(c => c.id === activeCall.chatId);
+                const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
+                const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
+                if (displayImageUrl) {
+                  return <img src={getFullImageUrl(displayImageUrl)} alt="Call" className="h-full w-full object-cover" />;
+                }
+                return <span>{displayInitial}</span>;
+              })()}
+            </div>
+            {/* Call type icon badge */}
+            <div className="absolute -bottom-1 -right-1 h-5 w-5 bg-emerald-500 border border-slate-900 rounded-full flex items-center justify-center">
+              {activeCall.type === CallType.Video ? (
+                <Video className="h-2.5 w-2.5 text-white" />
+              ) : (
+                <Phone className="h-2.5 w-2.5 text-white fill-current" />
+              )}
+            </div>
+          </div>
+
+          {/* Call details */}
+          <div className="flex flex-col text-left font-sans">
+            <span className="text-xs font-bold text-white max-w-[120px] truncate">
+              {(() => {
+                const callChat = chats.find(c => c.id === activeCall.chatId);
+                return callChat ? getChatDisplayName(callChat) : "Active Call";
+              })()}
+            </span>
+            <span className="text-[10px] font-medium text-emerald-400 mt-0.5 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {activeCall.status === CallStatus.Ringing ? "Ringing..." : `In progress • ${formatCallTimer(callDurationSeconds)}`}
+            </span>
+          </div>
+
+          {/* Separator */}
+          <div className="w-[1px] h-6 bg-slate-700/80 mx-1" />
+
+          {/* Floating Actions */}
+          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            {/* Quick Toggle Microphone */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleToggleCallMicrophone}
+              className={cn(
+                "h-8 w-8 rounded-full border-none transition-all p-0 flex items-center justify-center",
+                isCallMuted 
+                  ? "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30" 
+                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              )}
+              title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
+            >
+              {isCallMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+
+            {/* Quick End Call */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleTerminateCall}
+              className="h-8 w-8 rounded-full border-none bg-rose-600 hover:bg-rose-700 text-white p-0 flex items-center justify-center"
+              title="End Call"
+            >
+              <Phone className="h-4 w-4 fill-current text-white rotate-[135deg]" />
+            </Button>
+            
+            {/* Quick Return */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsCallModalOpen(true)}
+              className="h-8 w-8 rounded-full border-none bg-slate-800 hover:bg-slate-700 text-slate-300 p-0 flex items-center justify-center"
+              title="Maximize"
+            >
+              <Maximize className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <AnimatePresence>
         {isScreensaverOpen && (
           <motion.div 
@@ -17782,8 +20737,12 @@ export default function App() {
               'grid-cols-3 grid-rows-2'
             }`}>
               {userProfile.cameraIds?.map((camId, i) => {
-                const camName = (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name || `Camera ${camId}`;
-                const videoUrl = i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4";
+                const camDto = (cameras || []).find(c => c.id.toString() === camId.toString());
+                const camName = camDto?.cameraName || (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name || `Camera ${camId}`;
+                const rawUrl = camDto?.liveStreamUrl;
+                const videoUrl = rawUrl 
+                  ? resolveCameraUrl(rawUrl) 
+                  : (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
                 
                 return (
                   <div key={i} className="relative bg-slate-900 rounded-sm overflow-hidden border border-white/5">
