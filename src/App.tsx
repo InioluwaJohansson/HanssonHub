@@ -2172,7 +2172,8 @@ export default function App() {
 
   // New State
   const [logs, setLogs] = React.useState<GetLogDto[]>([]);
-  const [visibleLogsCount, setVisibleLogsCount] = React.useState<number>(50);
+  const [logPage, setLogPage] = React.useState<number>(1);
+  const [hasMoreLogs, setHasMoreLogs] = React.useState<boolean>(true);
   const [selectedLog, setSelectedLog] = React.useState<GetLogDto | null>(null);
   const [isViewLogOpen, setIsViewLogOpen] = React.useState<boolean>(false);
   const loaderRef = React.useRef<HTMLDivElement>(null);
@@ -3091,7 +3092,9 @@ export default function App() {
     // 15. Activity Logs Fetching
     if (activeView === 'logs') {
       const page = 1;
-      const pageSize = 5000;
+      const pageSize = 50;
+      setLogPage(page);
+      setHasMoreLogs(true);
       
       const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
         if (!dateVal) return '';
@@ -3110,26 +3113,32 @@ export default function App() {
           .then((res: any) => {
             if (res && res.data && Array.isArray(res.data)) {
               setLogs(res.data);
+              setHasMoreLogs(res.data.length >= pageSize);
             } else {
               setLogs([]);
+              setHasMoreLogs(false);
             }
           })
           .catch(err => {
             console.error("Failed to load logs by date", err);
             setLogs([]);
+            setHasMoreLogs(false);
           });
       } else {
         apiFetch(`/Log/GetAllLogs?page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
           .then((res: any) => {
             if (res && res.data && Array.isArray(res.data)) {
               setLogs(res.data);
+              setHasMoreLogs(res.data.length >= pageSize);
             } else {
               setLogs([]);
+              setHasMoreLogs(false);
             }
           })
           .catch(err => {
             console.error("Failed to load logs", err);
             setLogs([]);
+            setHasMoreLogs(false);
           });
       }
     }
@@ -6578,32 +6587,65 @@ export default function App() {
     }
   };
 
+  const fetchMoreLogs = React.useCallback(async () => {
+    if (isPagingLoading || !hasMoreLogs) return;
+    setIsPagingLoading(true);
+    
+    const nextPage = logPage + 1;
+    const pageSize = 50;
+    
+    const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
+      if (!dateVal) return '';
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+
+    try {
+      let res;
+      if (logStartDate || logEndDate) {
+        const startStr = formatDateToDDMMYYYY(logStartDate);
+        const endStr = formatDateToDDMMYYYY(logEndDate || new Date());
+        res = await apiFetch(`/Log/GetAllLogsByDate?startDate=${startStr}&endDate=${endStr}&page=${nextPage}&pageSize=${pageSize}`, { method: 'POST', body: '' });
+      } else {
+        res = await apiFetch(`/Log/GetAllLogs?page=${nextPage}&pageSize=${pageSize}`, { method: 'POST', body: '' });
+      }
+      
+      const resData = res as any;
+      if (resData && resData.data && Array.isArray(resData.data)) {
+        if (resData.data.length > 0) {
+          setLogs(prev => [...prev, ...resData.data]);
+          setLogPage(nextPage);
+        }
+        if (resData.data.length < pageSize) {
+          setHasMoreLogs(false);
+        }
+      } else {
+        setHasMoreLogs(false);
+      }
+    } catch (err) {
+      console.error("Failed to load more logs", err);
+    } finally {
+      setIsPagingLoading(false);
+    }
+  }, [logPage, hasMoreLogs, isPagingLoading, logStartDate, logEndDate]);
+
   React.useEffect(() => {
     if (activeView !== 'logs' || !loaderRef.current) return;
+    if (!hasMoreLogs || isPagingLoading) return;
     
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !isPagingLoading) {
-        const filteredLogsCount = logs.filter(log => {
-          if (!logStartDate && !logEndDate) return true;
-          const logDate = new Date(log.timeOfAction);
-          const start = logStartDate ? new Date(logStartDate) : new Date(0);
-          const end = logEndDate ? new Date(logEndDate) : new Date();
-          return logDate >= start && logDate <= end;
-        }).length;
-
-        if (visibleLogsCount < filteredLogsCount) {
-          setIsPagingLoading(true);
-          setTimeout(() => {
-            setVisibleLogsCount(prev => prev + 50);
-            setIsPagingLoading(false);
-          }, 500);
-        }
+      if (entries[0].isIntersecting && !isPagingLoading && hasMoreLogs) {
+        fetchMoreLogs();
       }
     }, { root: null, rootMargin: '100px', threshold: 0.1 });
 
     observer.observe(loaderRef.current);
     return () => observer.disconnect();
-  }, [activeView, isPagingLoading, logs, visibleLogsCount, logStartDate, logEndDate]);
+  }, [activeView, isPagingLoading, hasMoreLogs, fetchMoreLogs]);
 
   React.useEffect(() => {
     if (!hasMoreCallLogs || isFetchingMoreCallLogs || isCallLogsLoading) return;
@@ -8499,7 +8541,7 @@ export default function App() {
         return logDate >= start && logDate <= end;
       });
 
-      const displayedLogs = filteredLogs.slice(0, visibleLogsCount);
+      const displayedLogs = filteredLogs;
 
       const getActionTypeBadgeColor = (type: string) => {
         switch (type) {
@@ -8562,7 +8604,7 @@ export default function App() {
                       selected={logStartDate ? new Date(logStartDate) : undefined}
                       onSelect={(date) => {
                         setLogStartDate(date ? date.toISOString() : '');
-                        setVisibleLogsCount(50); // Reset page count on filter
+                        setLogPage(1); // Reset page count on filter
                       }}
                       initialFocus
                       className="rounded-2xl"
@@ -8593,7 +8635,7 @@ export default function App() {
                       selected={logEndDate ? new Date(logEndDate) : undefined}
                       onSelect={(date) => {
                         setLogEndDate(date ? date.toISOString() : '');
-                        setVisibleLogsCount(50); // Reset page count on filter
+                        setLogPage(1); // Reset page count on filter
                       }}
                       initialFocus
                       className="rounded-2xl"
@@ -8605,7 +8647,7 @@ export default function App() {
                 variant="ghost" 
                 size="icon" 
                 className="mt-5 h-10 w-10 hover:bg-destructive/10 hover:text-destructive rounded-xl transition-colors"
-                onClick={() => { setLogStartDate(''); setLogEndDate(''); setVisibleLogsCount(50); }}
+                onClick={() => { setLogStartDate(''); setLogEndDate(''); setLogPage(1); }}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
@@ -8667,7 +8709,7 @@ export default function App() {
             </div>
 
             {/* Paging / Loading Trigger element */}
-            {visibleLogsCount < filteredLogs.length && (
+            {hasMoreLogs && (
               <div 
                 ref={loaderRef} 
                 className="p-6 flex flex-col items-center justify-center gap-2 border-t bg-muted/5"
@@ -8682,15 +8724,9 @@ export default function App() {
                     variant="ghost" 
                     size="sm" 
                     className="text-muted-foreground hover:text-foreground text-xs font-semibold py-1.5 px-4 rounded-xl border-dashed border hover:border-solid bg-background/50 hover:bg-background transition-all"
-                    onClick={() => {
-                      setIsPagingLoading(true);
-                      setTimeout(() => {
-                        setVisibleLogsCount(prev => prev + 50);
-                        setIsPagingLoading(false);
-                      }, 400);
-                    }}
+                    onClick={() => fetchMoreLogs()}
                   >
-                    Load More ({filteredLogs.length - visibleLogsCount} remaining)
+                    Load More
                   </Button>
                 )}
               </div>
@@ -16991,9 +17027,9 @@ export default function App() {
                                             : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
                                       </span>
                                     </div>
-                                    {logChat?.isGroup && log.participants && log.participants.length > 0 && (
+                                    {logChat?.isGroup && log.participants && log.participants.length > 0 && log.callerPersonId === userProfile?.id && (
                                       <div className="mt-2 text-[10px] text-slate-500 font-medium flex flex-wrap gap-1.5">
-                                        {log.participants.map((p, pIdx) => {
+                                        {log.participants.filter((p: any) => p.personId !== userProfile?.id).map((p: any, pIdx: number) => {
                                           let statusColor = "text-slate-500 bg-slate-100";
                                           let statusText = "Ringing";
                                           if (p.status === CallParticipantStatus.Connected) {
