@@ -139,11 +139,11 @@ import {
   Zap,
   Lock,
   Unlock,
+  Repeat,
   Camera,
   Plus,
   Tag,
   Film,
-  Sun,
   Home as HomeIcon,
   Sofa,
   Utensils,
@@ -194,8 +194,6 @@ import {
   MessageSquare,
   Send,
   Paperclip,
-  Mic,
-  MicOff,
   PhoneOff,
   Image as ImageIcon,
   FileText,
@@ -245,7 +243,11 @@ import {
   Volume1,
   PhoneIncoming,
   PhoneOutgoing,
-  ArrowDownUp
+  ArrowDownUp,
+  Moon,
+  Sun,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
@@ -253,6 +255,7 @@ import { cn } from '@/lib/utils';
 import { LoginScreen } from './components/LoginScreen';
 import { RememberedUsersManager } from './utils/rememberedUsers';
 import { RecordingWaveform } from './components/RecordingWaveform';
+import { GrainyAudioOverlay } from './components/GrainyAudioOverlay';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
 import { initSignalR } from './lib/signalR';
@@ -343,12 +346,23 @@ const getFullImageUrl = (url: string | null | undefined): string | undefined => 
 };
 
 const NoItems = ({ icon: Icon = Info, message = "No items found." }: { icon?: any, message?: string }) => (
-  <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200 w-full">
-    <div className="h-16 w-16 rounded-full bg-white flex items-center justify-center text-slate-400 mb-4 shadow-sm">
+  <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-slate-50/50 dark:bg-zinc-950 rounded-3xl border-2 border-dashed border-slate-200 dark:border-zinc-800 w-full transition-colors">
+    <div className="h-16 w-16 rounded-full bg-white dark:bg-zinc-800 flex items-center justify-center text-slate-400 dark:text-zinc-400 mb-4 shadow-sm border border-slate-100 dark:border-zinc-700">
       <Icon className="h-8 w-8" />
     </div>
-    <h3 className="text-lg font-semibold text-slate-900">{message}</h3>
-    <p className="text-sm text-slate-500 mt-1 max-w-[250px] mx-auto">It looks like you haven't added anything here yet. Get started by clicking the add button.</p>
+    <h3 className="text-lg font-semibold text-slate-900 dark:text-zinc-100">{message}</h3>
+    <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-[250px] mx-auto">It looks like you haven't added anything here yet. Get started by clicking the add button.</p>
+  </div>
+);
+
+const ThreeDotsLoading = ({ label = "Loading data..." }: { label?: string }) => (
+  <div className="col-span-full flex flex-col items-center justify-center py-16 space-y-4 w-full bg-slate-50/30 dark:bg-zinc-950/30 rounded-3xl border border-dashed border-slate-200/60 dark:border-zinc-800/60 animate-in fade-in duration-300">
+    <div className="flex space-x-2.5 items-center">
+      <div className="w-3.5 h-3.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+      <div className="w-3.5 h-3.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+      <div className="w-3.5 h-3.5 bg-primary rounded-full animate-bounce"></div>
+    </div>
+    <span className="text-sm font-medium text-slate-500 dark:text-zinc-400">{label}</span>
   </div>
 );
 
@@ -454,6 +468,68 @@ const getProp = (obj: any, propName: string) => {
     }
   }
   return undefined;
+};
+
+const formatTimeSpanForPayload = (timeStr: any): string => {
+  if (!timeStr && timeStr !== 0) return "00:00:00";
+  let str = '';
+  if (typeof timeStr === 'string') {
+    str = timeStr;
+  } else if (typeof timeStr === 'object') {
+    const h = String(timeStr.hours ?? timeStr.Hours ?? 0).padStart(2, '0');
+    const m = String(timeStr.minutes ?? timeStr.Minutes ?? 0).padStart(2, '0');
+    const s = String(timeStr.seconds ?? timeStr.Seconds ?? 0).padStart(2, '0');
+    str = `${h}:${m}:${s}`;
+  } else {
+    str = String(timeStr);
+  }
+  if (/^\d{2}:\d{2}$/.test(str)) {
+    return `${str}:00`;
+  }
+  return str || "00:00:00";
+};
+
+const formatTimeSpanDisplay = (timeVal: any): string => {
+  if (!timeVal && timeVal !== 0) return '';
+  let str = '';
+  if (typeof timeVal === 'string') {
+    str = timeVal;
+  } else if (typeof timeVal === 'object') {
+    const h = String(timeVal.hours ?? timeVal.Hours ?? 0).padStart(2, '0');
+    const m = String(timeVal.minutes ?? timeVal.Minutes ?? 0).padStart(2, '0');
+    const s = String(timeVal.seconds ?? timeVal.Seconds ?? 0).padStart(2, '0');
+    str = `${h}:${m}:${s}`;
+  } else {
+    str = String(timeVal);
+  }
+  const match = str.match(/^(\d{2}):(\d{2})/);
+  if (match) {
+    const hours = parseInt(match[1], 10);
+    const minutes = match[2];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 === 0 ? 12 : hours % 12;
+    return `${h12}:${minutes} ${ampm}`;
+  }
+  return str;
+};
+
+const formatTimeSpanForInput = (timeVal: any): string => {
+  if (!timeVal && timeVal !== 0) return '00:00';
+  let str = '';
+  if (typeof timeVal === 'string') {
+    str = timeVal;
+  } else if (typeof timeVal === 'object') {
+    const h = String(timeVal.hours ?? timeVal.Hours ?? 0).padStart(2, '0');
+    const m = String(timeVal.minutes ?? timeVal.Minutes ?? 0).padStart(2, '0');
+    str = `${h}:${m}`;
+  } else {
+    str = String(timeVal);
+  }
+  const match = str.match(/^(\d{2}):(\d{2})/);
+  if (match) {
+    return `${match[1]}:${match[2]}`;
+  }
+  return '00:00';
 };
 
 const isExternalTriggered = (e: any): boolean => {
@@ -1368,7 +1444,7 @@ const CustomAudioPlayer = ({
           </div>
 
           {/* Time Display beneath slider at the right */}
-          <div className="flex justify-end text-[10px] text-[#667781] mt-0.5 font-medium px-0.5">
+          <div className="flex justify-end text-[10px] text-[#667781] dark:text-zinc-400 mt-0.5 font-medium px-0.5">
             <span>
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
@@ -2080,6 +2156,10 @@ export default function App() {
   const [facilitySearchQuery, setFacilitySearchQuery] = React.useState('');
   const [facilitySortBy, setFacilitySortBy] = React.useState<'room' | 'section'>('room');
 
+  React.useEffect(() => {
+    setFacilitySearchQuery('');
+  }, [activeView]);
+
   const syncDevicesFromFetchedType = (type: string, fetchedData: any[]) => {
     setDevices(prev => {
       const otherDevices = prev.filter(d => d.type !== type);
@@ -2170,6 +2250,38 @@ export default function App() {
     });
   };
 
+  // Theme & App Bar States
+  const [theme, setTheme] = React.useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('app-theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+  const [isHeaderMicMuted, setIsHeaderMicMuted] = React.useState<boolean>(false);
+  const [isMicOverlayActive, setIsMicOverlayActive] = React.useState<boolean>(false);
+  const [isMicMinimized, setIsMicMinimized] = React.useState<boolean>(false);
+
+  const [transcription, setTranscription] = React.useState<string>("");
+  const wasCallMutedBeforeHeyFridayRef = React.useRef<boolean>(false);
+  const speechRecognitionRef = React.useRef<any>(null);
+
+
+  
+  
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('app-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = React.useCallback(() => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
   // New State
   const [logs, setLogs] = React.useState<GetLogDto[]>([]);
   const [logPage, setLogPage] = React.useState<number>(1);
@@ -2181,6 +2293,14 @@ export default function App() {
   const sideCallLogsLoaderRef = React.useRef<HTMLDivElement>(null);
   const [isPagingLoading, setIsPagingLoading] = React.useState<boolean>(false);
   const [globalFetching, setGlobalFetching] = React.useState(0);
+  const [loadingViews, setLoadingViews] = React.useState<Record<string, boolean>>({});
+
+  const isViewLoading = React.useCallback((viewName: string) => {
+    if (loadingViews[viewName] !== undefined) {
+      return loadingViews[viewName];
+    }
+    return !fetchedViewsRef.current[viewName] && globalFetching > 0;
+  }, [loadingViews, globalFetching]);
 
   React.useEffect(() => {
     const handleStart = () => setGlobalFetching(prev => prev + 1);
@@ -2666,6 +2786,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeView]);
 
+
   React.useEffect(() => {
     if (!isLoggedIn) {
       return;
@@ -2854,43 +2975,48 @@ export default function App() {
 
     // 1.5. Facilities Overview Reload
     if (activeView === 'facilities' || activeView === 'facility-overview') {
-      apiFetch('/Section/GetAllSections', { method: 'POST' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); })
-        .catch(err => console.error("Failed to reload sections for overview", err));
-
-      apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); })
-        .catch(err => console.error("Failed to reload hardwares for overview", err));
-
-      apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
-        .catch(err => console.error("Failed to reload actions for overview", err));
-
-      apiFetch('/Room/GetAllRooms', { method: 'POST' })
-        .then((res: any) => { 
-          if (res && res.data && Array.isArray(res.data)) {
-            setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
-          }
-        })
-        .catch(err => console.error("Failed to reload rooms for overview", err));
-
-      apiFetch('/External/GetAllExternals', { method: 'POST' })
-        .then((res: any) => { 
-          if (res && res.data && Array.isArray(res.data)) { 
-            setExternals(res.data); 
-            syncDevicesFromFetchedType('external', res.data); 
-          } 
-        })
-        .catch(err => console.error("Failed to reload externals for overview", err));
+      if (!fetchedViewsRef.current['facility-overview']) {
+        fetchedViewsRef.current['facility-overview'] = true;
+        fetchedViewsRef.current['facilities'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-overview': true, 'facilities': true }));
+        Promise.all([
+          apiFetch('/Section/GetAllSections', { method: 'POST' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); })
+            .catch(err => console.error("Failed to reload sections for overview", err)),
+          apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); })
+            .catch(err => console.error("Failed to reload hardwares for overview", err)),
+          apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
+            .catch(err => console.error("Failed to reload actions for overview", err)),
+          apiFetch('/Room/GetAllRooms', { method: 'POST' })
+            .then((res: any) => { 
+              if (res && res.data && Array.isArray(res.data)) {
+                setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
+              }
+            })
+            .catch(err => console.error("Failed to reload rooms for overview", err)),
+          apiFetch('/External/GetAllExternals', { method: 'POST' })
+            .then((res: any) => { 
+              if (res && res.data && Array.isArray(res.data)) { 
+                setExternals(res.data); 
+                syncDevicesFromFetchedType('external', res.data); 
+              } 
+            })
+            .catch(err => console.error("Failed to reload externals for overview", err))
+        ]).finally(() => setLoadingViews(prev => ({ ...prev, 'facility-overview': false, 'facilities': false })));
+      }
     }
 
     // 2. All Users (Persons) Page
     if (activeView === 'all-users') {
       if (!fetchedViewsRef.current['all-users']) {
         fetchedViewsRef.current['all-users'] = true;
+        setLoadingViews(prev => ({ ...prev, 'all-users': true }));
         apiFetch('/Person/GetAllPersons', { method: 'POST' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setAllUsers(res.data); else setAllUsers([]); })
-          .catch(err => { console.error("Failed to load persons", err); setAllUsers([]); });
+          .catch(err => { console.error("Failed to load persons", err); setAllUsers([]); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'all-users': false })));
       }
     }
 
@@ -2898,9 +3024,11 @@ export default function App() {
     if (activeView === 'facility-hardware') {
       if (!fetchedViewsRef.current['facility-hardware']) {
         fetchedViewsRef.current['facility-hardware'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-hardware': true }));
         apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); else setHardwares([]); })
-          .catch(err => { console.error("Failed to load hardwares", err); setHardwares([]); });
+          .catch(err => { console.error("Failed to load hardwares", err); setHardwares([]); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-hardware': false })));
       }
     }
 
@@ -2908,6 +3036,7 @@ export default function App() {
     if (activeView === 'facility-cameras') {
       if (!fetchedViewsRef.current['facility-cameras']) {
         fetchedViewsRef.current['facility-cameras'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-cameras': true }));
         apiFetch('/Camera/GetAllCameras', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) { 
@@ -2918,7 +3047,8 @@ export default function App() {
               syncDevicesFromFetchedType('camera', []);
             }
           })
-          .catch(err => { console.error("Failed to load cameras", err); setCameras([]); syncDevicesFromFetchedType('camera', []); });
+          .catch(err => { console.error("Failed to load cameras", err); setCameras([]); syncDevicesFromFetchedType('camera', []); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-cameras': false })));
       }
     }
 
@@ -2926,6 +3056,7 @@ export default function App() {
     if (activeView === 'facility-windows') {
       if (!fetchedViewsRef.current['facility-windows']) {
         fetchedViewsRef.current['facility-windows'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-windows': true }));
         apiFetch('/Window/GetAllWindows', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) { 
@@ -2936,7 +3067,8 @@ export default function App() {
               syncDevicesFromFetchedType('window', []);
             }
           })
-          .catch(err => { console.error("Failed to load windows", err); setWindows([]); syncDevicesFromFetchedType('window', []); });
+          .catch(err => { console.error("Failed to load windows", err); setWindows([]); syncDevicesFromFetchedType('window', []); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-windows': false })));
       }
     }
 
@@ -2944,6 +3076,7 @@ export default function App() {
     if (activeView === 'facility-doors') {
       if (!fetchedViewsRef.current['facility-doors']) {
         fetchedViewsRef.current['facility-doors'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-doors': true }));
         apiFetch('/Door/GetAllDoors', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) { 
@@ -2954,7 +3087,8 @@ export default function App() {
               syncDevicesFromFetchedType('door', []);
             }
           })
-          .catch(err => { console.error("Failed to load doors", err); setDoors([]); syncDevicesFromFetchedType('door', []); });
+          .catch(err => { console.error("Failed to load doors", err); setDoors([]); syncDevicesFromFetchedType('door', []); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-doors': false })));
       }
     }
 
@@ -2962,6 +3096,7 @@ export default function App() {
     if (activeView === 'facility-lights') {
       if (!fetchedViewsRef.current['facility-lights']) {
         fetchedViewsRef.current['facility-lights'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-lights': true }));
         apiFetch('/Light/GetAllLights', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) { 
@@ -2972,7 +3107,8 @@ export default function App() {
               syncDevicesFromFetchedType('light', []);
             }
           })
-          .catch(err => { console.error("Failed to load lights", err); setLights([]); syncDevicesFromFetchedType('light', []); });
+          .catch(err => { console.error("Failed to load lights", err); setLights([]); syncDevicesFromFetchedType('light', []); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-lights': false })));
       }
     }
 
@@ -2980,6 +3116,7 @@ export default function App() {
     if (activeView === 'facility-rooms' || activeView === 'rooms') {
       if (!fetchedViewsRef.current['facility-rooms']) {
         fetchedViewsRef.current['facility-rooms'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-rooms': true, 'rooms': true }));
         apiFetch('/Room/GetAllRooms', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) {
@@ -2988,7 +3125,8 @@ export default function App() {
               setRooms([]);
             }
           })
-          .catch(err => { console.error("Failed to load rooms", err); setRooms([]); });
+          .catch(err => { console.error("Failed to load rooms", err); setRooms([]); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-rooms': false, 'rooms': false })));
       }
     }
 
@@ -2996,27 +3134,35 @@ export default function App() {
     if (activeView === 'facility-sections') {
       if (!fetchedViewsRef.current['facility-sections']) {
         fetchedViewsRef.current['facility-sections'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-sections': true }));
         apiFetch('/Section/GetAllSections', { method: 'POST' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); else setSections([]); })
-          .catch(err => { console.error("Failed to load sections", err); setSections([]); });
+          .catch(err => { console.error("Failed to load sections", err); setSections([]); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-sections': false })));
       }
     }
 
     // 10. Contact (and Categories) Page
     if (activeView === 'contacts') {
-      apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
-        .catch(err => { console.error("Failed to load contact categories", err); setContactCategories([]); });
-      
-      apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); else setContacts([]); })
-        .catch(err => { console.error("Failed to load contacts", err); setContacts([]); });
+      if (!fetchedViewsRef.current['contacts']) {
+        fetchedViewsRef.current['contacts'] = true;
+        setLoadingViews(prev => ({ ...prev, 'contacts': true }));
+        Promise.all([
+          apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
+            .catch(err => { console.error("Failed to load contact categories", err); setContactCategories([]); }),
+          apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContacts(res.data); else setContacts([]); })
+            .catch(err => { console.error("Failed to load contacts", err); setContacts([]); })
+        ]).finally(() => setLoadingViews(prev => ({ ...prev, 'contacts': false })));
+      }
     }
 
     // 11. Appliance Page
     if (activeView === 'facility-appliances') {
       if (!fetchedViewsRef.current['facility-appliances']) {
         fetchedViewsRef.current['facility-appliances'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-appliances': true }));
         apiFetch('/Appliance/GetAllAppliances', { method: 'POST' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) { 
@@ -3027,7 +3173,8 @@ export default function App() {
               syncDevicesFromFetchedType('appliance', []);
             }
           })
-          .catch(err => { console.error("Failed to load appliances", err); setAppliances([]); syncDevicesFromFetchedType('appliance', []); });
+          .catch(err => { console.error("Failed to load appliances", err); setAppliances([]); syncDevicesFromFetchedType('appliance', []); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-appliances': false })));
       }
     }
 
@@ -3035,6 +3182,7 @@ export default function App() {
     if (activeView === 'user-room') {
       if (!fetchedViewsRef.current['user-room']) {
         fetchedViewsRef.current['user-room'] = true;
+        setLoadingViews(prev => ({ ...prev, 'user-room': true }));
         apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' })
           .then((res: any) => { 
             if (res && res.data && Array.isArray(res.data)) {
@@ -3043,7 +3191,8 @@ export default function App() {
               setUserRooms([]);
             }
           })
-          .catch(err => { console.error("Failed to load user-specific rooms by person id", err); setUserRooms([]); });
+          .catch(err => { console.error("Failed to load user-specific rooms by person id", err); setUserRooms([]); })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'user-room': false })));
       }
     }
 
@@ -3071,61 +3220,51 @@ export default function App() {
     if (activeView === 'facility-externals') {
       if (!fetchedViewsRef.current['facility-externals']) {
         fetchedViewsRef.current['facility-externals'] = true;
-        apiFetch('/External/GetAllExternals', { method: 'POST', body: '' })
-          .then((res: any) => {
-            if (res && res.data && Array.isArray(res.data)) {
-              setExternals(res.data);
-              syncDevicesFromFetchedType('external', res.data);
-            } else {
-              setExternals([]);
-              syncDevicesFromFetchedType('external', []);
-            }
-          })
-          .catch(err => { console.error("Failed to load externals", err); setExternals([]); syncDevicesFromFetchedType('external', []); });
-
-        apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
-          .catch(err => console.error("Failed to load actions on externals page", err));
+        setLoadingViews(prev => ({ ...prev, 'facility-externals': true }));
+        Promise.all([
+          apiFetch('/External/GetAllExternals', { method: 'POST', body: '' })
+            .then((res: any) => {
+              if (res && res.data && Array.isArray(res.data)) {
+                setExternals(res.data);
+                syncDevicesFromFetchedType('external', res.data);
+              } else {
+                setExternals([]);
+                syncDevicesFromFetchedType('external', []);
+              }
+            })
+            .catch(err => { console.error("Failed to load externals", err); setExternals([]); syncDevicesFromFetchedType('external', []); }),
+          apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
+            .catch(err => console.error("Failed to load actions on externals page", err))
+        ]).finally(() => setLoadingViews(prev => ({ ...prev, 'facility-externals': false })));
       }
     }
 
     // 15. Activity Logs Fetching
     if (activeView === 'logs') {
-      const page = 1;
-      const pageSize = 50;
-      setLogPage(page);
-      setHasMoreLogs(true);
-      
-      const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
-        if (!dateVal) return '';
-        const d = new Date(dateVal);
-        if (isNaN(d.getTime())) return '';
-        const day = String(d.getDate()).padStart(2, '0');
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const year = d.getFullYear();
-        return `${day}-${month}-${year}`;
-      };
+      if (!fetchedViewsRef.current['logs']) {
+        fetchedViewsRef.current['logs'] = true;
+        setLoadingViews(prev => ({ ...prev, 'logs': true }));
+        const page = 1;
+        const pageSize = 50;
+        setLogPage(page);
+        setHasMoreLogs(true);
+        
+        const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
+          if (!dateVal) return '';
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return '';
+          const day = String(d.getDate()).padStart(2, '0');
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const year = d.getFullYear();
+          return `${day}-${month}-${year}`;
+        };
 
-      if (logStartDate || logEndDate) {
-        const startStr = formatDateToDDMMYYYY(logStartDate);
-        const endStr = formatDateToDDMMYYYY(logEndDate || new Date());
-        apiFetch(`/Log/GetAllLogsByDate?startDate=${startStr}&endDate=${endStr}&page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
-          .then((res: any) => {
-            if (res && res.data && Array.isArray(res.data)) {
-              setLogs(res.data);
-              setHasMoreLogs(res.data.length >= pageSize);
-            } else {
-              setLogs([]);
-              setHasMoreLogs(false);
-            }
-          })
-          .catch(err => {
-            console.error("Failed to load logs by date", err);
-            setLogs([]);
-            setHasMoreLogs(false);
-          });
-      } else {
-        apiFetch(`/Log/GetAllLogs?page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
+        const fetchLogsPromise = (logStartDate || logEndDate)
+          ? apiFetch(`/Log/GetAllLogsByDate?startDate=${formatDateToDDMMYYYY(logStartDate)}&endDate=${formatDateToDDMMYYYY(logEndDate || new Date())}&page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' })
+          : apiFetch(`/Log/GetAllLogs?page=${page}&pageSize=${pageSize}`, { method: 'POST', body: '' });
+
+        fetchLogsPromise
           .then((res: any) => {
             if (res && res.data && Array.isArray(res.data)) {
               setLogs(res.data);
@@ -3139,13 +3278,16 @@ export default function App() {
             console.error("Failed to load logs", err);
             setLogs([]);
             setHasMoreLogs(false);
-          });
+          })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'logs': false })));
       }
     }
+
     // 16. Actions Fetching
     if (activeView === 'facility-actions') {
       if (!fetchedViewsRef.current['facility-actions']) {
         fetchedViewsRef.current['facility-actions'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-actions': true }));
         apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
           .then((res: any) => {
             if (res && res.data && Array.isArray(res.data)) {
@@ -3157,14 +3299,17 @@ export default function App() {
           .catch(err => {
             console.error("Failed to load actions", err);
             setActions([]);
-          });
+          })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-actions': false })));
       }
     }
   }, [activeView, isLoggedIn, logStartDate, logEndDate]);
   const [actionForm, setActionForm] = React.useState<CreateActionDto>({
     actionName: '',
     description: '',
-    personId: 1
+    isPrivate: false,
+    isRecurring: false,
+    time: '00:00:00'
   });
 
   const [isAddRoomOpen, setIsAddRoomOpen] = React.useState(false);
@@ -3717,7 +3862,99 @@ export default function App() {
     });
   }, []);
 
-  const handleCallStatusUpdate = React.useCallback((eventName: "IncomingCall" | "CallAccepted" | "CallRejected" | "CallEnded" | "CallTimedOut" | "ParticipantLeft", payload: any) => {
+  const invokeCallSignalingSequence = React.useCallback(async (callId: number, chatId: number) => {
+    if (!callId || !chatId) return;
+    const conn = signalRConnectionRef.current;
+    if (!conn || conn.state !== "Connected") {
+      console.warn("SignalR connection not ready or not connected for call signaling sequence");
+      return;
+    }
+
+    const token = localStorage.getItem('token') || '';
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
+
+    try {
+      let pc = pcRef.current;
+      if (!pc) {
+        pc = initPeerConnection(callId, chatId);
+        try {
+          pc.createDataChannel("signaling");
+        } catch (e) {}
+      }
+
+      let sdpStr = pc.localDescription?.sdp || "";
+      if (!sdpStr) {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          sdpStr = offer.sdp || "";
+        } catch (e) {
+          console.warn("Could not create WebRTC offer SDP:", e);
+        }
+      }
+
+      // 1. Invoke Offer
+      const offerDto: OfferDto = {
+        callId,
+        CallId: callId,
+        chatId,
+        ChatId: chatId,
+        personId: currentUserId,
+        PersonId: currentUserId,
+        sdp: sdpStr,
+        Sdp: sdpStr
+      };
+      await conn.invoke("Offer", offerDto, token).catch((err: any) => {
+        console.warn("Failed to invoke Offer via SignalR:", err);
+      });
+
+      // 2. Invoke IceCandidate
+      const candidateStr = "candidate:1 1 UDP 2013266431 127.0.0.1 34567 typ host";
+      const iceCandidateDto: IceCandidateDto = {
+        callId,
+        CallId: callId,
+        chatId,
+        ChatId: chatId,
+        personId: currentUserId,
+        PersonId: currentUserId,
+        candidate: candidateStr,
+        Candidate: candidateStr,
+        sdpMid: "0",
+        SdpMid: "0",
+        sdpMLineIndex: 0,
+        SdpMLineIndex: 0
+      };
+      await conn.invoke("IceCandidate", iceCandidateDto, token).catch((err: any) => {
+        console.warn("Failed to invoke IceCandidate via SignalR:", err);
+      });
+
+      // 3. Invoke ToggleCallItems
+      const toggleCallItemsDto: ToggleCallItemsDto = {
+        callId,
+        CallId: callId,
+        chatId,
+        ChatId: chatId,
+        personId: currentUserId,
+        PersonId: currentUserId,
+        isMuted: isCallMuted,
+        IsMuted: isCallMuted,
+        isCameraEnabled: isCallCameraEnabled,
+        IsCameraEnabled: isCallCameraEnabled,
+        isSharing: isCallScreenSharing,
+        IsSharing: isCallScreenSharing
+      };
+      await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch((err: any) => {
+        console.warn("Failed to invoke ToggleCallItems via SignalR:", err);
+      });
+
+      console.log(`[SignalR Call Signaling] Successfully invoked Offer, IceCandidate, and ToggleCallItems for callId=${callId}, chatId=${chatId}, personId=${currentUserId}`);
+    } catch (err) {
+      console.error("Error during invokeCallSignalingSequence:", err);
+    }
+  }, [initPeerConnection, isCallMuted, isCallCameraEnabled, isCallScreenSharing, userProfile]);
+
+
+  const handleCallStatusUpdate = React.useCallback((eventName: "IncomingCall" | "CallAccepted" | "CallRejected" | "CallEnded" | "CallTimedOut" | "ParticipantLeft" | "ParticipantJoined" | "ParticipantJoinedCall" | "ParticipantAddedToCall", payload: any) => {
     if (!payload) return;
     
     const { callDto, isLegacy, legacyData } = parseCallUpdate(payload);
@@ -3735,58 +3972,21 @@ export default function App() {
       setIsCallCameraEnabled(callDto.type === CallType.Video);
       setIsCallScreenSharing(false);
       toast.info(`Incoming ${callDto.type === CallType.Video ? 'video' : 'voice'} call...`);
+      if (callDto && callDto.id) {
+        invokeCallSignalingSequence(callDto.id, callDto.chatId);
+      }
     } else if (eventName === "CallAccepted") {
       setActiveCall(callDto);
       setIsIncomingCall(false);
       toast.success("Call answered");
-
-      const conn = signalRConnectionRef.current;
-      if (conn && conn.state === "Connected") {
-        const token = localStorage.getItem('token') || '';
-        const currentUserId = userProfileRef.current?.id || 0;
-        
-        (async () => {
-          try {
-            let pc = pcRef.current;
-            if (!pc) {
-              pc = initPeerConnection(callDto.id, callDto.chatId);
-              pc.createDataChannel("signaling");
-            }
-            if (!pc.localDescription) {
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              const offerDto: OfferDto = {
-                callId: callDto.id,
-                CallId: callDto.id,
-                chatId: callDto.chatId,
-                ChatId: callDto.chatId,
-                personId: currentUserId,
-                PersonId: currentUserId,
-                sdp: offer.sdp || "",
-                Sdp: offer.sdp || ""
-              };
-              await conn.invoke("Offer", offerDto, token);
-            }
-
-            const toggleDto: ToggleCallItemsDto = {
-              callId: callDto.id,
-              chatId: callDto.chatId,
-              personId: currentUserId,
-              isMuted: isCallMuted,
-              isCameraEnabled: isCallCameraEnabled,
-              isSharing: isCallScreenSharing,
-              CallId: callDto.id,
-              ChatId: callDto.chatId,
-              PersonId: currentUserId,
-              IsMuted: isCallMuted,
-              IsCameraEnabled: isCallCameraEnabled,
-              IsSharing: isCallScreenSharing
-            };
-            await conn.invoke("ToggleCallItems", toggleDto, token);
-          } catch (err) {
-            console.warn("Error invoking Offer/ToggleCallItems on CallAccepted event:", err);
-          }
-        })();
+      if (callDto && callDto.id) {
+        invokeCallSignalingSequence(callDto.id, callDto.chatId);
+      }
+    } else if (eventName === "ParticipantJoined" || eventName === "ParticipantJoinedCall" || (eventName as string) === "ParticipantAddedToCall") {
+      if (callDto && callDto.id) {
+        setActiveCall(callDto);
+        toast.info("A participant joined the call");
+        invokeCallSignalingSequence(callDto.id, callDto.chatId);
       }
     } else if (eventName === "CallRejected" || eventName === "ParticipantLeft") {
       if (isLegacy && legacyData) {
@@ -4010,6 +4210,7 @@ export default function App() {
   // Chat State
   const [isChatModalOpen, setIsChatModalOpen] = React.useState(false);
   const [hasLoadedChats, setHasLoadedChats] = React.useState(false);
+  const [isChatsLoading, setIsChatsLoading] = React.useState(false);
   
   
   const [isPreviewModalOpen, setIsPreviewModalOpen] = React.useState(false);
@@ -4387,6 +4588,9 @@ export default function App() {
         setIsCallScreenSharing(false);
         setIsCallModalOpen(true);
         toast.success(`Outgoing ${type === CallType.Video ? 'video' : 'voice'} call started...`);
+        if (callData && callData.id) {
+          invokeCallSignalingSequence(callData.id, callData.chatId);
+        }
       } else {
         toast.error("Failed to start call");
       }
@@ -4575,50 +4779,8 @@ export default function App() {
       setIsCallMuted(false);
       setIsCallScreenSharing(false);
 
-      // 3. Perform SignalR/WebRTC signaling safely
-      try {
-        const conn = signalRConnectionRef.current;
-        if (conn && conn.state === "Connected") {
-          const pc = initPeerConnection(callId, chatId);
-          pc.createDataChannel("signaling");
-          
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          
-          const offerDto: OfferDto = {
-            callId,
-            CallId: callId,
-            chatId,
-            ChatId: chatId,
-            personId: currentUserId,
-            PersonId: currentUserId,
-            sdp: offer.sdp || "",
-            Sdp: offer.sdp || ""
-          };
-          
-          await conn.invoke("Offer", offerDto, token);
-
-          const toggleCallItemsDto: ToggleCallItemsDto = {
-            callId,
-            chatId,
-            personId: currentUserId,
-            isMuted: false,
-            isCameraEnabled: false,
-            isSharing: false,
-            CallId: callId,
-            ChatId: chatId,
-            PersonId: currentUserId,
-            IsMuted: false,
-            IsCameraEnabled: false,
-            IsSharing: false
-          };
-          await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch(err => {
-            console.warn("Failed to invoke ToggleCallItems after accept call:", err);
-          });
-        }
-      } catch (webrtcErr) {
-        console.warn("WebRTC/SignalR offer warning during join call:", webrtcErr);
-      }
+      // 3. Perform SignalR/WebRTC signaling sequence (Offer, IceCandidate, ToggleCallItems)
+      await invokeCallSignalingSequence(callId, chatId);
 
       toast.success("Joined call");
     } catch (err) {
@@ -4812,6 +4974,7 @@ export default function App() {
 
   const loadMyChats = async (force = false) => {
     if (hasLoadedChats && !force) return;
+    setIsChatsLoading(true);
     // Try to load cached chats from localStorage
     const cachedChatsStr = localStorage.getItem('chats_cache');
     let cachedChats: ChatDto[] = [];
@@ -4865,6 +5028,8 @@ export default function App() {
       } else {
         console.warn('Silent chat update failed:', err);
       }
+    } finally {
+      setIsChatsLoading(false);
     }
   };
 
@@ -5340,6 +5505,17 @@ export default function App() {
     hs.on("ActionCreated", (data) => setActions(prev => {
       const dataId = data.id ?? data.Id ?? data.actionId ?? data.ActionId;
       if (dataId !== undefined && dataId !== null && prev.some(a => a.id.toString() === dataId.toString())) return prev;
+      
+      const isPriv = !!(data.isPrivate ?? data.IsPrivate);
+      const actionPersonId = data.personId ?? data.PersonId ?? data.createdBy ?? data.CreatedBy;
+      const currentUserId = userProfileRef.current?.id ?? userProfileRef.current?.getUserDto?.personId;
+
+      if (isPriv && actionPersonId !== undefined && actionPersonId !== null && currentUserId !== undefined && currentUserId !== null) {
+        if (actionPersonId.toString() !== currentUserId.toString()) {
+          return prev;
+        }
+      }
+
       return [...prev, { 
         ...data, 
         id: dataId, 
@@ -5347,38 +5523,56 @@ export default function App() {
         actionDescription: (data.actionDescription ?? data.ActionDescription ?? data.description ?? data.Description), 
         actionActive: (data.actionActive ?? data.ActionActive ?? false), 
         actionId: (data.actionId ?? data.ActionId ?? ''), 
+        isPrivate: data.isPrivate ?? data.IsPrivate ?? false,
+        isRecurring: data.isRecurring ?? data.IsRecurring ?? false,
+        time: data.time ?? data.Time ?? '00:00:00',
         getActionStepDtos: (data.getActionStepDtos ?? data.GetActionStepDtos ?? []),
         createdBy: data.createdBy ?? data.CreatedBy,
-        createdByName: data.createdByName ?? data.CreatedByName ?? data.createdByName ?? data.CreatedByName,
+        createdByName: data.createdByName ?? data.CreatedByName,
         createdOn: data.createdOn ?? data.CreatedOn,
         lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy,
-        lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? data.lastModifiedByName ?? data.LastModifiedByName,
+        lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName,
         lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn,
         personId: data.personId ?? data.PersonId
       }];
     }));
-    hs.on("ActionUpdated", (data) => setActions(prev => prev.map(a => {
+    hs.on("ActionUpdated", (data) => setActions(prev => {
       const dataId = data.id ?? data.Id ?? data.actionId ?? data.ActionId;
-      if (a.id !== undefined && a.id !== null && dataId !== undefined && dataId !== null && a.id.toString() === dataId.toString()) {
-        return { 
-          ...a, 
-          ...data,
-          actionName: data.actionName ?? data.ActionName ?? data.name ?? a.actionName,
-          actionDescription: data.actionDescription ?? data.ActionDescription ?? data.description ?? data.Description ?? a.actionDescription,
-          actionActive: data.actionActive ?? data.ActionActive ?? a.actionActive,
-          actionId: data.actionId ?? data.ActionId ?? a.actionId,
-          getActionStepDtos: data.getActionStepDtos ?? data.GetActionStepDtos ?? a.getActionStepDtos,
-          createdBy: data.createdBy ?? data.CreatedBy ?? a.createdBy,
-          createdByName: data.createdByName ?? data.CreatedByName ?? a.createdByName,
-          createdOn: data.createdOn ?? data.CreatedOn ?? a.createdOn,
-          lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy ?? a.lastModifiedBy,
-          lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? a.lastModifiedByName,
-          lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn ?? a.lastModifiedOn,
-          personId: data.personId ?? data.PersonId ?? a.personId
-        };
+      const isPriv = !!(data.isPrivate ?? data.IsPrivate);
+      const actionPersonId = data.personId ?? data.PersonId ?? data.createdBy ?? data.CreatedBy;
+      const currentUserId = userProfileRef.current?.id ?? userProfileRef.current?.getUserDto?.personId;
+
+      if (isPriv && actionPersonId !== undefined && actionPersonId !== null && currentUserId !== undefined && currentUserId !== null) {
+        if (actionPersonId.toString() !== currentUserId.toString()) {
+          return prev.filter(a => a.id.toString() !== dataId?.toString());
+        }
       }
-      return a;
-    })));
+
+      return prev.map(a => {
+        if (a.id !== undefined && a.id !== null && dataId !== undefined && dataId !== null && a.id.toString() === dataId.toString()) {
+          return { 
+            ...a, 
+            ...data,
+            actionName: data.actionName ?? data.ActionName ?? data.name ?? a.actionName,
+            actionDescription: data.actionDescription ?? data.ActionDescription ?? data.description ?? data.Description ?? a.actionDescription,
+            actionActive: data.actionActive ?? data.ActionActive ?? a.actionActive,
+            actionId: data.actionId ?? data.ActionId ?? a.actionId,
+            isPrivate: data.isPrivate ?? data.IsPrivate ?? a.isPrivate,
+            isRecurring: data.isRecurring ?? data.IsRecurring ?? a.isRecurring,
+            time: data.time ?? data.Time ?? a.time,
+            getActionStepDtos: data.getActionStepDtos ?? data.GetActionStepDtos ?? a.getActionStepDtos,
+            createdBy: data.createdBy ?? data.CreatedBy ?? a.createdBy,
+            createdByName: data.createdByName ?? data.CreatedByName ?? a.createdByName,
+            createdOn: data.createdOn ?? data.CreatedOn ?? a.createdOn,
+            lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy ?? a.lastModifiedBy,
+            lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? a.lastModifiedByName,
+            lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn ?? a.lastModifiedOn,
+            personId: data.personId ?? data.PersonId ?? a.personId
+          };
+        }
+        return a;
+      });
+    }));
     hs.on("ActionActivationChanged", (data) => {
       const actId = data.actionId ?? data.ActionId ?? data.id ?? data.Id;
       const isActive = data.isActive ?? data.IsActive ?? data.actionActive ?? data.ActionActive;
@@ -5585,6 +5779,8 @@ export default function App() {
         handleCallStatusUpdate("CallTimedOut", payload);
       } else if (eventName === "ParticipantLeft") {
         handleCallStatusUpdate("ParticipantLeft", payload);
+      } else if (eventName === "ParticipantJoined" || eventName === "ParticipantJoinedCall" || eventName === "ParticipantAddedToCall") {
+        handleCallStatusUpdate("ParticipantJoined" as any, payload);
       } else if (eventName === "Offer") {
         handleOfferEvent(payload);
       } else if (eventName === "Answer") {
@@ -5631,6 +5827,18 @@ export default function App() {
 
     hs.on("ParticipantLeft", (data: any) => {
       handleCallStatusUpdate("ParticipantLeft", data);
+    });
+
+    hs.on("ParticipantJoined", (data: any) => {
+      handleCallStatusUpdate("ParticipantJoined" as any, data);
+    });
+
+    hs.on("ParticipantJoinedCall", (data: any) => {
+      handleCallStatusUpdate("ParticipantJoinedCall" as any, data);
+    });
+
+    hs.on("ParticipantAddedToCall", (data: any) => {
+      handleCallStatusUpdate("ParticipantAddedToCall" as any, data);
     });
 
     hs.on("Offer", (offerDto: any) => {
@@ -8125,53 +8333,53 @@ export default function App() {
         >
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-bold tracking-tight">Welcome home, {userProfile.getPersonDetailsDto.firstName}!</h1>
-            <p className="text-muted-foreground">Everything is looking good. You have {activeDevices} active devices.</p>
+            <p className="text-slate-500 dark:text-zinc-400">Everything is looking good. You have {activeDevices} active devices.</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('facility-overview')}
             >
               <div className="flex flex-col items-start gap-2">
                 <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                   <Layers className="h-6 w-6" />
                 </div>
-                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Facilities</p>
+                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Facilities</p>
               </div>
               <div className="text-right flex flex-col items-end justify-center">
-                <p className="text-4xl font-bold text-slate-900 leading-none mb-1">{totalFacilityCount}</p>
-                <div className="text-xs text-muted-foreground max-w-[120px] text-right">
+                <p className="text-4xl font-bold text-slate-900 dark:text-zinc-100 leading-none mb-1">{totalFacilityCount}</p>
+                <div className="text-xs text-slate-500 dark:text-zinc-400 max-w-[120px] text-right">
                   Appliances, Cameras, Doors, Lights, Windows, Externals
                 </div>
               </div>
             </Card>
             <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('contacts')}
             >
               <div className="flex flex-col items-start gap-2">
-                <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500">
+                <div className="h-12 w-12 rounded-full bg-slate-500/10 flex items-center justify-center text-blue-500">
                   <Contact className="h-6 w-6" />
                 </div>
-                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Contacts</p>
+                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Contacts</p>
               </div>
               <div className="text-right flex flex-col items-end justify-center h-full">
-                <p className="text-4xl font-bold text-slate-900 leading-none">{dashboardData?.totalContacts ?? contacts.length}</p>
+                <p className="text-4xl font-bold text-slate-900 dark:text-zinc-100 leading-none">{dashboardData?.totalContacts ?? contacts.length}</p>
               </div>
             </Card>
             <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white border border-slate-200 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
               onClick={() => setActiveView('logs')}
             >
               <div className="flex flex-col items-start gap-2">
                 <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
                   <ClipboardList className="h-6 w-6" />
                 </div>
-                <p className="text-sm font-bold text-slate-800 uppercase tracking-wider">Logs</p>
+                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Logs</p>
               </div>
               <div className="text-right flex flex-col items-end justify-center">
-                <div className="text-xs text-muted-foreground max-w-[120px] text-right">
+                <div className="text-xs text-slate-500 dark:text-zinc-400 max-w-[120px] text-right">
                   Create, Update, Delete, Locked, Unlocked, Open, Closed
                 </div>
               </div>
@@ -8181,10 +8389,10 @@ export default function App() {
           {/* Facilities Rotating Carousel */}
           <div className="flex flex-col lg:flex-row gap-6 items-stretch w-full mb-8">
             {/* Left Section: 2/3 Width Carousel */}
-            <div className="lg:w-2/3 bg-white/40 backdrop-blur border border-slate-200 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[320px] shadow-sm select-none">
+            <div className="lg:w-2/3 bg-white/40 dark:bg-zinc-900/40 backdrop-blur border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[320px] shadow-sm select-none">
               {/* Orbit track helper ellipse */}
               <div 
-                className="absolute border border-dashed border-slate-200 rounded-full pointer-events-none" 
+                className="absolute border border-dashed border-slate-200 dark:border-zinc-800 rounded-full pointer-events-none" 
                 style={{
                   width: '380px',
                   height: '110px',
@@ -8233,10 +8441,10 @@ export default function App() {
                         width: '120px'
                       }}
                     >
-                      <div className={`h-16 w-16 mb-4 rounded-xl border flex items-center justify-center transition-all ${isActive ? 'border-primary/50 shadow-md bg-white' : 'border-slate-200 bg-slate-50 shadow-sm'}`}>
-                        <Icon className={`transition-colors ${isActive ? 'text-primary' : 'text-slate-400'}`} style={{ width: isActive ? '32px' : '28px', height: isActive ? '32px' : '28px' }} />
+                      <div className={`h-16 w-16 mb-4 rounded-xl border flex items-center justify-center transition-all ${isActive ? 'border-primary/50 shadow-md bg-white dark:bg-zinc-900' : 'border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 shadow-sm'}`}>
+                        <Icon className={`transition-colors ${isActive ? 'text-primary' : 'text-slate-400 dark:text-zinc-500'}`} style={{ width: isActive ? '32px' : '28px', height: isActive ? '32px' : '28px' }} />
                       </div>
-                      <span className={`text-[13px] uppercase tracking-widest transition-all text-center px-2 ${isActive ? 'font-black text-slate-800' : 'font-semibold text-slate-500'}`}>
+                      <span className={`text-[13px] uppercase tracking-widest transition-all text-center px-2 ${isActive ? 'font-black text-slate-800 dark:text-zinc-100' : 'font-semibold text-slate-500 dark:text-zinc-400'}`}>
                         {item.label}
                       </span>
                     </div>
@@ -8246,7 +8454,7 @@ export default function App() {
             </div>
 
             {/* Right Section: 1/3 Width Description & Navigation Card */}
-            <Card className="lg:w-1/3 p-8 bg-white border border-slate-200 shadow-sm rounded-3xl flex flex-col justify-between group overflow-hidden relative min-h-[320px]">
+            <Card className="lg:w-1/3 p-8 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm rounded-3xl flex flex-col justify-between group overflow-hidden relative min-h-[320px]">
               <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
               
               <div className="space-y-6 z-10">
@@ -8255,28 +8463,28 @@ export default function App() {
                     {React.createElement(DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].icon, { className: 'h-6 w-6' })}
                   </div>
                   <div>
-                    <Badge variant="outline" className="text-[10px] tracking-wider uppercase font-extrabold text-primary mb-0.5">
+                    <Badge variant="outline" className="text-[10px] tracking-wider uppercase font-extrabold text-primary mb-0.5 border-primary/30">
                       Facility System
                     </Badge>
-                    <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-none uppercase">
+                    <h3 className="text-2xl font-black text-slate-900 dark:text-zinc-100 tracking-tight leading-none uppercase">
                       {DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].label}
                     </h3>
                   </div>
                 </div>
                 
-                <p className="text-slate-600 font-sans text-sm leading-relaxed antialiased">
+                <p className="text-slate-600 dark:text-zinc-300 font-sans text-sm leading-relaxed antialiased">
                   {DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].desc}
                 </p>
               </div>
 
-              <div className="pt-6 border-t border-slate-100 flex items-center justify-between z-10">
-                <span className="text-xs text-slate-400 font-mono tracking-wider">
+              <div className="pt-6 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between z-10">
+                <span className="text-xs text-slate-400 dark:text-zinc-500 font-mono tracking-wider">
                   DISCOVER MODULE 0{((Math.round(dashboardRotation / 36) % 10 + 10) % 10 + 10) % 10 + 1}
                 </span>
                 <Button 
                   variant="default" 
                   size="icon" 
-                  className="h-12 w-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white shadow transition-all duration-300 group-hover:translate-x-1"
+                  className="h-12 w-12 rounded-2xl bg-zinc-950 dark:bg-zinc-100 dark:hover:bg-zinc-200 hover:bg-slate-800 text-white dark:text-zinc-950 shadow transition-all duration-300 group-hover:translate-x-1"
                   onClick={() => {
                     const targetView = DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].id;
                     if (targetView === 'facility-actions' && !canSeeActions) {
@@ -8286,7 +8494,7 @@ export default function App() {
                     setActiveView(targetView);
                   }}
                 >
-                  <ArrowRight className="h-5 w-5 text-white" />
+                  <ArrowRight className="h-5 w-5 text-white dark:text-zinc-950" />
                 </Button>
               </div>
             </Card>
@@ -8319,7 +8527,7 @@ export default function App() {
                         setSelectedCamera(targetCam as Device);
                         setIsCameraModalOpen(true);
                       }}
-                      className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-slate-900 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 shadow-md cursor-pointer group hover:scale-[1.01] transition-transform"
+                      className="min-w-[80vw] sm:min-w-[400px] h-[280px] bg-zinc-950 rounded-3xl snap-center shrink-0 relative overflow-hidden flex items-center justify-center border border-slate-200 dark:border-zinc-800 shadow-md cursor-pointer group hover:scale-[1.01] transition-transform"
                     >
                       <HlsVideo src={feedUrl} autoPlay muted loop playsInline className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none" />
                       <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent text-white flex justify-between items-end">
@@ -8350,15 +8558,15 @@ export default function App() {
                   actions.slice(0, 4).map(action => (
                     <Card 
                       key={action.id} 
-                      className="p-5 flex items-start gap-4 hover:border-primary/50 transition-colors cursor-pointer group bg-white shadow-sm"
+                      className="p-5 flex items-start gap-4 hover:border-primary/50 transition-colors cursor-pointer group bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm"
                       onClick={() => setActiveView('facility-actions')}
                     >
                       <div className="h-12 w-12 shrink-0 rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
                         <Zap className="h-6 w-6" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-slate-800 text-base mb-1 truncate">{action.actionName}</h4>
-                        <p className="text-xs text-muted-foreground line-clamp-2">{action.actionDescription || 'Automated device sequence execution.'}</p>
+                        <h4 className="font-bold text-slate-800 dark:text-zinc-100 text-base mb-1 truncate">{action.actionName}</h4>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400 line-clamp-2">{action.actionDescription || 'Automated device sequence execution.'}</p>
                       </div>
                     </Card>
                   ))
@@ -8375,7 +8583,7 @@ export default function App() {
                 <Layers className="h-5 w-5 text-primary" />
                 Recent Activity
               </h2>
-              <Card className="divide-y overflow-hidden">
+              <Card className="divide-y divide-slate-100 dark:divide-zinc-800 overflow-hidden bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800">
                 {logs && logs.length > 0 ? (
                   logs.slice(0, 3).map(log => {
                     const details = log.getPersonDto?.getPersonDetailsDto;
@@ -8383,16 +8591,16 @@ export default function App() {
                     const firstName = details?.firstName || 'System';
                     return (
                       <div key={log.id} className="p-4 flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center border">
+                        <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center border border-slate-200 dark:border-zinc-800">
                           {imageUrl ? (
                             <img src={getFullImageUrl(imageUrl)} alt={`${firstName} avatar`} className="h-full w-full object-cover" />
                           ) : (
-                            <UserIcon className="h-4 w-4 text-slate-400" />
+                            <UserIcon className="h-4 w-4 text-slate-400 dark:text-zinc-500" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm truncate font-medium"><span className="font-semibold text-foreground">{firstName}</span>: {log.logDetails}</p>
-                          <p className="text-xs text-muted-foreground">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
+                          <p className="text-sm truncate font-medium"><span className="font-semibold text-slate-900 dark:text-zinc-100">{firstName}</span>: <span className="text-slate-700 dark:text-zinc-300">{log.logDetails}</span></p>
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
                         </div>
                       </div>
                     );
@@ -8435,7 +8643,7 @@ export default function App() {
               <LayoutGrid className="h-8 w-8 text-primary" />
               <h1 className="text-3xl font-bold tracking-tight">Facilities Overview</h1>
             </div>
-            <p className="text-muted-foreground">Real-time status summary of your home infrastructure.</p>
+            <p className="text-slate-500 dark:text-zinc-400">Real-time status summary of your home infrastructure.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -8502,13 +8710,13 @@ export default function App() {
                       <div className="rounded-2xl bg-primary/10 p-4 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
                         <Icon className="h-8 w-8" />
                       </div>
-                      <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                      <ChevronRight className="h-5 w-5 text-slate-500 dark:text-zinc-400 group-hover:text-primary transition-colors" />
                     </div>
                     <div className="mt-6 space-y-2">
                       <h3 className="text-xl font-bold">{cat.name}</h3>
                       <div className="flex items-center gap-2">
                         <Badge variant="secondary" className="font-mono">{total} Items</Badge>
-                        <span className="text-xs text-muted-foreground font-medium">{statusSummary}</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">{statusSummary}</span>
                       </div>
                     </div>
                     <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -8548,7 +8756,7 @@ export default function App() {
           case 'Light Control': return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
           case 'Door Security': return 'bg-red-500/10 text-red-500 border-red-500/20';
           case 'Scene Activation': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
-          case 'Appliance State': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+          case 'Appliance State': return 'bg-slate-500/10 text-blue-500 border-slate-200/20';
           case 'Window Control': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
           case 'Profile Sync': return 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
           case 'Camera Access': return 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20';
@@ -8571,18 +8779,18 @@ export default function App() {
                 <ClipboardList className="h-8 w-8 text-primary" />
                 <div className="flex items-center justify-between w-full">
                   <h1 className="text-3xl font-bold tracking-tight">Activity Logs</h1>
-                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                     <ClipboardList className="h-3 w-3" />
                     {logs.length} Total Logs
                   </Badge>
                 </div>
               </div>
-              <p className="text-muted-foreground">Recent actions and events in your smart home.</p>
+              <p className="text-slate-500 dark:text-zinc-400">Recent actions and events in your smart home.</p>
             </div>
             
             <div className="flex items-center gap-4 bg-card p-3 rounded-2xl border shadow-sm">
               <div className="flex flex-col gap-1.5 prose-sm">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">From</Label>
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 ml-1">From</Label>
                 <Popover>
                   <PopoverTrigger 
                     render={
@@ -8590,7 +8798,7 @@ export default function App() {
                         variant="outline"
                         className={cn(
                           "h-10 justify-start text-left font-normal w-[160px] rounded-xl border-dashed hover:border-solid transition-all",
-                          !logStartDate && "text-muted-foreground"
+                          !logStartDate && "text-slate-500 dark:text-zinc-400"
                         )}
                       />
                     }
@@ -8613,7 +8821,7 @@ export default function App() {
                 </Popover>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">To</Label>
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 ml-1">To</Label>
                 <Popover>
                   <PopoverTrigger 
                     render={
@@ -8621,7 +8829,7 @@ export default function App() {
                         variant="outline"
                         className={cn(
                           "h-10 justify-start text-left font-normal w-[160px] rounded-xl border-dashed hover:border-solid transition-all",
-                          !logEndDate && "text-muted-foreground"
+                          !logEndDate && "text-slate-500 dark:text-zinc-400"
                         )}
                       />
                     }
@@ -8656,7 +8864,11 @@ export default function App() {
 
           <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
             <div className="divide-y text-left">
-              {displayedLogs.length > 0 ? (displayedLogs || []).map(log => {
+              {isViewLoading('logs') ? (
+                <div className="p-8">
+                  <ThreeDotsLoading label="Loading logs..." />
+                </div>
+              ) : displayedLogs.length > 0 ? (displayedLogs || []).map(log => {
                 const details = log.getPersonDto?.getPersonDetailsDto;
                 const userFullName = details ? `${details.firstName} ${details.lastName}` : 'System';
                 const imageUrl = details?.imageUrl;
@@ -8675,15 +8887,15 @@ export default function App() {
                         {imageUrl ? (
                           <img src={getFullImageUrl(imageUrl)} alt={userFullName} className="h-full w-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
                         ) : (
-                          <UserIcon className="h-5 w-5 text-slate-400" />
+                          <UserIcon className="h-5 w-5 text-slate-400 dark:text-zinc-500" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1 text-left">
                         <p className="text-sm font-medium leading-none text-foreground flex items-center gap-2 flex-wrap text-left">
                           <span className="font-bold">{userFullName}</span>
-                          <span className="text-muted-foreground truncate max-w-[400px] text-left">{log.logDetails}</span>
+                          <span className="text-slate-500 dark:text-zinc-400 truncate max-w-[400px] text-left">{log.logDetails}</span>
                         </p>
-                        <p className="mt-1.5 text-xs text-muted-foreground flex items-center gap-1">
+                        <p className="mt-1.5 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1">
                           <Clock className="h-3 w-3 inline text-primary/75" />
                           {new Date(log.timeOfAction).toLocaleString()}
                         </p>
@@ -8693,13 +8905,13 @@ export default function App() {
                       <Badge variant="outline" className={cn("text-xs px-2.5 py-0.5 rounded-full border", getActionTypeBadgeColor(log.actionType))}>
                         {log.actionType}
                       </Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground hidden sm:block" />
+                      <ChevronRight className="h-4 w-4 text-slate-500 dark:text-zinc-400 hidden sm:block" />
                     </div>
                   </div>
                 );
               }) : (
-                <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
-                  <ClipboardList className="h-12 w-12 text-muted-foreground/40" />
+                <div className="p-12 text-center text-slate-500 dark:text-zinc-400 flex flex-col items-center justify-center gap-3">
+                  <ClipboardList className="h-12 w-12 text-slate-500 dark:text-zinc-400/40" />
                   <div>
                     <p className="font-semibold text-foreground">No logs found</p>
                     <p className="text-xs">Adjust your date filters or do some changes to trigger logs.</p>
@@ -8723,7 +8935,7 @@ export default function App() {
                   <Button 
                     variant="ghost" 
                     size="sm" 
-                    className="text-muted-foreground hover:text-foreground text-xs font-semibold py-1.5 px-4 rounded-xl border-dashed border hover:border-solid bg-background/50 hover:bg-background transition-all"
+                    className="text-slate-500 dark:text-zinc-400 hover:text-foreground text-xs font-semibold py-1.5 px-4 rounded-xl border-dashed border hover:border-solid bg-background/50 hover:bg-background transition-all"
                     onClick={() => fetchMoreLogs()}
                   >
                     Load More
@@ -8737,7 +8949,7 @@ export default function App() {
           <Dialog open={isViewLogOpen} onOpenChange={setIsViewLogOpen}>
             <DialogContent className="sm:max-w-[480px] rounded-3xl border shadow-2xl p-6 bg-card" showCloseButton={false}>
               <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
                 <X className="h-4 w-4" />
               </DialogClose>
               </div>
@@ -8765,7 +8977,7 @@ export default function App() {
                       <h4 className="font-bold text-foreground text-base leading-snug">
                         {selectedLog.getPersonDto?.getPersonDetailsDto?.firstName} {selectedLog.getPersonDto?.getPersonDetailsDto?.lastName}
                       </h4>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1 flex-wrap text-left">
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 mt-1 flex-wrap text-left">
                         <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 py-0 bg-primary/5 text-primary leading-none">
                           Role: {selectedLog.getPersonDto?.getUserDto?.roleName || 'System/Guest'}
                         </Badge>
@@ -8779,7 +8991,7 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-1 bg-muted/10 p-3 rounded-xl border text-left">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block text-left">Action Class</span>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 block text-left">Action Class</span>
                         <Badge variant="outline" className={cn("text-xs font-bold w-fit", getActionTypeBadgeColor(selectedLog.actionType))}>
                           {selectedLog.actionType}
                         </Badge>
@@ -8787,10 +8999,10 @@ export default function App() {
                     </div>
 
                     <div className="space-y-1.5 bg-muted/10 p-4 rounded-xl border text-left">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block text-left">Timestamp of Event</span>
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 block text-left">Timestamp of Event</span>
                       <div className="text-xs font-medium space-y-1.5 text-left">
                         <p className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-primary" /> <span className="text-foreground font-semibold">Local:</span> {new Date(selectedLog.timeOfAction).toLocaleString()}</p>
-                        <p className="flex items-center gap-2 text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" /> <span className="font-semibold text-[11px]">UTC:</span> <span className="font-mono text-[11px]">{selectedLog.timeOfAction}</span></p>
+                        <p className="flex items-center gap-2 text-slate-500 dark:text-zinc-400"><CalendarDays className="h-3.5 w-3.5" /> <span className="font-semibold text-[11px]">UTC:</span> <span className="font-mono text-[11px]">{selectedLog.timeOfAction}</span></p>
                       </div>
                     </div>
 
@@ -8830,13 +9042,13 @@ export default function App() {
                 <Contact className="h-8 w-8 text-primary" />
                 <div className="flex items-center justify-between w-full">
                   <h1 className="text-3xl font-bold tracking-tight">Contacts</h1>
-                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                     <Contact className="h-3 w-3" />
                     {contacts.length} {contacts.length === 1 ? 'Contact' : 'Contacts'}
                   </Badge>
                 </div>
               </div>
-              <p className="text-muted-foreground">Manage your home contacts and emergency services.</p>
+              <p className="text-slate-500 dark:text-zinc-400">Manage your home contacts and emergency services.</p>
             </div>
             <div className="flex items-center gap-2">
               <Button variant={contactView === 'overview' ? 'default' : 'outline'} size="sm" onClick={() => setContactView('overview')}>Overview</Button>
@@ -8846,14 +9058,14 @@ export default function App() {
 
           {contactView === 'overview' ? (
             <div className="flex flex-col gap-6 items-start w-full">
-              <Card className="p-6 w-full h-fit transition-all duration-300 bg-white border border-slate-200 shadow-sm">
+              <Card className="p-6 w-full h-fit transition-all duration-300 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm text-foreground">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <h3 className="text-lg font-bold flex items-center gap-2">
                     <Tag className="h-4 w-4 text-slate-500" />
                     Categories
                   </h3>
                   <div className="flex items-center gap-3">
-                    <Badge variant="secondary" className="h-8 px-3 rounded-full flex items-center gap-1.5 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                    <Badge variant="secondary" className="h-8 px-3 rounded-full flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                       <Tag className="h-3 w-3 text-slate-500" />
                       {contactCategories?.length || 0} {contactCategories?.length === 1 ? 'Category' : 'Categories'}
                     </Badge>
@@ -8863,19 +9075,23 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex overflow-x-auto gap-4 pb-2 snap-x" style={{ scrollbarWidth: 'thin' }}>
-                  {contactCategories && contactCategories.length > 0 ? (
+                  {isViewLoading('contacts') ? (
+                    <div className="w-full">
+                      <ThreeDotsLoading label="Loading categories..." />
+                    </div>
+                  ) : contactCategories && contactCategories.length > 0 ? (
                     contactCategories.map(cat => {
                       const CategoryIcon = iconMap[cat.icon || 'UserCircle'] || UserCircle;
                       return (
                         <div key={cat.id} className="group relative flex-[0_0_30%] max-w-[30%] min-w-[200px] snap-start">
-                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors h-full">
+                          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 dark:bg-zinc-800/50 hover:bg-muted dark:hover:bg-zinc-800 transition-colors h-full">
                             <div className="flex items-center gap-3 overflow-hidden">
                               <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
                                 <CategoryIcon className="h-4 w-4" />
                               </div>
                               <div className="min-w-0">
                                 <p className="text-sm font-bold truncate">{cat.name}</p>
-                                {cat.description && <p className="text-[10px] text-muted-foreground truncate">{cat.description}</p>}
+                                {cat.description && <p className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">{cat.description}</p>}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -8884,7 +9100,7 @@ export default function App() {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  className="h-7 w-7 text-blue-500 hover:text-blue-700 hover:bg-blue-100 bg-white shadow-sm"
+                                  className="h-7 w-7 text-blue-500 hover:text-slate-700 hover:bg-blue-100 dark:hover:bg-zinc-900 bg-white dark:bg-zinc-800 shadow-sm"
                                   onClick={() => {
                                     setEditingCategory(cat);
                                     setNewCategoryName(cat.name);
@@ -8898,7 +9114,7 @@ export default function App() {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-100 bg-white shadow-sm"
+                                  className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/40 bg-white dark:bg-zinc-800 shadow-sm"
                                   onClick={() => handleDeleteCategory(cat.id)}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -8910,21 +9126,23 @@ export default function App() {
                       );
                     })
                   ) : (
-                    <div className="w-full py-6 px-4 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center gap-1">
-                      <p className="text-slate-500 font-medium text-sm">No contact categories found</p>
-                      <p className="text-slate-400 text-xs">Create a custom category to group your contacts.</p>
+                    <div className="w-full py-6 px-4 text-center border border-dashed border-slate-200 dark:border-zinc-800 rounded-xl bg-slate-50/50 dark:bg-zinc-950 flex flex-col items-center justify-center gap-1">
+                      <p className="text-slate-500 dark:text-zinc-400 font-medium text-sm">No contact categories found</p>
+                      <p className="text-slate-400 dark:text-zinc-500 text-xs">Create a custom category to group your contacts.</p>
                     </div>
                   )}
                 </div>
               </Card>
 
-              <Card className="p-6 w-full bg-white border border-slate-200 shadow-sm">
+              <Card className="p-6 w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm text-foreground">
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <Users className="h-5 w-5 text-slate-500" />
                   Recent Contacts
                 </h3>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {contacts && contacts.length > 0 ? (
+                  {isViewLoading('contacts') ? (
+                    <ThreeDotsLoading label="Loading recent contacts..." />
+                  ) : contacts && contacts.length > 0 ? (
                     contacts.slice(0, 4).map(contact => (
                       <div 
                         key={contact.id} 
@@ -8940,7 +9158,7 @@ export default function App() {
                         </div>
                         <div className="flex flex-col">
                           <span className="text-sm font-bold">{contact.firstName} {contact.lastName}</span>
-                          <span className="text-xs text-muted-foreground capitalize">{contact.getContactCategoryDto.name}</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 capitalize">{contact.getContactCategoryDto.name}</span>
                         </div>
                       </div>
                     ))
@@ -8956,9 +9174,8 @@ export default function App() {
             <div className="space-y-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input 
-                    placeholder="Search contacts..." 
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400" />
+                  <Input autoComplete="off" placeholder="Search contacts..." 
                     className="pl-10"
                     value={contactSearchQuery}
                     onChange={(e) => setContactSearchQuery(e.target.value)}
@@ -8987,7 +9204,9 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                {filteredContacts && filteredContacts.length > 0 ? (
+                {isViewLoading('contacts') ? (
+                  <ThreeDotsLoading label="Loading contacts..." />
+                ) : filteredContacts && filteredContacts.length > 0 ? (
                   (filteredContacts || []).map(contact => (
                     <Card 
                       key={contact.id} 
@@ -9015,22 +9234,22 @@ export default function App() {
                         <div className="grid gap-3 text-sm">
                           {contact.contactDetails.map((d, idx) => (
                             <div key={idx} className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2 text-muted-foreground">
+                              <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
                                 <Mail className="h-4 w-4" />
                                 <span className="font-medium text-foreground">{d.email}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-muted-foreground">
+                              <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
                                 <Phone className="h-4 w-4" />
                                 <span className="font-medium text-foreground">{d.phoneNumber}</span>
                               </div>
                             </div>
                           ))}
                           {contact.address.map((a, idx) => (
-                            <div key={idx} className="flex items-start gap-2 text-muted-foreground">
+                            <div key={idx} className="flex items-start gap-2 text-slate-500 dark:text-zinc-400">
                               <MapPin className="h-4 w-4 mt-0.5" />
                               <div className="flex flex-col">
                                 <span className="font-medium text-foreground">{a.numberLine} {a.street}, {a.city}</span>
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{a.state}, {a.country}</span>
+                                <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase tracking-wider">{a.state}, {a.country}</span>
                               </div>
                             </div>
                           ))}
@@ -9065,7 +9284,7 @@ export default function App() {
                 {userProfile.getPersonDetailsDto.firstName} {userProfile.getPersonDetailsDto.lastName} Profile
               </h1>
             </div>
-            <p className="text-muted-foreground">Manage your account information and security settings.</p>
+            <p className="text-slate-500 dark:text-zinc-400">Manage your account information and security settings.</p>
           </div>
 
           <Card className="overflow-hidden border-none shadow-2xl bg-card/50 backdrop-blur-md">
@@ -9075,44 +9294,40 @@ export default function App() {
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
-                      <UserIcon className="h-3 w-3 text-muted-foreground" />
+                      <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Full Name
                     </Label>
-                    <Input 
-                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black px-0"
+                    <Input autoComplete="off" className="border-0 border-b-2 border-slate-200 dark:border-zinc-700 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black dark:text-zinc-100 dark:text-white px-0"
                       value={userProfile.getPersonDetailsDto.firstName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, firstName: e.target.value } }))} 
                     />
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
-                      <UserIcon className="h-3 w-3 text-muted-foreground" />
+                      <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Last Name
                     </Label>
-                    <Input 
-                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black px-0"
+                    <Input autoComplete="off" className="border-0 border-b-2 border-slate-200 dark:border-zinc-700 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-lg font-medium bg-transparent text-black dark:text-zinc-100 dark:text-white px-0"
                       value={userProfile.getPersonDetailsDto.lastName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getPersonDetailsDto: { ...p.getPersonDetailsDto, lastName: e.target.value } }))} 
                     />
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
-                      <ShieldCheck className="h-3 w-3 text-muted-foreground" />
+                      <ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Username
                     </Label>
-                    <Input 
-                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
+                    <Input autoComplete="off" className="border-0 border-b-2 border-slate-200 dark:border-zinc-700 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black dark:text-zinc-100 dark:text-white px-0"
                       value={userProfile.getUserDto.userName} 
                       onChange={(e) => setUserProfile(p => ({ ...p, getUserDto: { ...p.getUserDto, userName: e.target.value } }))} 
                     />
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
-                      <Mail className="h-3 w-3 text-muted-foreground" />
+                      <Mail className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Email Address
                     </Label>
-                    <Input 
-                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
+                    <Input autoComplete="off" className="border-0 border-b-2 border-slate-200 dark:border-zinc-700 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black dark:text-zinc-100 dark:text-white px-0"
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.email || ''} 
                       onChange={(e) => {
                         const email = e.target.value;
@@ -9127,11 +9342,10 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
-                      <Smartphone className="h-3 w-3 text-muted-foreground" />
+                      <Smartphone className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Phone Number
                     </Label>
-                    <Input 
-                      className="border-0 border-b-2 border-slate-200 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black px-0"
+                    <Input autoComplete="off" className="border-0 border-b-2 border-slate-200 dark:border-zinc-700 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none bg-transparent text-black dark:text-zinc-100 dark:text-white px-0"
                       value={userProfile.getPersonDetailsDto.getContactDetailsDtos[0]?.phoneNumber || ''} 
                       onChange={(e) => {
                         const phoneNumber = e.target.value;
@@ -9159,7 +9373,7 @@ export default function App() {
                     <Button
                       variant="outline" 
                       size="sm" 
-                      className="h-7 px-3 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 transition-all flex items-center gap-1.5"
+                      className="h-7 px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all flex items-center gap-1.5"
                       onClick={async () => {
                         const newAddresses = (userProfile.getPersonDetailsDto.getAddressDtos || []).filter(a => a.id && a.id > 10000);
                         if (newAddresses.length > 0) {
@@ -9192,7 +9406,7 @@ export default function App() {
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-black hover:bg-primary/5 px-3 flex items-center gap-1.5"
+                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-foreground dark:text-zinc-100 hover:bg-primary/5 px-3 flex items-center gap-1.5"
                       onClick={() => {
                         setUserProfile(p => {
                           if (!p) return null;
@@ -9242,9 +9456,8 @@ export default function App() {
                         </Button>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Number/Line</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Number/Line</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.numberLine}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9257,9 +9470,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Street</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Street</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.street}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9272,9 +9484,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">City</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">City</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.city}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9287,9 +9498,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Region</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Region</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.region}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9302,9 +9512,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">State</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">State</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.state}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9317,9 +9526,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Country</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Country</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.country}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9332,9 +9540,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Postal Code</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Postal Code</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={addr.postalCode || ''}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9365,7 +9572,7 @@ export default function App() {
                     <Button
                       variant="outline" 
                       size="sm" 
-                      className="h-7 px-3 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 transition-all flex items-center gap-1.5"
+                      className="h-7 px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all flex items-center gap-1.5"
                       onClick={async () => {
                         const newContacts = (userProfile.getPersonDetailsDto.getContactDetailsDtos || []).filter(c => c.id && c.id > 10000);
                         if (newContacts.length > 0) {
@@ -9395,7 +9602,7 @@ export default function App() {
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-black hover:bg-primary/5 px-3 flex items-center gap-1.5"
+                      className="text-[10px] uppercase h-7 bg-transparent border border-primary/20 text-foreground dark:text-zinc-100 hover:bg-primary/5 px-3 flex items-center gap-1.5"
                       onClick={() => {
                         setUserProfile(p => {
                           if (!p) return null;
@@ -9444,9 +9651,8 @@ export default function App() {
                         </Button>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Email Address</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Email Address</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={contact.email}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9459,9 +9665,8 @@ export default function App() {
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground uppercase">Phone Number</Label>
-                            <Input 
-                              className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-black px-0 h-8"
+                            <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Phone Number</Label>
+                            <Input autoComplete="off" className="border-0 border-b-2 border-primary/20 focus-visible:border-b-green-400 focus-visible:ring-0 rounded-none shadow-none text-xs bg-transparent text-foreground dark:text-zinc-100 px-0 h-8"
                               value={contact.phoneNumber}
                               onChange={(e) => {
                                 const val = e.target.value;
@@ -9517,18 +9722,18 @@ export default function App() {
                     Security Settings
                   </h3>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-blue-200 text-black hover:bg-blue-50 hover:text-blue-700 transition-colors rounded-2xl" onClick={() => setIsPasswordModalOpen(true)}>
+                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-900 hover:text-slate-700 dark:hover:text-zinc-100 transition-colors rounded-2xl" onClick={() => setIsPasswordModalOpen(true)}>
                       <Key className="mr-4 h-5 w-5 text-blue-500" />
                       <div className="flex flex-col items-start">
                         <span className="font-bold text-xs uppercase tracking-wider">Change Password</span>
-                        <span className="text-[10px] text-muted-foreground">Update your login credentials</span>
+                        <span className="text-[10px] text-slate-500 dark:text-zinc-400">Update your login credentials</span>
                       </div>
                     </Button>
-                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-orange-200 text-black hover:bg-orange-50 hover:text-orange-700 transition-colors rounded-2xl" onClick={() => setIsAuthCodeModalOpen(true)}>
+                    <Button variant="outline" className="justify-start h-auto p-4 bg-transparent border border-orange-200 dark:border-orange-800/60 text-slate-900 dark:text-zinc-100 hover:bg-orange-50 dark:hover:bg-orange-950/30 hover:text-orange-700 dark:hover:text-orange-300 transition-colors rounded-2xl" onClick={() => setIsAuthCodeModalOpen(true)}>
                       <ShieldAlert className="mr-4 h-5 w-5 text-orange-500" />
                       <div className="flex flex-col items-start">
                         <span className="font-bold text-xs uppercase tracking-wider">Authorization Code</span>
-                        <span className="text-[10px] text-muted-foreground">Manage your 6-digit secure code</span>
+                        <span className="text-[10px] text-slate-500 dark:text-zinc-400">Manage your 6-digit secure code</span>
                       </div>
                     </Button>
                   </div>
@@ -9536,7 +9741,7 @@ export default function App() {
 
                 <div className="flex justify-end pt-8">
                   <Button 
-                    className="bg-transparent border-2 border-green-300 text-black hover:bg-green-50 rounded-full px-8 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto"
+                    className="bg-transparent border-2 border-green-400 dark:border-green-600 text-slate-900 dark:text-zinc-100 hover:bg-green-50 dark:hover:bg-green-950/40 rounded-full px-8 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto"
                     onClick={handleUpdateProfile}
                   >
                     <CheckCheck className="mr-2 h-4 w-4 text-green-600" />
@@ -9573,20 +9778,20 @@ export default function App() {
                 </div>
                 
                 <div className="w-full pt-6 space-y-3">
-                  <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-widest pb-2 border-b">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest pb-2 border-b">
                     <span>Identity Status</span>
                     <CheckCircle2 className="h-3 w-3 text-green-500" />
                   </div>
                   <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[10px] text-muted-foreground uppercase">System Role</span>
+                    <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">System Role</span>
                     <span className="text-xs font-medium">{userProfile.getUserDto.roleName}</span>
                   </div>
                   <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[10px] text-muted-foreground uppercase">Member Since</span>
+                    <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Member Since</span>
                     <span className="text-xs font-medium">October 2023</span>
                   </div>
                   <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[10px] text-muted-foreground uppercase">Access Level</span>
+                    <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Access Level</span>
                     <span className="text-xs font-medium">Standard Homeowner</span>
                   </div>
                 </div>
@@ -9616,20 +9821,19 @@ export default function App() {
                 <UserCircle className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">All Users</h1>
               </div>
-              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                 <UserCircle className="h-4 w-4 text-primary" />
                 {allUsers.length} {allUsers.length === 1 ? 'User' : 'Users'}
               </Badge>
             </div>
-            <p className="text-md text-muted-foreground">Manage system users, access levels and biometric tokens.</p>
+            <p className="text-md text-slate-500 dark:text-zinc-400">Manage system users, access levels and biometric tokens.</p>
           </div>  
             <div className="flex items-center gap-3 w-full">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
-                <Input 
-                  type="text"
+                <Input autoComplete="off" type="text"
                   placeholder="Search users by name or role..." 
-                  className="pl-9 h-11 rounded-none bg-white border-0 border-b border-slate-200 w-full focus-visible:ring-0 focus-visible:border-b-black transition-all"
+                  className="pl-9 h-11 rounded-none bg-white dark:bg-zinc-950 border-0 border-b border-slate-200 dark:border-zinc-800 text-black dark:text-zinc-100 dark:text-white w-full focus-visible:ring-0 focus-visible:border-b-black dark:focus-visible:border-b-white transition-all"
                   value={userSearchQuery}
                   onChange={(e) => setUserSearchQuery(e.target.value)}
                 />
@@ -9638,20 +9842,20 @@ export default function App() {
                 <div className="ml-auto flex items-center gap-3">
                   <Button 
                     variant="outline"
-                    className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                    className="font-medium border-slate-200 dark:border-zinc-800 flex items-center justify-center gap-2 px-4 shadow-sm"
                     onClick={() => setIsAddFingerprintOpen(true)}
                   >
                     <Fingerprint className="h-4 w-4" /> Add Fingerprint
                   </Button>
                   <Button 
                     variant="outline"
-                    className="font-medium border-slate-200 flex items-center justify-center gap-2 px-4 shadow-sm"
+                    className="font-medium border-slate-200 dark:border-zinc-800 flex items-center justify-center gap-2 px-4 shadow-sm"
                     onClick={() => setIsRegisterNfidOpen(true)}
                   >
                     <ScanLine className="h-4 w-4" /> Register NFID
                   </Button>
                   <Button 
-                    className="bg-black text-white hover:bg-black/90 transition-all font-medium px-6 flex items-center justify-center gap-2 shadow-sm"
+                    className="bg-white text-black dark:bg-zinc-950 dark:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-all font-medium px-6 flex items-center justify-center gap-2 shadow-sm border border-black dark:border-zinc-800"
                     onClick={async () => {
                       try {
                         const res: any = await apiFetch('/User/GenerateToken', { method: 'POST' });
@@ -9678,7 +9882,9 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {allUsers && allUsers.length > 0 ? (
+            {isViewLoading('manage-users') ? (
+              <ThreeDotsLoading label="Loading users..." />
+            ) : allUsers && allUsers.length > 0 ? (
               allUsers
                 .filter(person => {
                   const query = userSearchQuery.toLowerCase();
@@ -9696,14 +9902,14 @@ export default function App() {
                 return (
                   <Card 
                     key={person.id} 
-                    className={`p-4 flex items-center justify-between group border border-slate-200 shadow-sm bg-white hover:shadow-md hover:border-primary/50 transition-all cursor-pointer ${person.disabled ? 'opacity-50 grayscale' : ''}`}
+                    className={`p-4 flex items-center justify-between group border border-slate-200 dark:border-zinc-800 shadow-sm bg-white dark:bg-zinc-950 text-foreground hover:shadow-md hover:border-primary/50 transition-all cursor-pointer ${person.disabled ? 'opacity-50 grayscale' : ''}`}
                     onClick={() => {
                       setViewingPerson(person);
                       setIsViewPersonDetailsOpen(true);
                     }}
                   >
                     <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className="h-12 w-12 rounded-full overflow-hidden bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 flex items-center justify-center font-bold text-sm shrink-0">
                         {details?.imageUrl ? (
                           <img 
                             src={getFullImageUrl(details.imageUrl)} 
@@ -9724,7 +9930,7 @@ export default function App() {
                       </div>
                       <div>
                         <h3 className="font-bold">{details.firstName} {details.lastName}</h3>
-                        <p className="text-xs text-muted-foreground">{details.getContactDetailsDtos[0]?.email}</p>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400">{details.getContactDetailsDtos[0]?.email}</p>
                         <Badge variant="secondary" className="mt-1 text-[10px] uppercase tracking-wider">{user.roleName}</Badge>
                       </div>
                     </div>
@@ -9741,8 +9947,8 @@ export default function App() {
               className="h-full min-h-[100px] border-dashed border-2 hover:border-primary/50 hover:bg-primary/5 flex flex-col gap-2 py-8 rounded-xl transition-all"
               onClick={() => setIsAddPersonOpen(true)}
             >
-              <UserPlus className="h-6 w-6 text-muted-foreground" />
-              <span className="text-sm font-medium text-muted-foreground">Add New User</span>
+              <UserPlus className="h-6 w-6 text-slate-500 dark:text-zinc-400" />
+              <span className="text-sm font-medium text-slate-500 dark:text-zinc-400">Add New User</span>
             </Button>
           </div>
         </motion.div>
@@ -9769,11 +9975,11 @@ export default function App() {
                     <HomeIcon className="h-8 w-8 text-primary shrink-0" />
                     <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s Room(s)</h1>
                   </div>
-                  <p className="text-muted-foreground">Select a room to manage its devices.</p>
+                  <p className="text-slate-500 dark:text-zinc-400">Select a room to manage its devices.</p>
                 </div>
                 
                 <div className="shrink-0 pt-1">
-                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                     <Sofa className="h-3 w-3" />
                     {userRooms.length} {userRooms.length === 1 ? 'Room' : 'Rooms'}
                   </Badge>
@@ -9782,9 +9988,8 @@ export default function App() {
               
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
-                <Input 
-                  placeholder="Search your rooms..." 
-                  className="pl-9 h-10 border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none shadow-none"
+                <Input autoComplete="off" placeholder="Search your rooms..." 
+                  className="pl-9 h-10 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none shadow-none bg-transparent text-foreground dark:text-zinc-100"
                   value={myRoomsSearchQuery}
                   onChange={(e) => setMyRoomsSearchQuery(e.target.value)}
                 />
@@ -9792,42 +9997,45 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {(filteredUserRooms || []).map(room => {
-                const RoomIcon = iconMap[room.icon || ''] || Sofa;
-                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
-                const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
+              {isViewLoading('user-room') ? (
+                <ThreeDotsLoading label="Loading your rooms..." />
+              ) : filteredUserRooms && filteredUserRooms.length > 0 ? (
+                filteredUserRooms.map(room => {
+                  const RoomIcon = iconMap[room.icon || ''] || Sofa;
+                  const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                  const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
 
-                return (
-                  <Card 
-                    key={room.id}
-                    className="p-6 hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
-                    onClick={() => setSelectedUserRoomId(room.id)}
-                  >
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                      <RoomIcon className="h-24 w-24" />
-                    </div>
-                    <div className="relative z-10 space-y-4">
-                      <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
-                        <RoomIcon className="h-6 w-6" />
+                  return (
+                    <Card 
+                      key={room.id}
+                      className="p-6 hover:bg-accent transition-all cursor-pointer group relative overflow-hidden dark:bg-zinc-950 dark:border-zinc-800"
+                      onClick={() => setSelectedUserRoomId(room.id)}
+                    >
+                      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <RoomIcon className="h-24 w-24" />
                       </div>
-                      <div>
-                        <h3 className="font-bold text-lg text-slate-800">{room.name}</h3>
-                        <p className="text-sm text-slate-500">{roomDevices.length} Devices</p>
+                      <div className="relative z-10 space-y-4">
+                        <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                          <RoomIcon className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg text-slate-900 dark:text-zinc-100">{room.name}</h3>
+                          <p className="text-sm text-slate-500 dark:text-zinc-400">{roomDevices.length} Devices</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={activeCount > 0 ? 'default' : 'secondary'}>
+                            {activeCount} Active
+                          </Badge>
+                          <ChevronRight className="h-4 w-4 ml-auto text-slate-500 dark:text-zinc-400 group-hover:text-primary transition-colors" />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={activeCount > 0 ? 'default' : 'secondary'}>
-                          {activeCount} Active
-                        </Badge>
-                        <ChevronRight className="h-4 w-4 ml-auto text-muted-foreground group-hover:text-primary transition-colors" />
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
-              {filteredUserRooms.length === 0 && (
-                <div className="col-span-full py-12 text-center text-slate-500">
-                  <Sofa className="h-12 w-12 mx-auto text-slate-300 mb-4" />
-                  <h3 className="text-lg font-bold text-slate-700">No rooms found</h3>
+                    </Card>
+                  );
+                })
+              ) : (
+                <div className="col-span-full py-12 text-center text-slate-500 dark:text-zinc-400">
+                  <Sofa className="h-12 w-12 mx-auto text-slate-300 dark:text-zinc-600 mb-4" />
+                  <h3 className="text-lg font-bold text-slate-700 dark:text-zinc-200">No rooms found</h3>
                   <p className="text-sm">We couldn't find any rooms matching your search.</p>
                 </div>
               )}
@@ -9888,7 +10096,7 @@ export default function App() {
               <HomeIcon className="h-8 w-8 text-primary" />
               <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s {currentRoom?.name || 'Room'}</h1>
             </div>
-            <p className="text-muted-foreground">Manage devices in your personal space.</p>
+            <p className="text-slate-500 dark:text-zinc-400">Manage devices in your personal space.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -9900,15 +10108,15 @@ export default function App() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'door').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Doors</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Doors</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'window').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Windows</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Windows</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'camera').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Cameras</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Cameras</span>
                 </div>
               </div>
             </Card>
@@ -9920,11 +10128,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'light').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Lights</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Lights</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'appliance').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Appliances</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Appliances</span>
                 </div>
               </div>
             </Card>
@@ -9946,7 +10154,7 @@ export default function App() {
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
-                  <p className="text-[10px] text-muted-foreground font-medium">Click to toggle security</p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Click to toggle security</p>
                 </div>
               </Card>
             )}
@@ -10132,11 +10340,11 @@ export default function App() {
                   <Sofa className="h-8 w-8 text-primary shrink-0" />
                   <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
                 </div>
-                <p className="text-muted-foreground">Overview of all rooms in your home.</p>
+                <p className="text-slate-500 dark:text-zinc-400">Overview of all rooms in your home.</p>
               </div>
               
               <div className="shrink-0 pt-1">
-                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                   <Sofa className="h-3 w-3" />
                   {rooms.length} {rooms.length === 1 ? 'Room' : 'Rooms'}
                 </Badge>
@@ -10146,9 +10354,8 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
-                <Input 
-                  placeholder="Search rooms..." 
-                  className="pl-9 h-10 bg-white border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0"
+                <Input autoComplete="off" placeholder="Search rooms..." 
+                  className="pl-9 h-10 bg-transparent border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 text-foreground dark:text-zinc-100"
                   value={roomSearchQuery}
                   onChange={(e) => setRoomSearchQuery(e.target.value)}
                 />
@@ -10166,38 +10373,46 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
-              const Icon = iconMap[room.icon] || Sofa;
-              const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
-              const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
-              
-              return (
-                <Card 
-                  key={room.id} 
-                  className="p-6 border border-slate-200 shadow-sm hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
-                  onClick={() => setActiveView(`room-${room.id}`)}
-                >
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <Icon className="h-24 w-24" />
-                  </div>
-                  <div className="relative z-10 space-y-4">
-                    <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                      <Icon className="h-6 w-6" />
+            {isViewLoading('facility-rooms') || isViewLoading('rooms') ? (
+              <ThreeDotsLoading label="Loading rooms..." />
+            ) : rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).length > 0 ? (
+              rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
+                const Icon = iconMap[room.icon] || Sofa;
+                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
+                
+                return (
+                  <Card 
+                    key={room.id} 
+                    className="p-6 border border-slate-200 shadow-sm hover:bg-accent transition-all cursor-pointer group relative overflow-hidden"
+                    onClick={() => setActiveView(`room-${room.id}`)}
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                      <Icon className="h-24 w-24" />
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold">{room.name}</h3>
-                      <p className="text-sm text-muted-foreground">{roomDevices.length} Devices</p>
+                    <div className="relative z-10 space-y-4">
+                      <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                        <Icon className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">{room.name}</h3>
+                        <p className="text-sm text-slate-500 dark:text-zinc-400">{roomDevices.length} Devices</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={activeCount > 0 ? 'default' : 'secondary'}>
+                          {activeCount} Active
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 ml-auto text-slate-500 dark:text-zinc-400 group-hover:text-primary transition-colors" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={activeCount > 0 ? 'default' : 'secondary'}>
-                        {activeCount} Active
-                      </Badge>
-                      <ChevronRight className="h-4 w-4 ml-auto text-muted-foreground group-hover:text-primary transition-colors" />
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
+                  </Card>
+                );
+              })
+            ) : (
+              <div className="col-span-full">
+                <NoItems icon={Sofa} message="No rooms found." />
+              </div>
+            )}
           </div>
         </motion.div>
       );
@@ -10234,11 +10449,11 @@ export default function App() {
                   <Zap className="h-8 w-8 text-primary shrink-0" />
                   <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Actions & Automation</h1>
                 </div>
-                <p className="text-muted-foreground">Manage system-wide triggered events and automation sequences.</p>
+                <p className="text-slate-500 dark:text-zinc-400">Manage system-wide triggered events and automation sequences.</p>
               </div>
               
               <div className="shrink-0 pt-1">
-                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                   <Zap className="h-3 w-3" />
                   {actions.length} {actions.length === 1 ? 'Action' : 'Actions'}
                 </Badge>
@@ -10248,8 +10463,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
-                <Input
-                  type="text"
+                <Input autoComplete="off" type="text"
                   placeholder="Search actions by name..."
                   className="pl-10 h-10"
                   value={facilitySearchQuery}
@@ -10257,7 +10471,16 @@ export default function App() {
                 />
               </div>
               <div className="flex flex-row items-center gap-3 shrink-0">
-                <Button onClick={() => setIsAddActionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
+                <Button onClick={() => {
+                  setActionForm({
+                    actionName: '',
+                    description: '',
+                    isPrivate: false,
+                    isRecurring: false,
+                    time: '00:00:00'
+                  });
+                  setIsAddActionOpen(true);
+                }} className="bg-black text-white hover:bg-black/90 dark:bg-slate-100 dark:text-black dark:hover:bg-slate-200 shrink-0 font-medium border-0">
                   <Plus className="mr-2 h-4 w-4" /> Add New Action
                 </Button>
               </div>
@@ -10265,7 +10488,9 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredActions && filteredActions.length > 0 ? (
+            {isViewLoading('facility-actions') ? (
+              <ThreeDotsLoading label="Loading actions..." />
+            ) : filteredActions && filteredActions.length > 0 ? (
               (filteredActions || []).map(action => (
                 <Card 
                   key={action.id} 
@@ -10315,10 +10540,33 @@ export default function App() {
                         </Button>
                       </div>
                     </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">{action.actionDescription}</p>
+                    <p className="text-sm text-slate-500 dark:text-zinc-400 line-clamp-2">{action.actionDescription}</p>
+
+                    <div className="flex items-center gap-2 flex-wrap mt-1">
+                      <Badge variant="outline" className={cn(
+                        "text-[10px] h-5 gap-1 rounded-md font-medium",
+                        action.isPrivate ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+                      )}>
+                        {action.isPrivate ? <Lock className="h-3 w-3" /> : <Globe className="h-3 w-3" />}
+                        {action.isPrivate ? "Private" : "Public"}
+                      </Badge>
+                      <Badge variant="outline" className={cn(
+                        "text-[10px] h-5 gap-1 rounded-md font-medium",
+                        action.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700"
+                      )}>
+                        <Repeat className="h-3 w-3" />
+                        {action.isRecurring ? "Recurring" : "One-time"}
+                      </Badge>
+                      {action.time && (
+                        <Badge variant="outline" className="text-[10px] h-5 gap-1 rounded-md font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                          <Clock className="h-3 w-3" />
+                          {formatTimeSpanDisplay(action.time)}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="mt-2 pt-4 border-t flex items-center justify-between text-xs text-muted-foreground relative z-10">
+                  <div className="mt-2 pt-4 border-t dark:border-zinc-800 flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400 relative z-10">
                     <div className="flex items-center gap-1.5">
                       <Layers className="h-3 w-3" />
                       <span>{action.getActionStepDtos.length} Steps</span>
@@ -10345,7 +10593,7 @@ export default function App() {
         return (
           <div className="flex h-[50vh] flex-col items-center justify-center space-y-4">
             <h2 className="text-xl font-bold">Access Denied</h2>
-            <p className="text-muted-foreground">Only the Owner role can view the Hardware page.</p>
+            <p className="text-slate-500 dark:text-zinc-400">Only the Owner role can view the Hardware page.</p>
           </div>
         );
       }
@@ -10376,15 +10624,15 @@ export default function App() {
                   </Button>
                   <div className="h-4 w-px bg-border mx-1 shrink-0" />
                   <Cpu className="h-8 w-8 text-primary shrink-0" />
-                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Hardware Systems</h1>
+                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Hardware</h1>
                 </div>
-                <p className="text-muted-foreground">Manage and monitor hardware hubs and integration controllers.</p>
+                <p className="text-slate-500 dark:text-zinc-400">Manage and monitor hardware hubs and integration controllers.</p>
               </div>
               
               <div className="shrink-0 pt-1">
-                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                   <Cpu className="h-3 w-3" />
-                  {hardwares.length} {hardwares.length === 1 ? 'Controller' : 'Controllers'}
+                  {hardwares.length} {hardwares.length === 1 ? 'Hardware' : 'Hardwares'}
                 </Badge>
               </div>
             </div>
@@ -10392,8 +10640,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 z-10" />
-                <Input
-                  type="text"
+                <Input autoComplete="off" type="text"
                   placeholder="Search hardware by name..."
                   className="pl-10 h-10"
                   value={facilitySearchQuery}
@@ -10405,7 +10652,7 @@ export default function App() {
                   <button
                     className={cn(
                       "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                      facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                     )}
                     onClick={() => setFacilitySortBy('room')}
                   >
@@ -10414,7 +10661,7 @@ export default function App() {
                   <button
                     className={cn(
                       "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                      facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                     )}
                     onClick={() => setFacilitySortBy('section')}
                   >
@@ -10434,7 +10681,9 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredHardwares && filteredHardwares.length > 0 ? (
+            {isViewLoading('facility-hardware') ? (
+              <ThreeDotsLoading label="Loading hardware..." />
+            ) : filteredHardwares && filteredHardwares.length > 0 ? (
               (filteredHardwares || []).map(hw => {
                 const deviceCount = (hw.applianceIdNames?.length || 0) + 
                                    (hw.cameraIdNames?.length || 0) + 
@@ -10469,11 +10718,11 @@ export default function App() {
 
                     <div className="space-y-2 text-sm pt-2 border-t">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs text-muted-foreground font-medium">Hardware ID</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">Hardware ID</span>
                         <span className="font-mono text-xs font-semibold">{hw.hardwareId}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-xs text-muted-foreground font-medium">Auth Key</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">Auth Key</span>
                         <span className="font-mono text-xs select-all text-primary font-medium truncate max-w-[150px]">{hw.authKey}</span>
                       </div>
                     </div>
@@ -10541,22 +10790,21 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
                 <Radio className="h-8 w-8 text-primary" />
                 <div className="flex items-center justify-between w-full">
-                  <h1 className="text-3xl font-bold tracking-tight">External Systems</h1>
-                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider">
+                  <h1 className="text-3xl font-bold tracking-tight">Externals</h1>
+                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                     <Radio className="h-3 w-3" />
                     {externals.length} {externals.length === 1 ? 'External' : 'Externals'}
                   </Badge>
                 </div>
               </div>
-              <p className="text-muted-foreground">Monitor and trigger auxiliary external interfaces around the property boundary.</p>
+              <p className="text-slate-500 dark:text-zinc-400">Monitor and trigger auxiliary external interfaces around the property boundary.</p>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
             <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
-              <Input
-                type="text"
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 z-10" />
+              <Input autoComplete="off" type="text"
                 placeholder="Search externals by name..."
                 className="pl-10 h-10"
                 value={facilitySearchQuery}
@@ -10568,7 +10816,7 @@ export default function App() {
                 <button
                   className={cn(
                     "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                    facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                   )}
                   onClick={() => setFacilitySortBy('room')}
                 >
@@ -10577,7 +10825,7 @@ export default function App() {
                 <button
                   className={cn(
                     "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                    facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                   )}
                   onClick={() => setFacilitySortBy('section')}
                 >
@@ -10596,15 +10844,17 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredExternals && filteredExternals.length > 0 ? (
+            {isViewLoading('facility-externals') ? (
+              <ThreeDotsLoading label="Loading external devices..." />
+            ) : filteredExternals && filteredExternals.length > 0 ? (
               (filteredExternals || []).map(ext => (
                 <Card key={ext.id} className="p-6 flex flex-col gap-4 border transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <h3 className="font-bold text-lg">{ext.externalName}</h3>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-xs text-muted-foreground font-mono">ID: {ext.externalId}</p>
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[9px] font-bold">
+                        <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">ID: {ext.externalId}</p>
+                        <Badge variant="secondary" className="px-1.5 py-0 text-[9px] font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-none">
                           {(ext.actionIds?.length || 0)} Linked Actions
                         </Badge>
                       </div>
@@ -10644,13 +10894,13 @@ export default function App() {
                   {(ext.section || ext.room) && (
                     <div className="flex gap-2 text-xs border-t pt-2">
                       {ext.section && (
-                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
+                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-slate-500 dark:text-zinc-400 bg-muted/50">
                           <Layers className="h-3 w-3" />
                           {(sections || []).find(s => s.id === ext.section)?.name || ext.section}
                         </Badge>
                       )}
                       {ext.room && (
-                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-muted-foreground bg-muted/50">
+                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-slate-500 dark:text-zinc-400 bg-muted/50">
                           <Sofa className="h-3 w-3" />
                           {(rooms || []).find(r => r.id === ext.room)?.name || ext.room}
                         </Badge>
@@ -10659,7 +10909,7 @@ export default function App() {
                   )}
 
                   <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-xs">
-                    <span className="text-muted-foreground font-medium">Mapped Automate Triggers:</span>
+                    <span className="text-slate-500 dark:text-zinc-400 font-medium">Mapped Automate Triggers:</span>
                     <div className="flex gap-1.5 flex-wrap mt-1">
                       {ext.actionIds && ext.actionIds.length > 0 ? (
                         ext.actionIds.map(aid => {
@@ -10669,7 +10919,7 @@ export default function App() {
                           );
                         })
                       ) : (
-                        <span className="text-muted-foreground italic">No triggers registered</span>
+                        <span className="text-slate-500 dark:text-zinc-400 italic">No triggers registered</span>
                       )}
                     </div>
                   </div>
@@ -10710,11 +10960,11 @@ export default function App() {
                   <Layers className="h-8 w-8 text-primary shrink-0" />
                   <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
                 </div>
-                <p className="text-muted-foreground">Manage devices and rooms grouped by section.</p>
+                <p className="text-slate-500 dark:text-zinc-400">Manage devices and rooms grouped by section.</p>
               </div>
               
               <div className="shrink-0 pt-1">
-                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                   <Layers className="h-3 w-3" />
                   {sections.length} {sections.length === 1 ? 'Section' : 'Sections'}
                 </Badge>
@@ -10724,8 +10974,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
-                <Input 
-                  placeholder="Search sections..." 
+                <Input autoComplete="off" placeholder="Search sections..." 
                   className="pl-10 h-10"
                   value={sectionSearchQuery}
                   onChange={(e) => setSectionSearchQuery(e.target.value)}
@@ -10742,7 +10991,9 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-8">
-            {sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
+            {isViewLoading('facility-sections') || isViewLoading('sections') ? (
+              <ThreeDotsLoading label="Loading home sections..." />
+            ) : sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
               sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
                 const sectionRooms = getSectionRooms(section, rooms);
                 const sectionDevices = getSectionDirectDevices(section, devices);
@@ -10762,7 +11013,7 @@ export default function App() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10"
                           onClick={() => {
                             setViewingSection(section);
                             setIsViewSectionOpen(true);
@@ -10776,7 +11027,7 @@ export default function App() {
                     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                       {/* Rooms in Section */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Rooms</h3>
+                        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Rooms</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           {sectionRooms.map(room => (
                             <Card key={room.id} className="border cursor-pointer hover:bg-accent transition-colors group relative"
@@ -10791,14 +11042,14 @@ export default function App() {
                             </Card>
                           ))}
                           {sectionRooms.length === 0 && (
-                            <p className="text-xs text-muted-foreground italic">No rooms in this section.</p>
+                            <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No rooms in this section.</p>
                           )}
                         </div>
                       </div>
  
                       {/* Devices in Section */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Direct Devices</h3>
+                        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Direct Devices</h3>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           {sectionDevices.map(device => (
                             <DeviceCard 
@@ -10813,7 +11064,7 @@ export default function App() {
                             />
                           ))}
                           {sectionDevices.length === 0 && (
-                            <p className="text-xs text-muted-foreground italic">No direct devices in this section.</p>
+                            <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No direct devices in this section.</p>
                           )}
                         </div>
                       </div>
@@ -10845,7 +11096,7 @@ export default function App() {
                 <Building2 className="h-8 w-8 text-primary" />
                 <h1 className="text-3xl font-bold tracking-tight">All Rooms</h1>
               </div>
-              <p className="text-muted-foreground">Overview of all rooms in HanssonHub.</p>
+              <p className="text-slate-500 dark:text-zinc-400">Overview of all rooms in HanssonHub.</p>
             </div>
             {isOwner && (
               <Button size="sm" onClick={() => setIsAddRoomOpen(true)}>
@@ -10894,7 +11145,7 @@ export default function App() {
                     </div>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">{roomDevices.length} Devices</span>
+                        <span className="text-slate-500 dark:text-zinc-400">{roomDevices.length} Devices</span>
                         <Badge variant={activeInRoom > 0 ? "default" : "secondary"}>
                           {activeInRoom} Active
                         </Badge>
@@ -10958,11 +11209,11 @@ export default function App() {
                 <TitleIcon className="h-8 w-8 text-primary shrink-0" />
                 <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
               </div>
-              <p className="text-muted-foreground">Manage all {title?.toLowerCase()} in your home.</p>
+              <p className="text-slate-500 dark:text-zinc-400">Manage all {title?.toLowerCase()} in your home.</p>
             </div>
             
             <div className="shrink-0 pt-1">
-              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 text-black border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
+              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
                 <TitleIcon className="h-3 w-3" />
                 {filteredDevices.length}{' '}
                 {(() => {
@@ -10982,9 +11233,8 @@ export default function App() {
               <div className="relative w-full max-w-md">
                 {!isRoom && (
                   <>
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
-                    <Input
-                      type="text"
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 z-10" />
+                    <Input autoComplete="off" type="text"
                       placeholder={`Search ${title?.toLowerCase()}...`}
                       className="pl-10 h-10"
                       value={facilitySearchQuery}
@@ -10999,7 +11249,7 @@ export default function App() {
                     <button
                       className={cn(
                         "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                        facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                        facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                       )}
                       onClick={() => setFacilitySortBy('room')}
                     >
@@ -11008,7 +11258,7 @@ export default function App() {
                     <button
                       className={cn(
                         "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                        facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-muted-foreground"
+                        facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
                       )}
                       onClick={() => setFacilitySortBy('section')}
                     >
@@ -11047,15 +11297,15 @@ export default function App() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'door').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Doors</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Doors</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'window').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Windows</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Windows</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'camera').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Cameras</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Cameras</span>
                 </div>
               </div>
             </Card>
@@ -11067,11 +11317,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'light').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Lights</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Lights</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'appliance').length}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">Appliances</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Appliances</span>
                 </div>
               </div>
             </Card>
@@ -11084,7 +11334,9 @@ export default function App() {
             ? (isSidebarCollapsed ? "lg:grid-cols-4" : "lg:grid-cols-3") 
             : "lg:grid-cols-3 xl:grid-cols-4"
         )}>
-          {filteredDevices && filteredDevices.length > 0 ? (
+          {isViewLoading(activeView) ? (
+            <ThreeDotsLoading label={`Loading ${title.toLowerCase()}...`} />
+          ) : filteredDevices && filteredDevices.length > 0 ? (
             (filteredDevices || []).map(device => (
               <DeviceCard 
                 key={device.id} 
@@ -11129,18 +11381,566 @@ export default function App() {
     );
   };
 
+
+  const speakVoiceResponse = (text: string) => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      const selectFeminineVoice = () => {
+        const voices = window.speechSynthesis.getVoices();
+        const feminineKeywords = [
+          'female', 'samantha', 'zira', 'victoria', 'karen', 'fiona', 
+          'google us english', 'microsoft zira', 'microsoft eva', 'siri', 
+          'jenny', 'aria', 'sonia', 'serena', 'stephanie', 'veena'
+        ];
+        let chosen = voices.find(v => 
+          v.lang.startsWith('en') && feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
+        );
+        if (!chosen) {
+          chosen = voices.find(v => v.lang.startsWith('en'));
+        }
+        return chosen;
+      };
+
+      const voice = selectFeminineVoice();
+      if (voice) utterance.voice = voice;
+      utterance.pitch = 1.2;
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const handleVoiceCommand = async (transcript: string) => {
+    const lower = transcript.toLowerCase().trim().replace(/^hey friday\s*/, "");
+    if (!lower) return;
+
+    // A. Permissions Guard: Friday cannot open add or edit functions EXCEPT chat modals
+    const isChatModalIntent = 
+      lower.includes("group") || 
+      lower.includes("chat") || 
+      lower.includes("message") || 
+      lower.includes("text") || 
+      lower.includes("call");
+
+    const isAddOrEditIntent = 
+      /\b(add|create|new|edit|update|modify|delete|remove)\b/.test(lower);
+
+    if (isAddOrEditIntent && !isChatModalIntent) {
+      const resp = "I don't have permission to open add or edit functions.";
+      speakVoiceResponse(resp);
+      toast.error(resp);
+      return;
+    }
+
+    // B. Chat Modals (Allowed)
+    if (lower.includes("group")) {
+      setIsGroupMode(true);
+      setSelectedParticipants([]);
+      setNewGroupName("");
+      setNewGroupDescription("");
+      setIsNewChatOpen(true);
+      setIsMicMinimized(true);
+      const resp = "Opening new group creation modal.";
+      speakVoiceResponse(resp);
+      toast.success(resp);
+      return;
+    }
+
+    if (lower.includes("start a new chat") || lower.includes("new chat") || lower.includes("start a chat")) {
+      setIsGroupMode(false);
+      setIsNewChatOpen(true);
+      setIsMicMinimized(true);
+      const resp = "Opening new chat modal.";
+      speakVoiceResponse(resp);
+      toast.success(resp);
+      return;
+    }
+
+    // C. Voice Navigation
+    const navMap: { keywords: string[]; view: NavView; label: string }[] = [
+      { keywords: ["dashboard", "home screen", "main page", "overview page"], view: 'dashboard', label: 'Dashboard' },
+      { keywords: ["my room", "user room", "my rooms"], view: 'user-room', label: "User Rooms" },
+      { keywords: ["facility overview", "facilities overview", "facilities"], view: 'facility-overview', label: "Facilities Overview" },
+      { keywords: ["facility actions", "actions", "automations", "automation"], view: 'facility-actions', label: "Facility Actions" },
+      { keywords: ["facility appliances", "appliances"], view: 'facility-appliances', label: "Appliances" },
+      { keywords: ["facility cameras", "cameras"], view: 'facility-cameras', label: "Cameras" },
+      { keywords: ["facility doors", "doors"], view: 'facility-doors', label: "Doors" },
+      { keywords: ["facility externals", "externals"], view: 'facility-externals', label: "Externals" },
+      { keywords: ["facility hardware", "hardware"], view: 'facility-hardware', label: "Hardware" },
+      { keywords: ["facility lights", "lights"], view: 'facility-lights', label: "Lights" },
+      { keywords: ["facility windows", "windows"], view: 'facility-windows', label: "Windows" },
+      { keywords: ["facility rooms", "all rooms"], view: 'facility-rooms', label: "Facility Rooms" },
+      { keywords: ["facility sections", "sections"], view: 'facility-sections', label: "Sections" },
+      { keywords: ["contacts", "contact list"], view: 'contacts', label: "Contacts" },
+      { keywords: ["all users", "users", "user list"], view: 'all-users', label: "All Users" },
+      { keywords: ["activity logs", "logs", "history"], view: 'logs', label: "Logs" },
+      { keywords: ["profile", "my profile", "settings"], view: 'profile', label: "Profile & Settings" }
+    ];
+
+    for (const item of navMap) {
+      if (item.keywords.some(kw => lower.includes(kw))) {
+        setActiveView(item.view);
+        setIsMicMinimized(true);
+        const resp = `Navigating to ${item.label}.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      }
+    }
+
+    // D. View Modals (e.g. "show external A")
+    if (lower.includes("external")) {
+      const extClean = lower.replace("show", "").replace("open", "").replace("external", "").replace("the", "").trim();
+      const matchedExt = externals.find(e => 
+        (e.externalName && e.externalName.toLowerCase().includes(extClean)) || 
+        (extClean && e.externalName && extClean.includes(e.externalName.toLowerCase()))
+      ) || externals[0];
+
+      if (matchedExt) {
+        setSelectedExternal(matchedExt);
+        setIsViewExternalOpen(true);
+        setIsMicMinimized(true);
+        const resp = `Showing external ${matchedExt.externalName || 'details'}.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      }
+    }
+
+    // 1. Brightness Adjustment
+    if (lower.includes("brightness") || lower.includes("%")) {
+      let pctMatch = lower.match(/(\d+)\s*%/);
+      if (!pctMatch) {
+        pctMatch = lower.match(/(?:to|at)\s*(\d+)/);
+      }
+      if (pctMatch) {
+        const percentage = parseInt(pctMatch[1], 10);
+        let devNameClean = lower
+          .replace(/set|change|adjust/g, "")
+          .replace(/the/g, "")
+          .replace(/brightness/g, "")
+          .replace(/of|for|to/g, "")
+          .replace(pctMatch[0], "")
+          .replace(/%/g, "")
+          .trim();
+
+        const matchedLight = devices.find(d => 
+          d.type === 'light' && 
+          (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
+        );
+
+        if (matchedLight) {
+          const rawId = matchedLight.id.includes('-') ? matchedLight.id.split('-')[1] : matchedLight.id;
+          const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
+          const currentIsActive = matchedLight.status === 'on';
+
+          try {
+            await apiFetch('/Light/UpdateLight', {
+              method: 'PUT',
+              body: JSON.stringify({
+                id: parseInt(rawId),
+                isActive: currentIsActive,
+                lightName: lightDto?.lightName || matchedLight.name,
+                brightnessLevel: percentage,
+                roomId: resolveRoomId(lightDto?.roomId, rooms),
+                sectionId: resolveSectionId(lightDto?.sectionId, sections)
+              })
+            });
+            setDevices(prev => prev.map(dev => dev.id === matchedLight.id ? { ...dev, status: 'on', value: percentage } : dev));
+            setLights(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: true, brightnessLevel: percentage } : item));
+            
+            const resp = `Setting brightness of ${matchedLight.name} to ${percentage} percent.`;
+            speakVoiceResponse(resp);
+            toast.success(resp);
+            setIsMicMinimized(true);
+          } catch (err: any) {
+            toast.error(`Failed to update brightness: ${err.message}`);
+          }
+          return;
+        } else {
+          const resp = `I could not find a light matching ${devNameClean || 'that name'}.`;
+          speakVoiceResponse(resp);
+          toast.error(resp);
+          return;
+        }
+      }
+    }
+
+    // 2. Door/Window Actions: Lock, Unlock, Open, Close
+    const doorActions = ['lock', 'unlock', 'open', 'close'];
+    let matchedAction: 'lock'|'unlock'|'open'|'close' | null = null;
+    for (const act of doorActions) {
+      if (lower.startsWith(act) || lower.includes(` ${act} `) || lower.endsWith(` ${act}`)) {
+        matchedAction = act as any;
+        break;
+      }
+    }
+
+    if (matchedAction) {
+      const devNameClean = lower
+        .replace(matchedAction, "")
+        .replace(/the/g, "")
+        .trim();
+
+      const matchedDev = devices.find(d => 
+        (d.type === 'door' || d.type === 'window') && 
+        (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
+      );
+
+      if (matchedDev) {
+        await handleDoorAction(matchedDev.id, matchedAction);
+        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing ${matchedDev.name}.`;
+        speakVoiceResponse(resp);
+        setIsMicMinimized(true);
+        return;
+      } else {
+        const resp = `I could not find a door or window matching ${devNameClean || 'that name'}.`;
+        speakVoiceResponse(resp);
+        toast.error(resp);
+        return;
+      }
+    }
+
+    // 3. Put on, turn on, put off, turn off, switch on, switch off
+    const turnOnWords = ['turn on', 'put on', 'switch on', 'activate', 'enable', 'open camera'];
+    const turnOffWords = ['turn off', 'put off', 'switch off', 'deactivate', 'disable', 'close camera'];
+    let isTurnOn = false;
+    let isTurnOff = false;
+    let activeWord = '';
+
+    for (const w of turnOnWords) {
+      if (lower.includes(w)) {
+        isTurnOn = true;
+        activeWord = w;
+        break;
+      }
+    }
+    if (!isTurnOn) {
+      for (const w of turnOffWords) {
+        if (lower.includes(w)) {
+          isTurnOff = true;
+          activeWord = w;
+          break;
+        }
+      }
+    }
+
+    if (isTurnOn || isTurnOff) {
+      const devNameClean = lower
+        .replace(activeWord, "")
+        .replace(/the/g, "")
+        .trim();
+
+      const matchedDev = devices.find(d => 
+        (d.type === 'light' || d.type === 'appliance' || d.type === 'camera' || d.type === 'external' as any) && 
+        (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
+      );
+
+      if (matchedDev) {
+        const isCurrentlyOn = matchedDev.status === 'on' || matchedDev.status === 'active';
+        if (isTurnOn && isCurrentlyOn) {
+          const resp = `${matchedDev.name} is already on.`;
+          speakVoiceResponse(resp);
+          toast.info(resp);
+          setIsMicMinimized(true);
+          return;
+        }
+        if (isTurnOff && !isCurrentlyOn) {
+          const resp = `${matchedDev.name} is already off.`;
+          speakVoiceResponse(resp);
+          toast.info(resp);
+          setIsMicMinimized(true);
+          return;
+        }
+
+        await handleToggle(matchedDev.id);
+        const resp = `Turning ${isTurnOn ? 'on' : 'off'} ${matchedDev.name}.`;
+        speakVoiceResponse(resp);
+        setIsMicMinimized(true);
+        return;
+      } else {
+        const resp = `I could not find a device matching ${devNameClean || 'that name'}.`;
+        speakVoiceResponse(resp);
+        toast.error(resp);
+        return;
+      }
+    }
+
+    // 4. Chat interactions: open chat, send a text/message, call/voice call
+    if (lower.includes("chat") || lower.includes("text") || lower.includes("message") || lower.includes("call") || lower.includes("phone")) {
+      let matchedUser: any = null;
+      let actionType: 'open_chat' | 'send_message' | 'call' = 'open_chat';
+      let messageText = '';
+
+      if (lower.includes("call") || lower.includes("phone")) {
+        actionType = 'call';
+      } else if (lower.includes("send a text") || lower.includes("send text") || lower.includes("message") || lower.includes("text to")) {
+        actionType = 'send_message';
+      } else {
+        actionType = 'open_chat';
+      }
+
+      for (const u of allUsers) {
+        const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
+        const first = u.getPersonDetailsDto.firstName.toLowerCase();
+        const last = u.getPersonDetailsDto.lastName.toLowerCase();
+        if (lower.includes(fullName) || (first.length > 2 && lower.includes(first))) {
+          matchedUser = u;
+          break;
+        }
+      }
+
+      if (matchedUser) {
+        const targetName = `${matchedUser.getPersonDetailsDto.firstName} ${matchedUser.getPersonDetailsDto.lastName}`;
+
+        if (actionType === 'open_chat') {
+          const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
+          if (existingChat) {
+            setActiveChatId(existingChat.id);
+          } else {
+            await startDirectChat(matchedUser);
+          }
+          const resp = `Opening chat with ${targetName}.`;
+          speakVoiceResponse(resp);
+          toast.success(resp);
+          setIsMicMinimized(true);
+          return;
+        } else if (actionType === 'call') {
+          const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
+          if (existingChat) {
+            handleStartCall(existingChat.id, CallType.Audio);
+            const resp = `Calling ${targetName}.`;
+            speakVoiceResponse(resp);
+            toast.success(resp);
+            setIsMicMinimized(true);
+          } else {
+            try {
+              const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
+              await loadMyChats(true);
+              const chatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id))?.id;
+              if (chatId) {
+                setActiveChatId(chatId);
+                handleStartCall(chatId, CallType.Audio);
+                const resp = `Calling ${targetName}.`;
+                speakVoiceResponse(resp);
+                toast.success(resp);
+              } else {
+                throw new Error("Could not create chat");
+              }
+            } catch (err: any) {
+              toast.error("Failed to call: " + err.message);
+            }
+            setIsMicMinimized(true);
+          }
+          return;
+        } else if (actionType === 'send_message') {
+          const separators = ['saying', 'say', 'to say', ':', 'message', 'text'];
+          for (const sep of separators) {
+            const parts = lower.split(sep);
+            if (parts.length > 1) {
+              const possibleMsg = parts.slice(1).join(sep).trim();
+              if (possibleMsg.length > 0 && !matchedUser.getPersonDetailsDto.firstName.toLowerCase().includes(possibleMsg)) {
+                messageText = possibleMsg;
+                break;
+              }
+            }
+          }
+
+          if (!messageText) {
+            const nameIdx = lower.indexOf(matchedUser.getPersonDetailsDto.firstName.toLowerCase());
+            if (nameIdx !== -1) {
+              const afterName = lower.slice(nameIdx + matchedUser.getPersonDetailsDto.firstName.length).trim();
+              if (afterName.startsWith("to")) {
+                messageText = afterName.slice(2).trim();
+              } else {
+                messageText = afterName;
+              }
+            }
+          }
+
+          if (messageText) {
+            messageText = messageText.charAt(0).toUpperCase() + messageText.slice(1);
+            const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
+            if (existingChat) {
+              setActiveChatId(existingChat.id);
+              setChatInput(messageText);
+              setTimeout(() => {
+                handleSendMessage({
+                  chatId: existingChat.id,
+                  content: messageText,
+                  type: MessageType.Text,
+                  attachments: []
+                });
+              }, 150);
+
+              const resp = `Sending text to ${targetName}.`;
+              speakVoiceResponse(resp);
+              toast.success(resp);
+              setIsMicMinimized(true);
+            } else {
+              try {
+                const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
+                await loadMyChats(true);
+                const chatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id))?.id;
+                if (chatId) {
+                  setActiveChatId(chatId);
+                  setChatInput(messageText);
+                  setTimeout(() => {
+                    handleSendMessage({
+                      chatId: chatId,
+                      content: messageText,
+                      type: MessageType.Text,
+                      attachments: []
+                    });
+                  }, 150);
+                  const resp = `Sending text to ${targetName}.`;
+                  speakVoiceResponse(resp);
+                  toast.success(resp);
+                } else {
+                  throw new Error("Could not create chat");
+                }
+              } catch (err: any) {
+                toast.error("Failed to send message: " + err.message);
+              }
+              setIsMicMinimized(true);
+            }
+            return;
+          } else {
+            const resp = `What message would you like to send to ${targetName}?`;
+            speakVoiceResponse(resp);
+            toast.info(resp);
+            return;
+          }
+        }
+      } else {
+        const resp = `I could not find a contact matching the name spoken.`;
+        speakVoiceResponse(resp);
+        toast.error(resp);
+        return;
+      }
+    }
+
+    const resp = "Command not recognized. Please try again.";
+    speakVoiceResponse(resp);
+    toast.error(resp);
+  };
+
+
+  React.useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    speechRecognitionRef.current = recognition;
+
+    recognition.onresult = (event: any) => {
+      let currentTranscript = '';
+      let isFinalResult = false;
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        currentTranscript += event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          isFinalResult = true;
+        }
+      }
+      const lowerTranscript = currentTranscript.toLowerCase().trim();
+      setTranscription(currentTranscript);
+      
+      if (lowerTranscript.includes("hey friday")) {
+         if (!isMicOverlayActive) {
+            setIsMicOverlayActive(true);
+            setIsHeaderMicMuted(false);
+            
+            // Check if call is active
+            if (activeCall) {
+               wasCallMutedBeforeHeyFridayRef.current = isCallMuted;
+               if (!isCallMuted) {
+                  // Mute call
+                  handleToggleCallMicrophone();
+               }
+            }
+         }
+      }
+
+      if (lowerTranscript.includes("dispose")) {
+         if (isMicOverlayActive) {
+            setIsMicOverlayActive(false);
+            setIsHeaderMicMuted(true);
+            
+            // Unmute call if it wasn't muted before
+            if (activeCall && !wasCallMutedBeforeHeyFridayRef.current && isCallMuted) {
+               handleToggleCallMicrophone();
+            }
+         }
+      }
+
+      if (isFinalResult && isMicOverlayActive && currentTranscript.trim().length > 0) {
+        const clean = lowerTranscript.replace("hey friday", "").trim();
+        if (clean.length > 0 && clean !== "dispose") {
+          handleVoiceCommand(currentTranscript);
+        }
+      }
+    };
+
+    recognition.onend = () => {
+      // Restart to keep listening continuously if needed, but browsers might block aggressive restarting.
+      // We will try restarting if the app is still active.
+      try {
+        recognition.start();
+      } catch (e) {}
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {}
+
+    return () => {
+      recognition.onend = null;
+      recognition.stop();
+    };
+  }, [isMicOverlayActive, activeCall, isCallMuted, devices, lights, doors, allUsers, chats]);
+
   if (!isLoggedIn) {
     return (
       <>
         <Toaster position="bottom-right" richColors />
-        <LoginScreen onLoginSuccess={handleLoginSuccess} />
+        <LoginScreen 
+          onLoginSuccess={handleLoginSuccess} 
+          theme={theme}
+          toggleTheme={toggleTheme}
+          isMicMuted={!isMicOverlayActive}
+          onToggleMic={() => {
+            if (!isMicOverlayActive) {
+              setIsMicOverlayActive(true);
+              setIsMicMinimized(false);
+              setIsHeaderMicMuted(false);
+            } else {
+              setIsMicOverlayActive(false);
+              setIsHeaderMicMuted(true);
+            }
+          }}
+        />
+        {isMicOverlayActive && (
+          <GrainyAudioOverlay transcription={transcription} 
+            theme={theme} 
+            isMinimized={isMicMinimized}
+            onToggleMinimize={setIsMicMinimized}
+            onClose={() => {
+              setIsMicOverlayActive(false);
+              setIsHeaderMicMuted(true);
+            }} 
+            onExecuteCommand={handleVoiceCommand}
+          />
+        )}
       </>
     );
   }
 
   if (!userProfile) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-background text-muted-foreground flex-col gap-4">
+      <div className="flex h-screen w-full items-center justify-center bg-background text-slate-500 dark:text-zinc-400 flex-col gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
         <p className="text-sm font-medium tracking-tight">Initializing HanssonHub Profile...</p>
       </div>
@@ -11149,16 +11949,6 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
-      {globalFetching > 0 && (
-        <div className="fixed bottom-24 right-6 z-[9999] bg-white/95 backdrop-blur-md shadow-xl rounded-full px-5 py-2.5 flex items-center justify-center gap-3 transition-all duration-300 animate-in fade-in zoom-in-95">
-           <span className="text-sm font-semibold text-slate-800">Sending request</span>
-           <div className="flex space-x-1.5 items-center mt-1">
-             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
-           </div>
-        </div>
-      )}
       <Toaster position="bottom-right" richColors />
       <Sidebar 
         activeView={activeView} 
@@ -11181,7 +11971,7 @@ export default function App() {
               <span className="text-lg font-bold tracking-tight">HanssonHub</span>
             </div>
             <div className="h-8 w-[1px] bg-border mr-4" />
-            <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
               <HeaderIcon className="h-4 w-4" />
               <span className="text-sm font-medium">
                 {headerTitle}
@@ -11189,19 +11979,59 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4">
+            {/* Muted div with rounded edges containing theme toggle, microphone button, and chat button */}
+            <div className="flex items-center gap-2 bg-muted/80 hover:bg-muted/90 p-1.5 px-2 rounded-2xl border border-border/50 shadow-2xs transition-all">
+              {/* Theme Toggle Button */}
+              <div 
+                onClick={toggleTheme}
+                className="flex items-center bg-background/90 hover:bg-background border border-border/60 rounded-full p-1 cursor-pointer transition-all shadow-2xs gap-0.5 select-none"
+                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              >
+                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'light' ? "bg-amber-500 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
+                  <Sun className="h-3.5 w-3.5" />
+                </div>
+                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'dark' ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
+                  <Moon className="h-3.5 w-3.5" />
+                </div>
+              </div>
+
+              {/* Microphone Button */}
               <button 
-                className="relative rounded-full p-2 hover:bg-muted"
+                className={cn(
+                  "relative rounded-full p-1.5 transition-all flex items-center justify-center border border-border/50 shadow-2xs cursor-pointer",
+                  isMicOverlayActive 
+                    ? "bg-rose-500/10 text-rose-600 border-rose-200 hover:bg-rose-500/20" 
+                    : "bg-background/90 hover:bg-background text-foreground"
+                )}
+                onClick={() => {
+                  if (!isMicOverlayActive) {
+                    setIsMicOverlayActive(true);
+                    setIsHeaderMicMuted(false);
+                  } else {
+                    setIsMicOverlayActive(false);
+                    setIsHeaderMicMuted(true);
+                  }
+                }}
+                title={isMicOverlayActive ? "Stop Microphone" : "Start Microphone"}
+              >
+                {!isMicOverlayActive ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4 text-rose-500" />}
+              </button>
+
+              {/* Chat Button */}
+              <button 
+                className="relative rounded-full p-1.5 bg-background/90 hover:bg-background text-foreground border border-border/50 shadow-2xs transition-all flex items-center justify-center cursor-pointer"
                 onClick={() => setIsChatModalOpen(true)}
                 title="Chats"
               >
-                <MessageSquare className="h-5 w-5" />
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+                <MessageSquare className="h-4 w-4" />
+                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
               </button>
             </div>
+
+            {/* Logout Button */}
             <button 
-              className="p-1 text-red-500 hover:text-red-600 transition-colors bg-transparent border-0 outline-none flex items-center justify-center cursor-pointer font-sans"
+              className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors rounded-xl border-0 outline-none flex items-center justify-center cursor-pointer font-sans"
               onClick={handleLogout}
               title="Logout"
             >
@@ -11219,7 +12049,7 @@ export default function App() {
             (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
           )}
         /><div className="p-8 pb-12 min-h-full">
-            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
               <div className="min-h-full px-2 py-1.5">
                 <AnimatePresence mode="wait">
                   {renderView()}
@@ -11259,7 +12089,7 @@ export default function App() {
               {(() => {
                 const type = activeView.replace('facility-', '');
                 const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
-                return <Icon className="h-3 w-3 text-muted-foreground" />;
+                return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
               })()}
               {(() => {
                 const type = activeView.replace('facility-', '');
@@ -11273,8 +12103,7 @@ export default function App() {
                   return map[type] || 'Device Name';
                 })()}
               </Label>
-              <Input 
-                id="name" 
+              <Input autoComplete="off" id="name" 
                 placeholder={`e.g. ${(() => {
                   const type = activeView.replace('facility-', '');
                   if (type === 'lights') return 'Desk Lamp';
@@ -11291,7 +12120,7 @@ export default function App() {
             {activeView === 'facility-appliances' && (
               <div className="grid gap-2">
                 <Label htmlFor="appliance-type" className="flex items-center gap-2">
-                  <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                  <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Appliance Type
                 </Label>
                 <Select 
@@ -11315,12 +12144,11 @@ export default function App() {
             {activeView === 'facility-cameras' && (
               <div className="space-y-4 pt-2 border-t mt-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                  <Label htmlFor="ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                     <Globe className="h-3 w-3" />
                     IP Address
                   </Label>
-                  <Input 
-                    id="ipAddress" 
+                  <Input autoComplete="off" id="ipAddress" 
                     type="text"
                     placeholder="e.g. 192.168.1.100"
                     value={newDevice.ipAddress || ''}
@@ -11329,12 +12157,11 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Label htmlFor="username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                       <UserCircle className="h-3 w-3" />
                       Username
                     </Label>
-                    <Input 
-                      id="username" 
+                    <Input autoComplete="off" id="username" 
                       type="text"
                       placeholder="admin"
                       value={newDevice.username || ''}
@@ -11342,12 +12169,11 @@ export default function App() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Label htmlFor="password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                       <Shield className="h-3 w-3" />
                       Password
                     </Label>
-                    <Input 
-                      id="password" 
+                    <Input autoComplete="off" id="password" 
                       type="password"
                       placeholder="••••••••"
                       value={newDevice.password || ''}
@@ -11357,12 +12183,11 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Label htmlFor="streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                       <Video className="h-3 w-3" />
                       Stream Path
                     </Label>
-                    <Input 
-                      id="streamPath" 
+                    <Input autoComplete="off" id="streamPath" 
                       type="text"
                       placeholder="/live"
                       value={newDevice.streamPath || ''}
@@ -11370,12 +12195,11 @@ export default function App() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Label htmlFor="port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                       <Settings2 className="h-3 w-3" />
                       Port
                     </Label>
-                    <Input 
-                      id="port" 
+                    <Input autoComplete="off" id="port" 
                       type="number"
                       placeholder="80"
                       value={newDevice.port !== undefined ? newDevice.port : ''}
@@ -11389,7 +12213,7 @@ export default function App() {
             {activeView === 'facility-doors' && (
               <div className="grid gap-2">
                 <Label htmlFor="door-type" className="flex items-center gap-2">
-                  <Building2 className="h-3 w-3 text-muted-foreground" />
+                  <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Door Type
                 </Label>
                 <Select 
@@ -11414,7 +12238,7 @@ export default function App() {
 
             <div className="grid gap-2">
               <Label htmlFor="section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-muted-foreground" />
+                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Section Name (Optional)
               </Label>
               <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
@@ -11436,7 +12260,7 @@ export default function App() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="room" className="flex items-center gap-2">
-                <Sofa className="h-3 w-3 text-muted-foreground" />
+                <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Room Name (Optional)
               </Label>
               <Select 
@@ -11466,7 +12290,7 @@ export default function App() {
                   <SelectItem value="none">No Room</SelectItem>
                   {newDevice.section && newDevice.section !== 'none' ? (
                     <>
-                      <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                         Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
                       </div>
                       {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
@@ -11475,7 +12299,7 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                         Unassigned Rooms
                       </div>
                       {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -11486,7 +12310,7 @@ export default function App() {
                 </SelectContent>
               </Select>
               {!newDevice.section || newDevice.section === 'none' ? (
-                <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+                <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
               ) : (
                 <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'section')}</span>
               )}
@@ -11495,7 +12319,7 @@ export default function App() {
           </div>
           <DialogFooter>
             
-            <Button onClick={handleAddDevice} className="bg-primary text-primary-foreground">
+            <Button onClick={handleAddDevice} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add {(() => {
                 const type = activeView.replace('facility-', '');
@@ -11529,11 +12353,10 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="room-name" className="flex items-center gap-2">
-                <Edit3 className="h-3 w-3 text-muted-foreground" />
+                <Edit3 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Room Name
               </Label>
-              <Input 
-                id="room-name" 
+              <Input autoComplete="off" id="room-name" 
                 placeholder="e.g. Study" 
                 value={newRoom.name}
                 onChange={(e) => setNewRoom(prev => ({ ...prev, name: e.target.value }))}
@@ -11541,7 +12364,7 @@ export default function App() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="room-person" className="flex items-center gap-2">
-                <UserIcon className="h-3 w-3 text-muted-foreground" />
+                <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Person Name
               </Label>
               <Select 
@@ -11580,7 +12403,7 @@ export default function App() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="room-section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-muted-foreground" />
+                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Section Name (Optional)
               </Label>
               <Select value={newRoom.section || 'none'} onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
@@ -11602,7 +12425,7 @@ export default function App() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="room-icon" className="flex items-center gap-2">
-                <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Icon
               </Label>
               <Select 
@@ -11627,7 +12450,7 @@ export default function App() {
                 <Label htmlFor="room-hidden" className="text-sm font-medium flex items-center gap-2">
                   <EyeOff className="h-3.5 w-3.5" /> Hidden Room
                 </Label>
-                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
               </div>
               <Switch 
                 id="room-hidden" 
@@ -11639,7 +12462,7 @@ export default function App() {
           </ScrollArea>
           <DialogFooter>
             
-            <Button onClick={handleAddRoom} className="bg-primary text-primary-foreground">
+            <Button onClick={handleAddRoom} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add Room
             </Button>
@@ -11658,11 +12481,10 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
                 Section Name
               </Label>
-              <Input 
-                id="edit-sec-name" 
+              <Input autoComplete="off" id="edit-sec-name" 
                 value={editingSection?.name || ''}
                 onChange={(e) => setEditingSection(prev => prev ? { ...prev, name: e.target.value } : null)}
               />
@@ -11672,7 +12494,7 @@ export default function App() {
                 <Label htmlFor="edit-sec-hidden" className="text-sm font-medium flex items-center gap-2">
                   <EyeOff className="h-3.5 w-3.5" /> Hidden Section
                 </Label>
-                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
               </div>
               <Switch 
                 id="edit-sec-hidden" 
@@ -11713,7 +12535,7 @@ export default function App() {
                   }
                 });
               }
-            }} className="bg-primary text-primary-foreground">
+            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -11722,55 +12544,52 @@ export default function App() {
       </Dialog>
       {/* Password Change Dialog */}
       <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-[400px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <Key className="h-5 w-5 text-blue-500" />
               Change Password
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-slate-500 dark:text-zinc-400">
               Update your account password. You will need your current password and your authorization code.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
-              <Label htmlFor="password-token" className="flex items-center gap-1.5"><Key className="h-3 w-3 text-muted-foreground" /> Security Token</Label>
-              <Input 
-                id="password-token" 
+              <Label htmlFor="password-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
+              <Input autoComplete="off" id="password-token" 
                 placeholder="XXXX-XXXX-XXXX-XXXX"
-                className={passwordData.token ? "border-b-green-400" : ""}
+                className={cn("bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.token ? "border-b-green-400" : "")}
                 value={passwordData.token}
                 onChange={(e) => setPasswordData(prev => ({ ...prev, token: e.target.value }))}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="new-password" className="flex items-center gap-1.5"><Lock className="h-3 w-3 text-muted-foreground" /> New Password</Label>
+              <Label htmlFor="new-password" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Lock className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> New Password</Label>
               <div className="relative">
-                <Input 
-                  id="new-password" 
+                <Input autoComplete="off" id="new-password" 
                   type={showNewPassword ? "text" : "password"}
-                  className={cn("pr-9", passwordData.newPassword ? "border-b-green-400" : "")}
+                  className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.newPassword ? "border-b-green-400" : "")}
                   value={passwordData.newPassword}
                   onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
                 />
                 <button 
                   type="button" 
                   onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
                 >
                   {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password-auth-code" className="flex items-center gap-1.5"><ShieldCheck className="h-3 w-3 text-muted-foreground" /> Authorization Code</Label>
+              <Label htmlFor="password-auth-code" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Authorization Code</Label>
               <div className="relative">
-                <Input 
-                  id="password-auth-code" 
+                <Input autoComplete="off" id="password-auth-code" 
                   type={showAuthCode ? "text" : "password"}
                   placeholder="000000"
                   maxLength={6}
-                  className={cn("pr-9", passwordData.authorizationCode.length === 6 ? "border-b-green-400" : "")}
+                  className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.authorizationCode.length === 6 ? "border-b-green-400" : "")}
                   value={passwordData.authorizationCode}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, '');
@@ -11780,7 +12599,7 @@ export default function App() {
                  <button 
                   type="button" 
                   onClick={() => setShowAuthCode(!showAuthCode)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
                 >
                   {showAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -11795,9 +12614,7 @@ export default function App() {
                   body: JSON.stringify({
                     id: userProfile?.getUserDto?.id || 0,
                     userName: userProfile?.getUserDto?.userName || "",
-                    password: passwordData.token, // Usually current password goes here, but maybe token acts as it. Let's use the UI fields we have. Wait! We need current password. Wait, passwordData doesn't have currentPassword. I'll use passwordData.token. If it fails, I'll pass it. Wait, checking the UI: 'password-token' is token. 'password' in UI doesn't exist?
-                    // Let's implement it mapping what we have.
-                    // But actually wait, the API expects password, newPassword, tokenCode, authorizationCode. I will just pass empty string to what's missing or what's mapped.
+                    password: passwordData.token,
                     newPassword: passwordData.newPassword,
                     tokenCode: passwordData.token,
                     authorizationCode: passwordData.authorizationCode
@@ -11810,8 +12627,8 @@ export default function App() {
                 console.error("Failed to update password", err);
                 toast.error(`Update failed: ${err.message}`);
               }
-            }} className="bg-transparent border-2 border-blue-600 text-black hover:bg-blue-50 flex items-center gap-2">
-              <Key className="h-4 w-4 text-blue-600" />
+            }} className="bg-transparent border-2 border-slate-200 dark:border-zinc-800 text-black dark:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-900 flex items-center gap-2">
+              <Key className="h-4 w-4 text-blue-600 dark:text-zinc-300" />
               Update Password
             </Button>
           </DialogFooter>
@@ -11820,55 +12637,52 @@ export default function App() {
 
       {/* Authorization Code Dialog */}
       <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
-        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 shadow-lg shadow-yellow-100/50">
+        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 dark:border-yellow-600 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 shadow-lg shadow-yellow-100/50 dark:shadow-none">
           <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2 text-yellow-700">
+            <DialogTitle className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 font-bold">
               <ShieldAlert className="h-5 w-5" />
               Change Authorization Code
             </DialogTitle>
-            <DialogDescription className="text-yellow-800/70">
+            <DialogDescription className="text-yellow-800/80 dark:text-yellow-200 font-medium">
               This is a sensitive operation. Please enter your credentials to authorize the action.
             </DialogDescription>
           </DialogHeader>
         <div className="grid gap-4 pt-[3px] pb-4">
           <div className="grid gap-2">
-            <Label htmlFor="auth-pwd" className="flex items-center gap-1.5"><Lock className="h-3 w-3 text-muted-foreground" /> Login Password</Label>
+            <Label htmlFor="auth-pwd" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Lock className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Login Password</Label>
             <div className="relative">
-              <Input 
-                id="auth-pwd" 
+              <Input autoComplete="off" id="auth-pwd" 
                 type={showAuthPwd ? "text" : "password"}
-                className={cn("pr-9", authCodeData.password ? "border-b-green-400" : "")}
+                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.password ? "border-b-green-400" : "")}
                 value={authCodeData.password}
                 onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
               />
               <button 
                 type="button" 
                 onClick={() => setShowAuthPwd(!showAuthPwd)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
               >
                 {showAuthPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="auth-token" className="flex items-center gap-1.5"><Key className="h-3 w-3 text-muted-foreground" /> Security Token</Label>
-            <Input 
-              id="auth-token" 
+            <Label htmlFor="auth-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
+            <Input autoComplete="off" id="auth-token" 
               placeholder="XXXX-XXXX-XXXX-XXXX"
-              className={authCodeData.token ? "border-b-green-400" : ""}
+              className={cn("bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.token ? "border-b-green-400" : "")}
               value={authCodeData.token}
               onChange={(e) => setAuthCodeData(prev => ({ ...prev, token: e.target.value }))}
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="new-auth" className="flex items-center gap-1.5"><ShieldCheck className="h-3 w-3 text-muted-foreground" /> New Authorization Code</Label>
+            <Label htmlFor="new-auth" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> New Authorization Code</Label>
             <div className="relative">
-              <Input 
-                id="new-auth" 
+              <Input autoComplete="off" id="new-auth" 
                 type={showNewAuthCode ? "text" : "password"}
                 placeholder="000000"
                 maxLength={6}
-                className={cn("pr-9", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
+                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
                 value={authCodeData.newAuthorizationCode}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '');
@@ -11878,7 +12692,7 @@ export default function App() {
                <button 
                 type="button" 
                 onClick={() => setShowNewAuthCode(!showNewAuthCode)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
               >
                 {showNewAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -11888,7 +12702,6 @@ export default function App() {
           <DialogFooter>
             <Button 
                onClick={async () => {
-                // In a real app, verify the auth code here
                 if (pendingUserAction) {
                   const authPayload = {
                      id: pendingUserAction.userId || 0,
@@ -11928,7 +12741,7 @@ export default function App() {
                         method: 'PUT',
                         body: JSON.stringify({
                           id: pendingUserAction.userId || 0,
-                          userName: "string", // Usually target username or current, backend may ignore if ID matches.
+                          userName: "string",
                           role: targetRole
                         })
                       });
@@ -11967,9 +12780,9 @@ export default function App() {
                   }
                 }
               }} 
-              className="bg-transparent border-2 border-yellow-600 text-black hover:bg-yellow-50 flex items-center gap-2"
+              className="bg-transparent border-2 border-yellow-600 dark:border-yellow-500 text-black dark:text-zinc-100 hover:bg-yellow-50 dark:hover:bg-yellow-950/40 flex items-center gap-2"
             >
-              <Key className="h-4 w-4 text-yellow-600" />
+              <Key className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
               Authorize Action
             </Button>
           </DialogFooter>
@@ -11995,15 +12808,15 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="p-fname">First Name</Label>
-                    <Input id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
+                    <Input autoComplete="off" id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-lname">Last Name</Label>
-                    <Input id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
+                    <Input autoComplete="off" id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-dob">Date of Birth</Label>
-                    <Input id="p-dob" type="date" className={newPerson.createPersonDetailsDto.dateOfBirth ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
+                    <Input autoComplete="off" id="p-dob" type="date" className={newPerson.createPersonDetailsDto.dateOfBirth ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-gender">Gender</Label>
@@ -12029,7 +12842,7 @@ export default function App() {
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="p-relation">Relation to Owner</Label>
-                  <Input id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
+                  <Input autoComplete="off" id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
                 </div>
               </div>
 
@@ -12041,7 +12854,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="p-uname">Username</Label>
-                    <Input id="p-uname" className={newPerson.createUserDto.userName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
+                    <Input autoComplete="off" id="p-uname" className={newPerson.createUserDto.userName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="p-role">System Role</Label>
@@ -12064,8 +12877,7 @@ export default function App() {
                   <div className="grid gap-2">
                     <Label htmlFor="p-pwd">Password</Label>
                     <div className="relative">
-                      <Input 
-                        id="p-pwd" 
+                      <Input autoComplete="off" id="p-pwd" 
                         type={showAddMemberPassword ? "text" : "password"} 
                         className={cn("pr-9 border-b-2", newPerson.createUserDto.password ? "border-b-green-400" : "border-b-slate-200")} 
                         value={newPerson.createUserDto.password} 
@@ -12074,7 +12886,7 @@ export default function App() {
                       <button 
                         type="button" 
                         onClick={() => setShowAddMemberPassword(!showAddMemberPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
                       >
                         {showAddMemberPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -12083,8 +12895,7 @@ export default function App() {
                   <div className="grid gap-2">
                     <Label htmlFor="p-auth">Initial Auth Code (6 digits)</Label>
                     <div className="relative">
-                      <Input 
-                        id="p-auth" 
+                      <Input autoComplete="off" id="p-auth" 
                         type={showAddMemberAuthCode ? "text" : "password"} 
                         placeholder="000000" 
                         maxLength={6} 
@@ -12095,7 +12906,7 @@ export default function App() {
                       <button 
                         type="button" 
                         onClick={() => setShowAddMemberAuthCode(!showAddMemberAuthCode)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
                       >
                         {showAddMemberAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -12154,11 +12965,11 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-role-select" className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3 w-3 text-muted-foreground" />
+                <ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Select New Role
               </Label>
               <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
-                <SelectTrigger id="edit-role-select" className="bg-transparent text-black border-primary/20">
+                <SelectTrigger id="edit-role-select" className="bg-transparent text-foreground dark:text-zinc-100 border-primary/20">
                   <SelectValue placeholder="Select role">
                     {updateUserRoleData.role !== undefined
                       ? ((appNamesDetailList?.role || []).find(r => r.id.toString() === updateUserRoleData.role?.toString())?.name || 'Select role')
@@ -12203,7 +13014,7 @@ export default function App() {
                   toast.error(`Failed to update role: ${err.message}`);
                 }
               });
-            }} className="bg-transparent border-2 border-primary text-black hover:bg-primary/5 flex items-center gap-2">
+            }} className="bg-transparent border-2 border-primary text-foreground dark:text-zinc-100 hover:bg-primary/5 flex items-center gap-2">
               <RefreshCw className="h-4 w-4" />
               Update Access
             </Button>
@@ -12229,7 +13040,7 @@ export default function App() {
                     <Button 
                        variant="ghost" 
                        size="icon" 
-                       className="h-8 w-8 bg-transparent border border-blue-200 text-black hover:bg-blue-50"
+                       className="h-8 w-8 bg-transparent border border-slate-200 text-black dark:text-zinc-100 hover:bg-slate-50"
                       onClick={() => {
                         if (viewingPerson) {
                           setUpdateUserRoleData({
@@ -12278,7 +13089,7 @@ export default function App() {
                     <Button 
                        variant="ghost" 
                        size="icon" 
-                       className="h-8 w-8 bg-transparent border border-red-200 text-black hover:bg-red-50"
+                       className="h-8 w-8 bg-transparent border border-red-200 text-black dark:text-zinc-100 hover:bg-red-50"
                       onClick={() => {
                         if (viewingPerson) {
                           requestAuth(async () => {
@@ -12301,7 +13112,7 @@ export default function App() {
                     <div className="h-4 w-px bg-border mx-1" />
                   </>
                 )}
-                <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+                <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
                   <X className="h-4 w-4" />
                 </DialogClose>
               </div>
@@ -12333,22 +13144,22 @@ export default function App() {
                       )}
                     </div>
                     <div className="space-y-3 flex-1">
-                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Core Identity</h4>
+                      <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest">Core Identity</h4>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">Username</Label>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Username</Label>
                           <p className="font-medium font-mono">{viewingPerson.getUserDto.userName}</p>
                         </div>
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">System Role</Label>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">System Role</Label>
                           <Badge variant="outline" className="mt-1">{viewingPerson.getUserDto.roleName}</Badge>
                         </div>
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">Internal ID</Label>
-                          <p className="font-medium font-mono text-muted-foreground text-xs">{viewingPerson.personId}</p>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Internal ID</Label>
+                          <p className="font-medium font-mono text-slate-500 dark:text-zinc-400 text-xs">{viewingPerson.personId}</p>
                         </div>
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">Gender</Label>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Gender</Label>
                           <p className="font-medium">{Gender[viewingPerson.getPersonDetailsDto.gender]}</p>
                         </div>
                       </div>
@@ -12357,33 +13168,33 @@ export default function App() {
 
                   {/* Contact Section */}
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Contact Channels</h4>
+                    <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest border-b pb-1">Contact Channels</h4>
                     {(viewingPerson?.getPersonDetailsDto?.getContactDetailsDtos || []).map((c, i) => (
                       <div key={i} className="bg-muted/30 p-3 rounded-lg grid grid-cols-2 gap-2 text-sm">
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">Email</Label>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Email</Label>
                           <p className="truncate" title={c.email}>{c.email}</p>
                         </div>
                         <div>
-                          <Label className="text-[10px] text-muted-foreground uppercase">Phone</Label>
+                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Phone</Label>
                           <p>{c.phoneNumber}</p>
                         </div>
                       </div>
                     ))}
-                    {viewingPerson.getPersonDetailsDto.getContactDetailsDtos.length === 0 && <p className="text-xs text-muted-foreground italic">No contact channels defined.</p>}
+                    {viewingPerson.getPersonDetailsDto.getContactDetailsDtos.length === 0 && <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No contact channels defined.</p>}
                   </div>
 
                   {/* Address Section */}
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest border-b pb-1">Physical Addresses</h4>
+                    <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest border-b pb-1">Physical Addresses</h4>
                     {(viewingPerson?.getPersonDetailsDto?.getAddressDtos || []).map((a, i) => (
                       <div key={i} className="bg-muted/30 p-3 rounded-lg space-y-1 text-sm">
                         <p className="font-medium">{a.numberLine} {a.street}</p>
-                        <p className="text-muted-foreground text-xs">{a.city}, {a.state}, {a.country}</p>
-                        {a.postalCode && <p className="text-muted-foreground text-[10px]">Postal: {a.postalCode}</p>}
+                        <p className="text-slate-500 dark:text-zinc-400 text-xs">{a.city}, {a.state}, {a.country}</p>
+                        {a.postalCode && <p className="text-slate-500 dark:text-zinc-400 text-[10px]">Postal: {a.postalCode}</p>}
                       </div>
                     ))}
-                    {viewingPerson.getPersonDetailsDto.getAddressDtos.length === 0 && <p className="text-xs text-muted-foreground italic">No addresses saved.</p>}
+                    {viewingPerson.getPersonDetailsDto.getAddressDtos.length === 0 && <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No addresses saved.</p>}
                   </div>
                 </>
               )}
@@ -12395,38 +13206,36 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden">
-          <DialogHeader className="p-6 pb-2">
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
+          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <PlusCircle className="h-5 w-5 text-primary" />
               Add New Category
             </DialogTitle>
-            <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
+            <DialogDescription className="text-slate-500 dark:text-zinc-400">Create a new category to organize your contacts.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 p-6 pt-0 pb-4 overflow-y-auto max-h-[60vh]">
+          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
             <div className="grid gap-2">
-              <Label htmlFor="cat-name">Category Name</Label>
-              <Input 
-                id="cat-name" 
+              <Label htmlFor="cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
+              <Input autoComplete="off" id="cat-name" 
                 placeholder="e.g. Emergency, Family, Services" 
-                className={newCategoryName ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"}
+                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="cat-desc">Description (Optional)</Label>
-              <Input 
-                id="cat-desc" 
+              <Label htmlFor="cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
+              <Input autoComplete="off" id="cat-desc" 
                 placeholder="Brief description of this category" 
-                className={newCategoryDescription ? "border-b-2 border-b-green-400 bg-transparent text-black" : "border-b-2 border-b-slate-200 bg-transparent text-black"}
+                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
                 value={newCategoryDescription}
                 onChange={(e) => setNewCategoryDescription(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label>Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/10">
+              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
                 {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
                   const Icon = iconMap[iconName];
                   return (
@@ -12435,8 +13244,8 @@ export default function App() {
                       variant="outline"
                       size="icon"
                       className={cn(
-                        "h-10 w-10 transition-all",
-                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
+                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
                       )}
                       onClick={() => setNewCategoryIcon(iconName)}
                     >
@@ -12447,8 +13256,8 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 border-t bg-slate-50 flex items-center justify-end sm:justify-end">
-            <Button onClick={handleAddCategory} className="bg-primary text-primary-foreground">
+          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end my-auto min-h-[72px]">
+            <Button onClick={handleAddCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add New Category
             </Button>
@@ -12457,36 +13266,36 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
+          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <Edit3 className="h-5 w-5 text-primary" />
               Edit Category
             </DialogTitle>
-            <DialogDescription>Update category details and icon.</DialogDescription>
+            <DialogDescription className="text-slate-500 dark:text-zinc-400">Update category details and icon.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
+          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
             <div className="grid gap-2">
-              <Label htmlFor="edit-cat-name">Category Name</Label>
-              <Input 
-                id="edit-cat-name" 
+              <Label htmlFor="edit-cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
+              <Input autoComplete="off" id="edit-cat-name" 
                 placeholder="e.g. Emergency, Family, Services" 
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
+                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-cat-desc">Description (Optional)</Label>
-              <Input 
-                id="edit-cat-desc" 
+              <Label htmlFor="edit-cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
+              <Input autoComplete="off" id="edit-cat-desc" 
                 placeholder="Brief description of this category" 
                 value={newCategoryDescription}
                 onChange={(e) => setNewCategoryDescription(e.target.value)}
+                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
               />
             </div>
             <div className="grid gap-2">
-              <Label>Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/10">
+              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
                 {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
                   const Icon = iconMap[iconName];
                   return (
@@ -12495,8 +13304,8 @@ export default function App() {
                       variant="outline"
                       size="icon"
                       className={cn(
-                        "h-10 w-10 transition-all",
-                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
+                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
                       )}
                       onClick={() => setNewCategoryIcon(iconName)}
                     >
@@ -12507,9 +13316,8 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            
-            <Button onClick={handleEditCategory} className="bg-primary text-primary-foreground">
+          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end">
+            <Button onClick={handleEditCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -12518,53 +13326,51 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) { setEditingContactId(null); setIsNewContactImageSelected(false); } }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-black bg-white shadow-2xl">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b bg-white pr-16">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 shadow-2xl">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {editingContactId ? <UserCog className="h-5 w-5 text-primary" /> : <UserPlus className="h-5 w-5 text-primary" />}
-                <DialogTitle className="text-lg font-bold tracking-tight">
+                <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-zinc-100">
                   {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
                 </DialogTitle>
               </div>
             </div>
-            <DialogDescription className="text-xs font-medium mt-1 text-muted-foreground">Fill in the contact details and addresses.</DialogDescription>
+            <DialogDescription className="text-xs font-medium mt-1 text-slate-500 dark:text-zinc-400">Fill in the contact details and addresses.</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh] p-8 pt-2">
+          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh] p-8 pt-2 bg-slate-50 dark:bg-zinc-900">
             <div className="grid gap-6 pt-[3px] pb-4">
               <div className="flex gap-8 items-start">
                 <div className="flex-1 space-y-5">
                   <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
                       <UserCircle className="h-3 w-3" /> First Name
                     </Label>
-                    <Input 
-                      placeholder="First Name" 
-                      className={newContact.firstName ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
+                    <Input autoComplete="off" placeholder="First Name" 
+                      className={newContact.firstName ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
                       value={newContact.firstName}
                       onChange={(e) => setNewContact(prev => ({ ...prev, firstName: e.target.value }))}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
                       <UserCircle className="h-3 w-3" /> Last Name
                     </Label>
-                    <Input 
-                      placeholder="Last Name" 
-                      className={newContact.lastName ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
+                    <Input autoComplete="off" placeholder="Last Name" 
+                      className={newContact.lastName ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
                       value={newContact.lastName}
                       onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
                       <Layers className="h-3 w-3" /> Category
                     </Label>
                     <Select 
                       value={newContact.contactCategory.toString()} 
                       onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
                     >
-                      <SelectTrigger className="h-10 bg-transparent text-black">
+                      <SelectTrigger className="h-10 rounded-none bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 border-0 border-b-2 border-slate-200 dark:border-zinc-800 shadow-none">
                         <SelectValue placeholder="Select Category">
                           {newContact.contactCategory
                             ? ((appNamesDetailList?.contactCategoryIdNames || []).find(cat => cat.id.toString() === newContact.contactCategory.toString())?.name || 'Select Category')
@@ -12581,7 +13387,7 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col items-center gap-3">
-                  <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground self-start ml-2">
+                  <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400 self-start ml-2">
                     <Camera className="h-3 w-3" /> Avatar
                   </Label>
                   <div 
@@ -12591,7 +13397,7 @@ export default function App() {
                     {newContact.imageUrl ? (
                       <img src={getFullImageUrl(newContact.imageUrl) || undefined} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
-                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2 text-slate-500 dark:text-zinc-400">
                         <ImagePlus className="h-8 w-8" />
                         <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
                       </div>
@@ -12655,10 +13461,9 @@ export default function App() {
                     </Button>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Phone</Label>
-                        <Input 
-                          placeholder="+123..." 
-                          className={detail.phoneNumber ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Phone</Label>
+                        <Input autoComplete="off" placeholder="+123..." 
+                          className={detail.phoneNumber ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
                           value={detail.phoneNumber}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -12668,10 +13473,9 @@ export default function App() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Email</Label>
-                        <Input 
-                          placeholder="email@example.com" 
-                          className={detail.email ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"}
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Email</Label>
+                        <Input autoComplete="off" placeholder="email@example.com" 
+                          className={detail.email ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
                           value={detail.email}
                           onChange={(e) => {
                             const details = [...newContact.contactDetails];
@@ -12732,56 +13536,56 @@ export default function App() {
                     </Button>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Number Line</Label>
-                        <Input className={addr.numberLine ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.numberLine} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Number Line</Label>
+                        <Input autoComplete="off" className={addr.numberLine ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.numberLine} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].numberLine = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Street</Label>
-                        <Input className={addr.street ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.street} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Street</Label>
+                        <Input autoComplete="off" className={addr.street ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.street} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].street = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">City</Label>
-                        <Input className={addr.city ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.city} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">City</Label>
+                        <Input autoComplete="off" className={addr.city ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.city} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].city = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Region</Label>
-                        <Input className={addr.region ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.region} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Region</Label>
+                        <Input autoComplete="off" className={addr.region ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.region} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].region = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">State</Label>
-                        <Input className={addr.state ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.state} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">State</Label>
+                        <Input autoComplete="off" className={addr.state ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.state} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].state = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Country</Label>
-                        <Input className={addr.country ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.country} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Country</Label>
+                        <Input autoComplete="off" className={addr.country ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.country} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].country = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
                         }} />
                       </div>
                       <div className="space-y-1 col-span-2">
-                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Postal Code</Label>
-                        <Input className={addr.postalCode ? "h-10 border-b-2 border-b-green-400 bg-transparent text-black" : "h-10 border-b-2 border-b-slate-200 bg-transparent text-black"} value={addr.postalCode} onChange={(e) => {
+                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Postal Code</Label>
+                        <Input autoComplete="off" className={addr.postalCode ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.postalCode} onChange={(e) => {
                           const list = [...newContact.address];
                           list[idx].postalCode = e.target.value;
                           setNewContact(prev => ({ ...prev, address: list }));
@@ -12793,8 +13597,8 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 border-t gap-3 bg-slate-50 flex items-center justify-end sm:items-center">
-            <Button onClick={handleAddContact} className="bg-black hover:bg-black/90 text-white px-4 mb-3 font-normal flex items-center justify-center gap-2">
+          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 gap-3 bg-white dark:bg-zinc-900 flex items-center justify-end sm:items-center">
+            <Button onClick={handleAddContact} className="bg-black dark:bg-zinc-950 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 px-4 mb-3 font-normal flex items-center justify-center gap-2">
               {editingContactId ? <Save className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
               {editingContactId ? 'Update Contact' : 'Save Contact'}
             </Button>
@@ -12834,8 +13638,7 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="scene-name">Scene Name</Label>
-              <Input 
-                id="scene-name" 
+              <Input autoComplete="off" id="scene-name" 
                 placeholder="e.g. Movie Night" 
                 value={newScene.name}
                 onChange={(e) => setNewScene(prev => ({ ...prev, name: e.target.value }))}
@@ -12879,11 +13682,10 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
                 Section Name
               </Label>
-              <Input 
-                id="sec-name" 
+              <Input autoComplete="off" id="sec-name" 
                 placeholder="e.g. Backyard, Garage, Attic" 
                 value={newSectionName}
                 onChange={(e) => setNewSectionName(e.target.value)}
@@ -12894,7 +13696,7 @@ export default function App() {
                 <Label htmlFor="sec-hidden" className="text-sm font-medium flex items-center gap-2">
                   <EyeOff className="h-3.5 w-3.5" /> Hidden Section
                 </Label>
-                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
               </div>
               <Switch 
                 id="sec-hidden" 
@@ -12905,7 +13707,7 @@ export default function App() {
           </div>
           <DialogFooter>
             
-            <Button onClick={handleAddSection} className="flex items-center gap-2 bg-primary text-primary-foreground">
+            <Button onClick={handleAddSection} className="flex items-center gap-2 bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <PlusCircle className="h-4 w-4" />
               Add Section
             </Button>
@@ -12914,7 +13716,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className={cn("sm:max-w-[520px] border-2 transition-colors duration-300", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/10" : authError ? "border-red-500" : "border-yellow-400 shadow-lg shadow-yellow-100/50")}>
+        <DialogContent className={cn("sm:max-w-[520px] border-2 transition-colors duration-300 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/20" : authError ? "border-red-500 bg-white dark:bg-zinc-950" : "border-yellow-400 dark:border-yellow-600 shadow-lg shadow-yellow-100/50 dark:shadow-none bg-white dark:bg-zinc-950")}>
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
             {/* Left Column (Current Contents) */}
             <div className="sm:col-span-7 space-y-4">
@@ -12935,10 +13737,17 @@ export default function App() {
                       key={index}
                       id={`auth-code-input-${index}`}
                       type="password"
+                      autoComplete="off"
                       maxLength={1}
                       className={cn(
-                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-white",
-                        authSuccess ? "border-green-500 text-green-600 bg-green-50" : (authCode[index] ? "border-primary" : "border-slate-200 focus:border-primary")
+                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100",
+                        authSuccess 
+                          ? "border-green-500 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/40" 
+                          : authError
+                            ? "border-red-500 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400"
+                            : authCode[index] 
+                              ? "border-primary bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" 
+                              : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:border-primary text-slate-900 dark:text-zinc-100"
                       )}
                       value={authCode[index] || ''}
                       onKeyDown={(e) => {
@@ -12964,7 +13773,7 @@ export default function App() {
                     />
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">This is a sensitive operation.</p>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">This is a sensitive operation.</p>
               </div>
             </div>
 
@@ -13046,7 +13855,7 @@ export default function App() {
                 <Label htmlFor="edit-device-name" className="flex items-center gap-2">
                   {(() => {
                     const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
-                    return <Icon className="h-3 w-3 text-muted-foreground" />;
+                    return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
                   })()}
                   {(() => {
                     if (editingDevice.type === 'window') return 'Window Name';
@@ -13059,8 +13868,7 @@ export default function App() {
                     return map[editingDevice.type] || 'Device Name';
                   })()}
                 </Label>
-                <Input 
-                  id="edit-device-name" 
+                <Input autoComplete="off" id="edit-device-name" 
                   value={editingDevice.name || ''}
                   onChange={(e) => setEditingDevice({ ...editingDevice, name: e.target.value })}
                 />
@@ -13069,12 +13877,11 @@ export default function App() {
               {editingDevice.type === 'camera' && (
                 <div className="space-y-4 pt-2 border-t mt-2">
                   <div className="grid gap-2">
-                    <Label htmlFor="edit-ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    <Label htmlFor="edit-ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                       <Globe className="h-3 w-3" />
                       IP Address
                     </Label>
-                    <Input 
-                      id="edit-ipAddress" 
+                    <Input autoComplete="off" id="edit-ipAddress" 
                       placeholder="e.g. 192.168.1.100"
                       value={editingDevice.ipAddress || ''}
                       onChange={(e) => setEditingDevice({ ...editingDevice, ipAddress: e.target.value })}
@@ -13082,24 +13889,22 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="edit-username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Label htmlFor="edit-username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                         <UserCircle className="h-3 w-3" />
                         Username
                       </Label>
-                      <Input 
-                        id="edit-username" 
+                      <Input autoComplete="off" id="edit-username" 
                         placeholder="admin"
                         value={editingDevice.username || ''}
                         onChange={(e) => setEditingDevice({ ...editingDevice, username: e.target.value })}
                       />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="edit-password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Label htmlFor="edit-password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                         <Shield className="h-3 w-3" />
                         Password
                       </Label>
-                      <Input 
-                        id="edit-password" 
+                      <Input autoComplete="off" id="edit-password" 
                         type="password"
                         placeholder="••••••••"
                         value={editingDevice.password || ''}
@@ -13109,24 +13914,22 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="edit-streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Label htmlFor="edit-streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                         <Video className="h-3 w-3" />
                         Stream Path
                       </Label>
-                      <Input 
-                        id="edit-streamPath" 
+                      <Input autoComplete="off" id="edit-streamPath" 
                         placeholder="/live"
                         value={editingDevice.streamPath || ''}
                         onChange={(e) => setEditingDevice({ ...editingDevice, streamPath: e.target.value })}
                       />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="edit-port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <Label htmlFor="edit-port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
                         <Settings2 className="h-3 w-3" />
                         Port
                       </Label>
-                      <Input 
-                        id="edit-port" 
+                      <Input autoComplete="off" id="edit-port" 
                         type="number"
                         placeholder="80"
                         value={editingDevice.port || 80}
@@ -13140,7 +13943,7 @@ export default function App() {
               {editingDevice.type === 'appliance' && (
                 <div className="grid gap-2 text-left">
                   <Label htmlFor="edit-appliance-type" className="flex items-center gap-2">
-                    <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                    <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                     Appliance Type
                   </Label>
                   <Select 
@@ -13164,7 +13967,7 @@ export default function App() {
               {editingDevice.type === 'door' && (
                 <div className="grid gap-2">
                   <Label htmlFor="edit-door-type" className="flex items-center gap-2">
-                    <Building2 className="h-3 w-3 text-muted-foreground" />
+                    <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                     Door Type
                   </Label>
                   <Select 
@@ -13189,7 +13992,7 @@ export default function App() {
 
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-muted-foreground" />
+                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Section
                 </Label>
                 <Select 
@@ -13218,7 +14021,7 @@ export default function App() {
 
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-room" className="flex items-center gap-2">
-                  <Sofa className="h-3 w-3 text-muted-foreground" />
+                  <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Room
                 </Label>
                 <Select 
@@ -13248,7 +14051,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {editingDevice.section && editingDevice.section !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
@@ -13257,7 +14060,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -13268,7 +14071,7 @@ export default function App() {
                   </SelectContent>
                 </Select>
                 {!editingDevice.section || editingDevice.section === 'none' ? (
-                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
+                  <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
                 ) : (
                   <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'section')}</span>
                 )}
@@ -13277,7 +14080,7 @@ export default function App() {
           )}
           <DialogFooter>
             
-            <Button onClick={handleSaveDevice} className="bg-primary text-primary-foreground">
+            <Button onClick={handleSaveDevice} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -13294,7 +14097,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (viewingRoom) {
                       handleEditRoom(viewingRoom);
@@ -13321,7 +14124,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -13341,32 +14144,32 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                     <div className="font-medium">{(sections || []).find(s => s.id.toString() === viewingRoom.section?.toString() || s.id.toString() === currentRoomDto?.sectionId?.toString())?.name || 'N/A'}</div>
                   </div>
                   {currentRoomDto && (
                     <>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                         <div className="font-medium">{getUserNameById(currentRoomDto.createdBy) || currentRoomDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                         <div className="font-medium">{currentRoomDto.createdOn ? format(new Date(currentRoomDto.createdOn), 'PPp') : 'N/A'}</div>
                       </div>
                       
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Hidden Status</span>
                         <div className="font-medium">
                           {currentRoomDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                         <div className="font-medium">{getUserNameById(currentRoomDto.lastModifiedBy) || currentRoomDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified On</span>
                         <div className="font-medium">{currentRoomDto.lastModifiedOn ? format(new Date(currentRoomDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                       </div>
                     </>
@@ -13380,36 +14183,36 @@ export default function App() {
 
       {/* Token Generation Modal */}
       <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-foreground" showCloseButton={false}>
           <div className="absolute right-6 top-6 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 transition-colors" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white">
-            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900">
+          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white dark:bg-zinc-950">
+            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-zinc-100">
               <Key className="h-6 w-6 text-primary" />
               Generated Token
             </DialogTitle>
-            <DialogDescription className="text-xs mt-1 text-slate-500">
+            <DialogDescription className="text-xs mt-1 text-slate-500 dark:text-zinc-400">
               Copy this token and keep it safe. It is required for external system integrations.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
-            <div className="bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
+            <div className="bg-slate-50 dark:bg-zinc-800/60 p-6 rounded-2xl border border-slate-100 dark:border-zinc-700/60 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Authentication Token</span>
+                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest">Authentication Token</span>
                 {generatedToken?.expiryTime && <TokenCountdown expiryTime={generatedToken.expiryTime} />}
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex-1 bg-white dark:bg-black p-4 rounded-xl border border-slate-100 dark:border-slate-800 font-mono text-sm break-all select-all text-primary shadow-inner">
+                <div className="flex-1 bg-white dark:bg-zinc-950 p-4 rounded-xl border border-slate-100 dark:border-zinc-800 font-mono text-sm break-all select-all text-emerald-600 dark:text-emerald-400 shadow-inner">
                   {generatedToken?.tokenCode}
                 </div>
                 <Button 
                   size="icon"
                   variant="outline"
-                  className="shrink-0 h-12 w-12 rounded-xl bg-white hover:bg-slate-50 transition-all border-slate-100 shadow-sm"
+                  className="shrink-0 h-12 w-12 rounded-xl bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 transition-all border-slate-100 dark:border-zinc-700 shadow-sm"
                   onClick={() => {
                     if (generatedToken?.tokenCode) {
                       navigator.clipboard.writeText(generatedToken.tokenCode);
@@ -13440,18 +14243,17 @@ export default function App() {
             <div className="grid gap-4 pt-[3px] pb-4 pr-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-name" className="flex items-center gap-2">
-                  <Edit3 className="h-3 w-3 text-muted-foreground" />
+                  <Edit3 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Room Name
                 </Label>
-                <Input 
-                  id="edit-room-name" 
+                <Input autoComplete="off" id="edit-room-name" 
                   value={editingRoom.name || ''}
                   onChange={(e) => setEditingRoom({ ...editingRoom, name: e.target.value })}
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-muted-foreground" />
+                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Section
                 </Label>
                 <Select 
@@ -13474,7 +14276,7 @@ export default function App() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-icon" className="flex items-center gap-2">
-                  <LayoutGrid className="h-3 w-3 text-muted-foreground" />
+                  <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Icon
                 </Label>
                 <Select 
@@ -13496,7 +14298,7 @@ export default function App() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-person" className="flex items-center gap-2">
-                  <UserIcon className="h-3 w-3 text-muted-foreground" />
+                  <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Assigned Person
                 </Label>
                 <Select 
@@ -13538,7 +14340,7 @@ export default function App() {
                   <Label htmlFor="edit-room-hidden" className="text-sm font-medium flex items-center gap-2">
                     <EyeOff className="h-3.5 w-3.5" /> Hidden Room
                   </Label>
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Hide from normal views</p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
                 </div>
                 <Switch 
                   id="edit-room-hidden" 
@@ -13552,7 +14354,7 @@ export default function App() {
           <DialogFooter>
             
             <Button 
-              className="bg-primary text-primary-foreground"
+              className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700"
               onClick={() => {
                 if (editingRoom?.id && editingRoom.name) {
                   handleSaveRoom();
@@ -13572,7 +14374,7 @@ export default function App() {
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 setIsViewContactOpen(false);
                 handleEditContact(viewingContact!);
@@ -13595,7 +14397,7 @@ export default function App() {
               <Trash2 className="h-4 w-4" />
             </Button>
             <div className="h-4 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -13624,14 +14426,14 @@ export default function App() {
               <div className="space-y-6">
                 {viewingContact.contactDetails.length > 0 && (
                   <div className="space-y-3">
-                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-muted-foreground"><Phone className="h-3 w-3" /> Communication</h4>
+                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-slate-500 dark:text-zinc-400"><Phone className="h-3 w-3" /> Communication</h4>
                     <div className="grid gap-2">
                       {(viewingContact?.contactDetails || []).map((d, i) => (
                         <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
                           <div className="flex justify-between items-center text-sm font-bold">
                             <span className="flex items-center gap-2"><Mail className="h-3 w-3 text-primary/60" /> {d.email}</span>
                           </div>
-                          <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
+                          <div className="flex justify-between items-center text-xs text-slate-500 dark:text-zinc-400 mt-1">
                             <span className="flex items-center gap-2"><Smartphone className="h-3 w-3" /> {d.phoneNumber}</span>
                           </div>
                         </div>
@@ -13642,13 +14444,13 @@ export default function App() {
                 
                 {viewingContact.address.length > 0 && (
                   <div className="space-y-3">
-                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-muted-foreground"><MapPin className="h-3 w-3" /> Locations</h4>
+                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-slate-500 dark:text-zinc-400"><MapPin className="h-3 w-3" /> Locations</h4>
                     <div className="grid gap-2">
                       {(viewingContact?.address || []).map((a, i) => (
                         <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
                           <span className="text-sm font-bold">{a.numberLine} {a.street}</span>
-                          <span className="text-xs text-muted-foreground mt-0.5">{a.city}, {a.region}, {a.state}</span>
-                          <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest mt-1">{a.postalCode} • {a.country}</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">{a.city}, {a.region}, {a.state}</span>
+                          <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400/60 uppercase tracking-widest mt-1">{a.postalCode} • {a.country}</span>
                         </div>
                       ))}
                     </div>
@@ -13692,7 +14494,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (selectedHardware) {
                         setHardwareForm({
@@ -13729,7 +14531,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -13749,11 +14551,11 @@ export default function App() {
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                    <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Controller Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Controller Name</span>
                     <p className="font-bold text-lg">{selectedHardware.hardwareName}</p>
                   </div>
                   <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                    <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Device ID / Serial</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Device ID / Serial</span>
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-mono font-bold text-sm text-primary truncate max-w-[100px]">{selectedHardware.hardwareId}</p>
                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(selectedHardware.hardwareId || '')}>
@@ -13792,72 +14594,72 @@ export default function App() {
 
               {/* Right Column: Linked Devices Summary Lists */}
               <div className="space-y-4 md:border-l md:pl-6">
-                <h3 className="text-xs uppercase font-bold tracking-wider text-muted-foreground border-b pb-1">Assigned Infrastructure Map</h3>
+                <h3 className="text-xs uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 border-b pb-1">Assigned Infrastructure Map</h3>
                 
                 <div className="space-y-3">
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0}/8 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0}/8 max)</span>
                     {selectedHardware.applianceIdNames && selectedHardware.applianceIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.applianceIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No appliances assigned to this controller.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No appliances assigned to this controller.</p>
                     )}
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0}/3 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0}/3 max)</span>
                     {selectedHardware.cameraIdNames && selectedHardware.cameraIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.cameraIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No cameras assigned to this controller.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No cameras assigned to this controller.</p>
                     )}
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0}/6 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0}/6 max)</span>
                     {selectedHardware.lightIdNames && selectedHardware.lightIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.lightIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No lights assigned to this controller.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No lights assigned to this controller.</p>
                     )}
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0}/4 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0}/4 max)</span>
                     {selectedHardware.doorIdNames && selectedHardware.doorIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.doorIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No door systems assigned.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No door systems assigned.</p>
                     )}
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0}/4 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0}/4 max)</span>
                     {selectedHardware.windowIdNames && selectedHardware.windowIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.windowIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No automation windows assigned.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No automation windows assigned.</p>
                     )}
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold text-muted-foreground block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0}/5 max)</span>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0}/5 max)</span>
                     {selectedHardware.externalIdNames && selectedHardware.externalIdNames.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {(selectedHardware.externalIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground italic">No external units assigned.</p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No external units assigned.</p>
                     )}
                   </div>
                 </div>
@@ -13883,10 +14685,9 @@ export default function App() {
           <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
               <Label htmlFor="add-hw-name" className="flex items-center gap-2">
-                <Cpu className="h-3.5 w-3.5 text-muted-foreground" /> Hardware Name
+                <Cpu className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware Name
               </Label>
-              <Input 
-                id="add-hw-name" 
+              <Input autoComplete="off" id="add-hw-name" 
                 placeholder="e.g. Living Room Node Bridge" 
                 value={hardwareForm.hardwareName || ''}
                 onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
@@ -13916,7 +14717,7 @@ export default function App() {
                   toast.error(`Creation failed: ${err.message}`);
                 }
               });
-            }}><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
+            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700"><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -13939,17 +14740,16 @@ export default function App() {
             <div className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="edit-hw-name" className="flex items-center gap-2">
-                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" /> Hardware Name
+                  <Cpu className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware Name
                 </Label>
-                <Input 
-                  id="edit-hw-name" 
+                <Input autoComplete="off" id="edit-hw-name" 
                   value={hardwareForm.hardwareName || ''}
                   onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
                 />
               </div>
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
-                  <Settings2 className="h-3.5 w-3.5 text-muted-foreground" /> Hardware ID / Serial
+                  <Settings2 className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware ID / Serial
                 </Label>
                 <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
                   <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.hardwareId}</p>
@@ -13960,7 +14760,7 @@ export default function App() {
               </div>
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
-                  <Key className="h-3.5 w-3.5 text-muted-foreground" /> Auth Security Key (Read-Only)
+                  <Key className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Auth Security Key (Read-Only)
                 </Label>
                 <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
                   <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.authKey}</p>
@@ -13980,7 +14780,7 @@ export default function App() {
                   {/* Appliances Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Connected Appliances ({Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Connected Appliances ({Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (8 - (hardwareForm.applianceIdNames?.length || 0)) <= 0
@@ -14021,7 +14821,7 @@ export default function App() {
                   {/* Cameras Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Assigned Security Cameras ({Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Assigned Security Cameras ({Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (3 - (hardwareForm.cameraIdNames?.length || 0)) <= 0
@@ -14062,7 +14862,7 @@ export default function App() {
                   {/* Lights Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Controlled Lighting ({Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Controlled Lighting ({Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (6 - (hardwareForm.lightIdNames?.length || 0)) <= 0
@@ -14103,7 +14903,7 @@ export default function App() {
                   {/* Window Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Automated Windows ({Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Automated Windows ({Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (4 - (hardwareForm.windowIdNames?.length || 0)) <= 0
@@ -14144,7 +14944,7 @@ export default function App() {
                   {/* Door Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Automated Doors ({Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Automated Doors ({Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (4 - (hardwareForm.doorIdNames?.length || 0)) <= 0
@@ -14185,7 +14985,7 @@ export default function App() {
                   {/* Externals Selection */}
                   <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-muted-foreground">Select Peripheral Auxiliaries ({Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left)</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Peripheral Auxiliaries ({Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left)</span>
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
                         (5 - (hardwareForm.externalIdNames?.length || 0)) <= 0
@@ -14281,7 +15081,7 @@ export default function App() {
                 addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
                 toast.success('Hardware updated successfully');
               });
-            }} className="bg-primary text-primary-foreground">
+            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -14292,11 +15092,11 @@ export default function App() {
 
       {/* Add External Device Modal */}
       <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-600 shadow-2xl">
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               <Radio className="h-6 w-6 text-primary" />
-              Add External System
+              Add New External
             </DialogTitle>
             <DialogDescription>
               Deploy a new peripheral automation unit to track custom safety events.
@@ -14306,21 +15106,20 @@ export default function App() {
           <div className="space-y-4 pt-[3px] pb-3">
             <div className="grid gap-2">
               <Label htmlFor="ext-name" className="flex items-center gap-2">
-                <Radio className="h-3.5 w-3.5 text-muted-foreground" /> External Device Name
+                <Radio className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> External Name
               </Label>
-              <Input 
-                id="ext-name" 
+              <Input autoComplete="off" id="ext-name" 
                 placeholder="e.g. Laser Gate Switch" 
                 value={externalForm.externalName || ''}
                 onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
-                className="rounded-xl"
+                className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="ext-section" className="flex items-center gap-2">
-                  <WindowIcon className="h-3.5 w-3.5 text-muted-foreground" /> Section
+                  <WindowIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Section
                 </Label>
                 <Select 
                   value={externalForm.sectionId?.toString() || 'none'} 
@@ -14330,7 +15129,7 @@ export default function App() {
                     roomId: undefined
                   }))}
                 >
-                  <SelectTrigger id="ext-section">
+                  <SelectTrigger id="ext-section" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
                     <SelectValue placeholder="Select section">
                       {externalForm.sectionId && externalForm.sectionId !== 'none'
                         ? ((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Select section')
@@ -14348,7 +15147,7 @@ export default function App() {
 
               <div className="grid gap-2">
                 <Label htmlFor="ext-room" className="flex items-center gap-2">
-                  <HomeIcon className="h-3.5 w-3.5 text-muted-foreground" /> Room
+                  <HomeIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Room
                 </Label>
                 <Select 
                   value={externalForm.roomId?.toString() || 'none'} 
@@ -14365,7 +15164,7 @@ export default function App() {
                     }
                   }}
                 >
-                  <SelectTrigger id="ext-room">
+                  <SelectTrigger id="ext-room" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
                     <SelectValue placeholder="Select room">
                       {externalForm.roomId && externalForm.roomId !== 'none'
                         ? ((rooms || []).find(r => r.id.toString() === externalForm.roomId?.toString())?.name || 'Select room')
@@ -14376,7 +15175,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {externalForm.sectionId && externalForm.sectionId !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.sectionId?.toString()).map(room => (
@@ -14385,7 +15184,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -14395,17 +15194,12 @@ export default function App() {
                     )}
                   </SelectContent>
                 </Select>
-                {!externalForm.sectionId || externalForm.sectionId === 'none' ? (
-                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
-                ) : (
-                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'section')}</span>
-                )}
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                <Zap className="h-3.5 w-3.5 text-muted-foreground" /> Link to Trigger Actions
+              <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Link to Trigger Actions
               </Label>
               <div className="flex flex-wrap gap-2">
                 {(actions || []).map((s) => {
@@ -14457,8 +15251,8 @@ export default function App() {
                   toast.error(`Error adding external device: ${err.message}`);
                 }
               }}
-            >
-              <PlusCircle className="mr-2 h-5 w-5" /> Add External Device
+            className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
+              <PlusCircle className="mr-2 h-5 w-5" /> Add External
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -14475,7 +15269,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (selectedExternal) {
                       setExternalForm(selectedExternal);
@@ -14509,7 +15303,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -14526,7 +15320,7 @@ export default function App() {
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Triggered Status</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Triggered Status</span>
                   <div className="flex items-center gap-2 font-medium">
                     {isExternalTriggered(selectedExternal) ? (
                       <Badge variant="destructive" className="animate-pulse">Triggered</Badge>
@@ -14536,44 +15330,44 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">External ID</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">External ID</span>
                   <div className="font-medium font-mono uppercase">{selectedExternal.externalId}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                   <div className="font-medium">
                     {selectedExternal.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                   <div className="font-medium">
                     {resolveSectionName(selectedExternal, selectedExternal, sections, rooms)}
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
                   <div className="font-medium">{(rooms || []).find(r => r.id === selectedExternal.roomId || r.id.toString() === selectedExternal.roomId?.toString())?.name || 'N/A'}</div>
                 </div>
                 
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                   <div className="font-medium">{getUserNameById(selectedExternal.createdBy) || selectedExternal.createdByName || 'System'}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                   <div className="font-medium">{selectedExternal.createdOn ? format(new Date(selectedExternal.createdOn), 'PPp') : 'N/A'}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                   <div className="font-medium">{getUserNameById(selectedExternal.lastModifiedBy) || selectedExternal.lastModifiedByName || 'System'}</div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified On</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified On</span>
                   <div className="font-medium">{selectedExternal.lastModifiedOn ? format(new Date(selectedExternal.lastModifiedOn), 'PPp') : 'Never'}</div>
                 </div>
                 <div className="space-y-1 col-span-2">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Linked Triggers</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Linked Triggers</span>
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
                       (selectedExternal.actionIds || []).map(aid => {
@@ -14585,7 +15379,7 @@ export default function App() {
                         );
                       })
                     ) : (
-                      <span className="text-sm text-muted-foreground font-medium">No actions linked</span>
+                      <span className="text-sm text-slate-500 dark:text-zinc-400 font-medium">No actions linked</span>
                     )}
                   </div>
                 </div>
@@ -14597,13 +15391,13 @@ export default function App() {
 
       {/* Edit External Device Modal */}
       <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
           <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <Pencil className="h-6 w-6 text-primary" />
               Edit {externalForm?.externalName || 'External'}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-slate-500 dark:text-zinc-400">
               Modify name pattern and linked trigger actions.
             </DialogDescription>
           </DialogHeader>
@@ -14613,19 +15407,18 @@ export default function App() {
               <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-2">
                 <Radio className="h-3 w-3" /> External Device Name
               </Label>
-              <Input 
-                id="edit-ext-name" 
+              <Input autoComplete="off" id="edit-ext-name" 
                 value={externalForm.externalName || ''}
                 onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
-                className="rounded-xl border-slate-200"
+                className="rounded-none border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
               />
             </div>
-            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-zinc-900 rounded-2xl border border-slate-100 dark:border-zinc-800">
               <div className="space-y-0.5">
-                <Label className="text-sm font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
-                  <Power className="h-3.5 w-3.5 text-muted-foreground" /> Device Active State
+                <Label className="text-sm font-bold text-slate-600 dark:text-zinc-200 flex items-center gap-2">
+                  <Power className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Device Active State
                 </Label>
-                <p className="text-[10px] text-muted-foreground font-medium">Enable or disable this external interface</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Enable or disable this external interface</p>
               </div>
               <Switch 
                 checked={externalForm.isActive} 
@@ -14636,7 +15429,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-ext-section" className="flex items-center gap-2">
-                  <WindowIcon className="h-3.5 w-3.5 text-muted-foreground" /> Section Name
+                  <WindowIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Section Name
                 </Label>
                 <Select 
                   value={externalForm.section || 'none'} 
@@ -14646,7 +15439,7 @@ export default function App() {
                     room: undefined
                   }))}
                 >
-                  <SelectTrigger id="edit-ext-section">
+                  <SelectTrigger id="edit-ext-section" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
                     <SelectValue placeholder="Select section">
                       {externalForm.section && externalForm.section !== 'none'
                         ? ((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Select section')
@@ -14664,7 +15457,7 @@ export default function App() {
 
               <div className="grid gap-2">
                 <Label htmlFor="edit-ext-room" className="flex items-center gap-2">
-                  <HomeIcon className="h-3.5 w-3.5 text-muted-foreground" /> Room Name
+                  <HomeIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Room Name
                 </Label>
                 <Select 
                   value={externalForm.room || 'none'} 
@@ -14681,7 +15474,7 @@ export default function App() {
                     }
                   }}
                 >
-                  <SelectTrigger id="edit-ext-room">
+                  <SelectTrigger id="edit-ext-room" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
                     <SelectValue placeholder="Select room">
                       {externalForm.room && externalForm.room !== 'none'
                         ? ((rooms || []).find(r => r.id.toString() === externalForm.room?.toString())?.name || 'Select room')
@@ -14692,7 +15485,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {externalForm.section && externalForm.section !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.section?.toString()).map(room => (
@@ -14701,7 +15494,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-muted-foreground px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -14711,17 +15504,12 @@ export default function App() {
                     )}
                   </SelectContent>
                 </Select>
-                {!externalForm.section || externalForm.section === 'none' ? (
-                  <span className="text-[9px] text-muted-foreground block mt-0.5">Note: Section is required to select section-attached rooms</span>
-                ) : (
-                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'section')}</span>
-                )}
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
-                <Zap className="h-3.5 w-3.5 text-muted-foreground" /> Action Command Triggers
+              <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Action Command Triggers
               </Label>
               <div className="flex flex-wrap gap-2">
                 {(actions || []).map((s) => {
@@ -14784,7 +15572,7 @@ export default function App() {
                   toast.error(`Failed to update external device: ${err.message}`);
                 }
               });
-            }} className="bg-primary text-primary-foreground">
+            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
             </Button>
@@ -14831,7 +15619,7 @@ export default function App() {
                           {isCurrentlyActive ? 'Active' : 'Inactive'}
                         </Badge>
                       </h2>
-                      <p className="text-xs text-muted-foreground font-mono">
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
                         ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} • 1080p Streamed • {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Main Hub'}
                       </p>
                     </div>
@@ -14843,7 +15631,7 @@ export default function App() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                           onClick={() => {
                             if (selectedCamera) {
                               handleEditDevice(selectedCamera.id, 'camera');
@@ -14872,7 +15660,7 @@ export default function App() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                      className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0"
                       onClick={() => setIsCameraModalOpen(false)}
                     >
                       <X className="h-4 w-4" />
@@ -14914,9 +15702,9 @@ export default function App() {
                         />
                       ) : (
                         <div className="flex-1 flex flex-col items-center justify-center bg-black/90 p-12 text-center h-full">
-                          <VideoOff className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                          <VideoOff className="h-16 w-16 text-slate-500 dark:text-zinc-400/30 mb-4" />
                           <h3 className="text-xl font-bold text-white mb-2">Camera Inactive</h3>
-                          <p className="text-muted-foreground text-sm max-w-xs">
+                          <p className="text-slate-500 dark:text-zinc-400 text-sm max-w-xs">
                             Please toggle active status to view live feed
                           </p>
                         </div>
@@ -14959,10 +15747,10 @@ export default function App() {
                       <div className="flex items-center justify-between border-b pb-2">
                         <h3 className="text-sm font-bold text-foreground tracking-widest uppercase font-mono">Stream Configuration</h3>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-blue-600 border-blue-200 text-[10px]">CCTV CONNECTION</Badge>
+                          <Badge variant="outline" className="text-blue-600 border-slate-200 text-[10px]">CCTV CONNECTION</Badge>
                           {selectedCamera && (
                             <div className="flex items-center gap-1.5 ml-1 border-l pl-2 border-border">
-                              <span className="text-[10px] font-mono text-muted-foreground uppercase">Power</span>
+                              <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 uppercase">Power</span>
                               <Switch
                                 id="camera-modal-power-toggle"
                                 checked={isCurrentlyActive}
@@ -14975,7 +15763,7 @@ export default function App() {
                               id="restart-camera-btn"
                               size="sm"
                               variant="ghost"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-all active:scale-95"
+                              className="h-7 w-7 p-0 rounded-full hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground transition-all active:scale-95"
                               onClick={() => handleRestartCamera(currentCameraDto.id)}
                               disabled={isRestartingCamera}
                               title="Restart Camera"
@@ -14988,32 +15776,32 @@ export default function App() {
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">IP Address</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">IP Address</span>
                           <span className="font-semibold text-foreground font-mono">{currentCameraDto?.ipAddress || '127.0.0.1'}</span>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Port Node</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Port Node</span>
                           <span className="font-semibold text-foreground font-mono">{currentCameraDto?.port || '80'}</span>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Username</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Username</span>
                           <span className="font-semibold text-foreground font-mono">{currentCameraDto?.username || 'N/A'}</span>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Stream Path</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Stream Path</span>
                           <span className="font-semibold text-foreground font-mono text-ellipsis overflow-hidden block">{currentCameraDto?.streamPath || '/'}</span>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t">
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
                           <span className="font-semibold text-foreground">
                             {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Unassigned Room'}
                           </span>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-muted-foreground block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
                           <span className="font-semibold text-foreground">
                             {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
                           </span>
@@ -15024,19 +15812,19 @@ export default function App() {
                     {/* Advanced Operations: Move the Edit and Delete icons into the view modal */}
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t mt-4">
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                           <div className="font-medium">
                             {currentCameraDto?.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                           </div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
                           <div className="font-medium">
                             {currentCameraDto?.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                           </div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                           <div className="font-medium">
                             {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
                           </div>
@@ -15044,19 +15832,19 @@ export default function App() {
                         
                         
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                           <div className="font-medium">{getUserNameById(currentCameraDto?.createdBy) || currentCameraDto?.createdByName || 'System'}</div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                           <div className="font-medium">{currentCameraDto?.createdOn ? format(new Date(currentCameraDto.createdOn), 'PPp') : 'N/A'}</div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                           <div className="font-medium">{getUserNameById(currentCameraDto?.lastModifiedBy) || currentCameraDto?.lastModifiedByName || 'System'}</div>
                         </div>
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                           <div className="font-medium">{currentCameraDto?.lastModifiedOn ? format(new Date(currentCameraDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                         </div>
                       </div>
@@ -15078,13 +15866,13 @@ export default function App() {
                     <div className="flex-1 overflow-y-auto pr-1">
                       {recordingsList.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-48 rounded-xl border border-dashed text-center p-6">
-                          <EyeOff className="h-8 w-8 text-muted-foreground/40 mb-2 animate-bounce" />
-                          <p className="text-xs text-muted-foreground">No recent security backup files located for this camera.</p>
+                          <EyeOff className="h-8 w-8 text-slate-500 dark:text-zinc-400/40 mb-2 animate-bounce" />
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">No recent security backup files located for this camera.</p>
                         </div>
                       ) : (
                         <div className="border rounded-xl overflow-hidden bg-muted/10">
                           <table className="w-full text-xs text-left">
-                            <thead className="text-[10px] bg-muted/20 text-muted-foreground uppercase tracking-wider border-b font-mono">
+                            <thead className="text-[10px] bg-muted/20 text-slate-500 dark:text-zinc-400 uppercase tracking-wider border-b font-mono">
                               <tr>
                                 <th className="p-3">Interval / Time Frame</th>
                                 <th className="p-3 text-right">Actions</th>
@@ -15103,7 +15891,7 @@ export default function App() {
                                         <span className="font-semibold text-foreground">
                                           {format(new Date(recording.startTime), "MMM dd, HH:mm:ss")}
                                         </span>
-                                        <span className="text-[10px] text-muted-foreground">
+                                        <span className="text-[10px] text-slate-500 dark:text-zinc-400">
                                           to {format(new Date(recording.endTime), "HH:mm:ss")}
                                         </span>
                                       </div>
@@ -15115,7 +15903,7 @@ export default function App() {
                                           size="icon"
                                           className={cn(
                                             "h-7 w-7 rounded-lg",
-                                            isCurrentlyPlayingThis ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                                            isCurrentlyPlayingThis ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground"
                                           )}
                                           onClick={() => setPlayingRecordingPath(recording.filePath)}
                                           title="Play Recording Video"
@@ -15126,7 +15914,7 @@ export default function App() {
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                                          className="h-7 w-7 rounded-lg hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground"
                                           onClick={() => {
                                             alert(`Initiating secure direct server download for ${recording.filePath.split('/').pop() || 'backup.mp4'}`);
                                             addLogEntry("Camera Access", `Initiated download of backup recording clip for camera: ${currentCameraDto?.cameraName || selectedCamera?.name}`);
@@ -15139,7 +15927,7 @@ export default function App() {
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="h-7 w-7 rounded-lg hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                                          className="h-7 w-7 rounded-lg hover:bg-destructive/10 hover:text-destructive text-slate-500 dark:text-zinc-400"
                                           onClick={() => {
                                             // Handle record deletion
                                             setCameras(prev => prev.map(c => {
@@ -15184,7 +15972,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (selectedAppliance) {
                       handleEditDevice(selectedAppliance.id, 'appliance');
@@ -15210,7 +15998,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -15230,7 +16018,7 @@ export default function App() {
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
                   <div className="flex items-center gap-2 font-medium">
                     <div className={cn("h-2 w-2 rounded-full", selectedAppliance.status === 'on' ? 'bg-emerald-500' : 'bg-zinc-400')} />
                     {selectedAppliance.status === 'on' ? 'Active' : 'Inactive'}
@@ -15239,49 +16027,49 @@ export default function App() {
                 
                 
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Device Type</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Device Type</span>
                   <div className="font-medium capitalize">{selectedAppliance.type}</div>
                 </div>
                 {currentApplianceDto && (
                   <>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                       <div className="font-medium">
                         {currentApplianceDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
                       <div className="font-medium">
                         {currentApplianceDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                       <div className="font-medium">
                         {resolveSectionName(selectedAppliance, currentApplianceDto, sections, rooms)}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
                       <div className="font-medium">
                         {selectedAppliance.room ? ((rooms || []).find(r => r.id.toString() === selectedAppliance.room?.toString())?.name || 'N/A') : (currentApplianceDto.roomId ? ((rooms || []).find(r => r.id.toString() === currentApplianceDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                       <div className="font-medium">{getUserNameById(currentApplianceDto.createdBy) || currentApplianceDto.createdByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                       <div className="font-medium">{currentApplianceDto.createdOn ? format(new Date(currentApplianceDto.createdOn), 'PPp') : 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                       <div className="font-medium">{getUserNameById(currentApplianceDto.lastModifiedBy) || currentApplianceDto.lastModifiedByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                       <div className="font-medium">{currentApplianceDto.lastModifiedOn ? format(new Date(currentApplianceDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                     </div>
                   </>
@@ -15302,7 +16090,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (selectedDoor) {
                       handleEditDevice(selectedDoor.id, 'door');
@@ -15328,7 +16116,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -15348,7 +16136,7 @@ export default function App() {
             <div className="pt-[3px] pb-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
                   <div className="flex items-center gap-2 font-medium">
                     {selectedDoor.status === 'locked' ? (
                       <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
@@ -15358,18 +16146,18 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Door Type</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Door Type</span>
                   <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
                 </div>
                 
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                   <div className="font-medium">
                     {resolveSectionName(selectedDoor, currentDoorDto, sections, rooms)}
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
                   <div className="font-medium">
                     {selectedDoor.room ? ((rooms || []).find(r => r.id.toString() === selectedDoor.room?.toString())?.name || 'N/A') : (currentDoorDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentDoorDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
                   </div>
@@ -15377,13 +16165,13 @@ export default function App() {
                 {currentDoorDto && (
                   <>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                       <div className="font-medium">
                         {currentDoorDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
                       <div className="font-medium">
                         {currentDoorDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                       </div>
@@ -15392,19 +16180,19 @@ export default function App() {
                     
                     
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                       <div className="font-medium">{getUserNameById(currentDoorDto.createdBy) || currentDoorDto.createdByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                       <div className="font-medium">{currentDoorDto.createdOn ? format(new Date(currentDoorDto.createdOn), 'PPp') : 'N/A'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                       <div className="font-medium">{getUserNameById(currentDoorDto.lastModifiedBy) || currentDoorDto.lastModifiedByName || 'System'}</div>
                     </div>
                     <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                       <div className="font-medium">{currentDoorDto.lastModifiedOn ? format(new Date(currentDoorDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                     </div>
                   </>
@@ -15424,7 +16212,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (selectedLight) {
                       handleEditDevice(selectedLight.id, 'light');
@@ -15450,7 +16238,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -15470,19 +16258,19 @@ export default function App() {
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Status</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
                     <div className="flex items-center gap-2 font-medium">
                       <div className={cn("h-2 w-2 rounded-full", selectedLight.status === 'on' ? 'bg-amber-400' : 'bg-zinc-400')} />
                       {selectedLight.status === 'on' ? 'On' : 'Off'}
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Brightness</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Brightness</span>
                     <div className="font-medium">{selectedLight.value || currentLightDto?.brightnessLevel || 0}%</div>
                   </div>
                   
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
                     <div className="font-medium">
                       {selectedLight.room ? ((rooms || []).find(r => r.id.toString() === selectedLight.room?.toString())?.name || 'N/A') : (currentLightDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentLightDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
                     </div>
@@ -15491,19 +16279,19 @@ export default function App() {
                   {currentLightDto && (
                     <>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                         <div className="font-medium">
                           {currentLightDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
                         <div className="font-medium">
                           {currentLightDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                         <div className="font-medium">
                           {resolveSectionName(selectedLight, currentLightDto, sections, rooms)}
                         </div>
@@ -15511,19 +16299,19 @@ export default function App() {
                       
                       
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                         <div className="font-medium">{getUserNameById(currentLightDto.createdBy) || currentLightDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                         <div className="font-medium">{currentLightDto.createdOn ? format(new Date(currentLightDto.createdOn), 'PPp') : 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                         <div className="font-medium">{getUserNameById(currentLightDto.lastModifiedBy) || currentLightDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                         <div className="font-medium">{currentLightDto.lastModifiedOn ? format(new Date(currentLightDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                       </div>
                     </>
@@ -15543,7 +16331,7 @@ export default function App() {
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
                   onClick={() => {
                     if (viewingSection) {
                       setEditingSection(viewingSection);
@@ -15579,7 +16367,7 @@ export default function App() {
                 <div className="h-4 w-px bg-border mx-1" />
               </>
             )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -15598,28 +16386,28 @@ export default function App() {
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                     <div className="font-medium text-lg">{currentSectionDto?.sectionName || viewingSection.name}</div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Name</span>
                     <div className="font-medium text-lg">{viewingSection.name}</div>
                   </div>
                   {currentSectionDto && (
                     <>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Hidden Status</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Hidden Status</span>
                         <div className="font-medium text-sm">
                           {currentSectionDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
                         </div>
                       </div>
                       
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                         <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'createdBy')) || getProp(currentSectionDto, 'createdByName') || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                         <div className="font-medium text-sm">
                           {(() => {
                             const dateVal = getProp(currentSectionDto, 'createdOn');
@@ -15633,11 +16421,11 @@ export default function App() {
                         </div>
                       </div>
                       <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                         <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'lastModifiedBy')) || getProp(currentSectionDto, 'lastModifiedByName') || 'System'}</div>
                       </div>
                       <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                         <div className="font-medium text-sm">
                           {(() => {
                             const dateVal = getProp(currentSectionDto, 'lastModifiedOn') || getProp(currentSectionDto, 'lastModifiedTime');
@@ -15666,7 +16454,7 @@ export default function App() {
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-8 w-8 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => {
                 if (selectedWindow) {
                   handleEditDevice(selectedWindow.id, 'window');
@@ -15690,7 +16478,7 @@ export default function App() {
               <Trash2 className="h-4 w-4" />
             </Button>
             <div className="h-4 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
@@ -15710,7 +16498,7 @@ export default function App() {
               <div className="pt-[3px] pb-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Lock Status</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
                     <div className="flex items-center gap-2 font-medium">
                       {selectedWindow.status === 'locked' ? (
                         <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
@@ -15720,7 +16508,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Open Status</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Open Status</span>
                     <div className="flex items-center gap-2 font-medium">
                       {currentWindowDto?.isOpen ? (
                         <Badge variant="secondary" className="bg-amber-400">Open</Badge>
@@ -15731,7 +16519,7 @@ export default function App() {
                   </div>
                   
                   <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground uppercase font-semibold">Room Name</span>
+                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
                     <div className="font-medium text-sm">
                       {selectedWindow.room ? ((rooms || []).find(r => r.id.toString() === selectedWindow.room?.toString())?.name || 'N/A') : (currentWindowDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentWindowDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
                     </div>
@@ -15740,19 +16528,19 @@ export default function App() {
                   {currentWindowDto && (
                     <>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Active Profile</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
                         <div className="font-medium">
                           {currentWindowDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Power Active</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
                         <div className="font-medium">
                           {currentWindowDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Section Name</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
                         <div className="font-medium text-sm">
                           {resolveSectionName(selectedWindow, currentWindowDto, sections, rooms)}
                         </div>
@@ -15760,19 +16548,19 @@ export default function App() {
                       
                       
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
                         <div className="font-medium">{getUserNameById(currentWindowDto.createdBy) || currentWindowDto.createdByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Created On</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
                         <div className="font-medium">{currentWindowDto.createdOn ? format(new Date(currentWindowDto.createdOn), 'PPp') : 'N/A'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified By</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
                         <div className="font-medium">{getUserNameById(currentWindowDto.lastModifiedBy) || currentWindowDto.lastModifiedByName || 'System'}</div>
                       </div>
                       <div className="space-y-1">
-                        <span className="text-xs text-muted-foreground uppercase font-semibold">Last Modified</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
                         <div className="font-medium">{currentWindowDto.lastModifiedOn ? format(new Date(currentWindowDto.lastModifiedOn), 'PPp') : 'Never'}</div>
                       </div>
                     </>
@@ -15784,18 +16572,20 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800" showCloseButton={false}>
           <div className="absolute right-6 top-6 flex items-center gap-2 z-50">
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-10 w-10 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="h-10 w-10 rounded-full text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
               onClick={() => { 
                 if (selectedAction) {
                   setActionForm({
                     actionName: selectedAction.actionName,
-                    description: selectedAction.actionDescription,
-                    personId: selectedAction.personId
+                    description: selectedAction.actionDescription || '',
+                    isPrivate: !!selectedAction.isPrivate,
+                    isRecurring: !!selectedAction.isRecurring,
+                    time: formatTimeSpanForPayload(selectedAction.time || '00:00:00')
                   });
                 }
                 setIsViewActionOpen(false); 
@@ -15824,23 +16614,35 @@ export default function App() {
               <Trash2 className="h-5 w-5" />
             </Button>
             <div className="h-5 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-5 w-5" />
             </DialogClose>
           </div>
-          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-slate-900 border-b mb-0 shrink-0 pr-40 flex flex-col justify-center">
+          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800 mb-0 shrink-0 pr-40 flex flex-col justify-center">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2">
+              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2 text-foreground dark:text-zinc-100">
                 <Zap className="h-6 w-6 text-primary shrink-0" />
                 {selectedAction?.actionName}
               </DialogTitle>
-              <DialogDescription className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2 leading-none whitespace-nowrap">
-                <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
-                <span className="h-1 w-1 rounded-full bg-slate-300 shrink-0" />
+              <DialogDescription className="text-slate-500 dark:text-zinc-400 font-medium flex items-center gap-2 flex-wrap leading-none">
+                <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
+                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
                 {selectedAction?.actionActive ? 
                   <span className="text-emerald-500 font-bold text-[11px] uppercase tracking-wider shrink-0">Active sequence</span> : 
                   <span className="text-slate-400 font-bold text-[11px] uppercase tracking-wider shrink-0">Disabled</span>
                 }
+                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
+                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isPrivate ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800")}>
+                  {selectedAction?.isPrivate ? "Private" : "Public"}
+                </Badge>
+                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700")}>
+                  {selectedAction?.isRecurring ? "Recurring" : "One-time"}
+                </Badge>
+                {selectedAction?.time && (
+                  <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                    {formatTimeSpanDisplay(selectedAction.time)}
+                  </Badge>
+                )}
               </DialogDescription>
             </div>
           </DialogHeader>
@@ -15848,7 +16650,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-6 scrollbar-hide">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                <h4 className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-2">
                   <Layers className="h-3 w-3" />
                   Execution Sequence
                 </h4>
@@ -15876,14 +16678,14 @@ export default function App() {
 
               <div className="space-y-3">
                 {(selectedAction?.getActionStepDtos || []).map((step, idx) => (
-                  <Card key={step.id} className="p-4 bg-white dark:bg-slate-800 border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-all group rounded-2xl">
+                  <Card key={step.id} className="p-4 bg-white dark:bg-zinc-950 border-slate-200/60 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all group rounded-2xl">
                     <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center font-bold text-slate-400 shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                      <div className="h-10 w-10 rounded-xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-400 shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
                         {idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700 dark:text-slate-200">
+                          <span className="font-bold text-slate-700 dark:text-zinc-100">
                             {(() => {
                               switch (step.facilityType) {
                                 case FacilityType.Appliance: return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
@@ -15896,7 +16698,7 @@ export default function App() {
                               }
                             })()}
                           </span>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md">
                             {FacilityType[step.facilityType]}
                           </span>
                         </div>
@@ -15909,7 +16711,7 @@ export default function App() {
                           {step.facilityType === FacilityType.Door && (
                             <Badge variant="outline" className={cn(
                               "text-[10px] rounded-lg",
-                              step.isLocked ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                              step.isLocked ? "bg-slate-50 text-blue-600 border-slate-200" : "bg-slate-50 text-slate-500 border-slate-200"
                             )}>
                               {step.isLocked ? "Locked" : "Unlocked"}
                             </Badge>
@@ -15934,7 +16736,7 @@ export default function App() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-9 w-9 rounded-xl hover:bg-blue-50 hover:text-blue-600 text-slate-400" 
+                          className="h-9 w-9 rounded-xl hover:bg-slate-50 hover:text-blue-600 text-slate-400" 
                           title="Edit Step"
                           onClick={() => {
                             setSelectedActionStep(step);
@@ -15973,27 +16775,27 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-6 bg-primary/5 rounded-3xl border border-primary/10">
+            <div className="p-6 bg-primary/5 dark:bg-zinc-950 rounded-3xl border border-primary/10 dark:border-zinc-800">
               <h4 className="text-sm font-bold text-primary uppercase tracking-widest mb-3 flex items-center gap-2">
                 <Info className="h-4 w-4" />
                 Description
               </h4>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+              <p className="text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
                 {selectedAction?.actionDescription}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Created By</span>
+              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Created By</span>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
                     <UserCircle className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-slate-200">
+                  <div className="font-bold text-slate-700 dark:text-zinc-100">
                     {getProp(selectedAction, 'createdByName') || getUserNameById(getProp(selectedAction, 'createdBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">
+                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
                     {(() => {
                       const cOn = getProp(selectedAction, 'createdOn') || getProp(selectedAction, 'createdDate') || getProp(selectedAction, 'createdTime') || getProp(selectedAction, 'createdAt');
                       return cOn ? format(new Date(cOn), 'PP') : 'N/A';
@@ -16001,16 +16803,16 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="p-5 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Modified</span>
+              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Last Modified</span>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
                     <Settings2 className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-slate-200">
+                  <div className="font-bold text-slate-700 dark:text-zinc-100">
                     {getProp(selectedAction, 'lastModifiedByName') || getUserNameById(getProp(selectedAction, 'lastModifiedBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 ml-auto">
+                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
                     {(() => {
                       const mOn = getProp(selectedAction, 'lastModifiedOn') || getProp(selectedAction, 'lastModifiedTime') || getProp(selectedAction, 'lastModifiedDate') || getProp(selectedAction, 'updatedAt');
                       return mOn ? format(new Date(mOn), 'PP') : 'N/A';
@@ -16021,8 +16823,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="p-5 border-t bg-white dark:bg-slate-900 shrink-0">
-             <div className="flex justify-end gap-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">
+          <div className="p-5 border-t bg-white dark:bg-zinc-950 shrink-0">
+             <div className="flex justify-end gap-3 text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-widest">
                Step configuration for automated sequence
              </div>
           </div>
@@ -16030,61 +16832,104 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+          <DialogHeader className="mb-0">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
                 <Zap className="h-6 w-6 text-primary shrink-0" />
-                Create New Action
+                Add Action
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium">Define a new automated sequence</DialogDescription>
+              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Define a new automated sequence</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="space-y-4 pt-[3px] pb-4">
+          <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="grid gap-2">
-              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 text-slate-400" />
+              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Action Name
               </Label>
-              <Input 
-                id="actionName" 
+              <Input autoComplete="off" id="actionName" 
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-none h-11 border-slate-200"
+                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-slate-400" />
+              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Description
               </Label>
-              <Input 
-                id="description" 
+              <Input autoComplete="off" id="description" 
                 placeholder="Describe what this action does..." 
                 value={actionForm.description}
                 onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-none h-11 border-slate-200"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
+                Scheduled Execution Time
+              </Label>
+              <Input autoComplete="off" id="actionTime" type="time"
+                value={formatTimeSpanForInput(actionForm.time)}
+                onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
+                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2.5">
+                <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                <div>
+                  <Label htmlFor="isPrivate" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Private Action</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Restricted to current user</p>
+                </div>
+              </div>
+              <Switch
+                id="isPrivate"
+                checked={actionForm.isPrivate}
+                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isPrivate: checked }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2.5">
+                <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                <div>
+                  <Label htmlFor="isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
+                </div>
+              </div>
+              <Switch
+                id="isRecurring"
+                checked={actionForm.isRecurring}
+                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isRecurring: checked }))}
               />
             </div>
           </div>
           <DialogFooter>
             <Button 
-              className="bg-primary text-white px-4 font-normal flex items-center justify-center gap-2"
+              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 px-4 font-medium flex items-center justify-center gap-2"
               onClick={() => {
                 if (!actionForm.actionName) return;
                 requestAuth(async () => {
                   try {
+                    const payload = { 
+                      ActionName: actionForm.actionName, 
+                      Description: actionForm.description || '',
+                      IsPrivate: actionForm.isPrivate,
+                      IsRecurring: actionForm.isRecurring,
+                      Time: formatTimeSpanForPayload(actionForm.time)
+                    };
                     await apiFetch('/Action/CreateAction', { 
                       method: 'POST', 
-                      body: JSON.stringify({ 
-                        ActionName: actionForm.actionName, 
-                        Description: actionForm.description || '' 
-                      }) 
+                      body: JSON.stringify(payload) 
                     });
                     toast.success('Action created successfully!');
                     setIsAddActionOpen(false);
-                    setActionForm({ actionName: '', description: '', personId: 1 });
+                    setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
                   } catch (err: any) {
                     toast.error(`Error creating action: ${err.message}`);
                   }
@@ -16092,68 +16937,122 @@ export default function App() {
               }}
             >
               <PlusCircle className="h-5 w-5" />
-              Create Action
+              Add Action
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+          <DialogHeader className="mb-0">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
                 <Edit3 className="h-6 w-6 text-primary shrink-0" />
                 Edit Action
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium">Update action details</DialogDescription>
+              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Update action details</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="space-y-4 pt-[3px] pb-4">
+          <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="grid gap-2">
-              <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Action Name</Label>
-              <Input 
-                id="edit-actionName" 
+              <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
+                Action Name
+              </Label>
+              <Input autoComplete="off" id="edit-actionName" 
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200"
+                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Description</Label>
-              <Input 
-                id="edit-description" 
+              <Label htmlFor="edit-description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
+                Description
+              </Label>
+              <Input autoComplete="off" id="edit-description" 
                 placeholder="Describe what this action does..." 
                 value={actionForm.description}
                 onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
+                Scheduled Execution Time
+              </Label>
+              <Input autoComplete="off" id="edit-actionTime" type="time"
+                value={formatTimeSpanForInput(actionForm.time)}
+                onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
+                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2.5">
+                <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                <div>
+                  <Label htmlFor="edit-isPrivate" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Private Action</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Restricted to current user</p>
+                </div>
+              </div>
+              <Switch
+                id="edit-isPrivate"
+                checked={actionForm.isPrivate}
+                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isPrivate: checked }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2.5">
+                <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                <div>
+                  <Label htmlFor="edit-isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
+                </div>
+              </div>
+              <Switch
+                id="edit-isRecurring"
+                checked={actionForm.isRecurring}
+                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isRecurring: checked }))}
               />
             </div>
           </div>
           <DialogFooter>
             <Button 
-              className="bg-primary text-primary-foreground px-4 font-normal flex items-center justify-center gap-2"
+              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 px-4 font-medium flex items-center justify-center gap-2"
               onClick={() => {
                 if (selectedAction) {
                   requestAuth(async () => {
                     try {
+                      const payload = { 
+                        Id: Number(selectedAction.id), 
+                        ActionName: actionForm.actionName, 
+                        Description: actionForm.description || '',
+                        IsPrivate: actionForm.isPrivate,
+                        IsRecurring: actionForm.isRecurring,
+                        Time: formatTimeSpanForPayload(actionForm.time)
+                      };
                       await apiFetch('/Action/UpdateAction', { 
                         method: 'PUT', 
-                        body: JSON.stringify({ 
-                          Id: Number(selectedAction.id), 
-                          ActionName: actionForm.actionName, 
-                          Description: actionForm.description || '' 
-                        }) 
+                        body: JSON.stringify(payload) 
                       });
-                      setActions(prev => prev.map(a => a.id === selectedAction.id ? {
-                        ...a,
+                      const updatedAction = {
+                        ...selectedAction,
                         actionName: actionForm.actionName,
                         actionDescription: actionForm.description,
+                        isPrivate: actionForm.isPrivate,
+                        isRecurring: actionForm.isRecurring,
+                        time: formatTimeSpanForPayload(actionForm.time),
                         lastModifiedOn: new Date().toISOString()
-                      } : a));
+                      };
+                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
+                      setSelectedAction(updatedAction);
                       setIsEditActionOpen(false);
-                      setActionForm({ actionName: '', description: '', personId: 1 });
+                      setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
                       toast.success('Action updated successfully!');
                     } catch (err: any) {
                       toast.error(`Error updating action: ${err.message}`);
@@ -16190,7 +17089,7 @@ export default function App() {
                   value={actionStepForm.facilityType.toString()} 
                   onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
                 >
-                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
                     <SelectValue placeholder="Select type">
                       {(appNamesDetailList?.facilityType || []).find(ft => ft.id.toString() === actionStepForm.facilityType.toString())?.name || "Select type"}
                     </SelectValue>
@@ -16209,7 +17108,7 @@ export default function App() {
                   value={actionStepForm.facilityTypeId.toString()} 
                   onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
                 >
-                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
                     <SelectValue placeholder="Select device">
                       {(() => {
                         const idStr = actionStepForm.facilityTypeId?.toString();
@@ -16256,7 +17155,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-[1.5rem] border border-slate-100 dark:border-slate-800 space-y-5">
+            <div className="p-5 bg-slate-50 dark:bg-zinc-900 rounded-[1.5rem] border border-slate-100 dark:border-zinc-800 space-y-5">
               {actionStepForm.facilityType === FacilityType.Light && (
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
@@ -16278,7 +17177,7 @@ export default function App() {
                 <div className="flex items-center justify-between p-1">
                   <div className="space-y-0.5">
                     <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Engage physical lock</p>
+                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Engage physical lock</p>
                   </div>
                   <Switch 
                     checked={actionStepForm.isLocked} 
@@ -16291,7 +17190,7 @@ export default function App() {
                 <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
                   <div className="space-y-0.5">
                     <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Physical orientation</p>
+                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Physical orientation</p>
                   </div>
                   <Switch 
                     checked={actionStepForm.isOpen} 
@@ -16306,7 +17205,7 @@ export default function App() {
               )}>
                 <div className="space-y-0.5">
                   <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
-                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Overall operational state</p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Overall operational state</p>
                 </div>
                 <Switch 
                   checked={actionStepForm.isActive} 
@@ -16317,7 +17216,7 @@ export default function App() {
           </div>
           <DialogFooter className="p-6 flex items-center justify-center">
             <Button 
-              className="flex items-center justify-center gap-2 px-4 font-normal"
+              className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
               onClick={() => {
                 if (selectedAction) {
                   requestAuth(async () => {
@@ -16389,7 +17288,7 @@ export default function App() {
                   value={actionStepForm.facilityType.toString()} 
                   onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
                 >
-                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
                     <SelectValue placeholder="Select type">
                       {(appNamesDetailList?.facilityType || []).find(ft => ft.id.toString() === actionStepForm.facilityType.toString())?.name || "Select type"}
                     </SelectValue>
@@ -16408,7 +17307,7 @@ export default function App() {
                   value={actionStepForm.facilityTypeId.toString()} 
                   onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
                 >
-                  <SelectTrigger className="rounded-2xl border-slate-200 h-11">
+                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
                     <SelectValue placeholder="Select device">
                       {(() => {
                         const idStr = actionStepForm.facilityTypeId?.toString();
@@ -16455,7 +17354,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 rounded-[1.5rem] border border-slate-100 dark:border-slate-800 space-y-5">
+            <div className="p-5 bg-slate-50 dark:bg-zinc-900 rounded-[1.5rem] border border-slate-100 dark:border-zinc-800 space-y-5">
               {actionStepForm.facilityType === FacilityType.Light && (
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
@@ -16477,7 +17376,7 @@ export default function App() {
                 <div className="flex items-center justify-between p-1">
                   <div className="space-y-0.5">
                     <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Engage physical lock</p>
+                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Engage physical lock</p>
                   </div>
                   <Switch 
                     checked={actionStepForm.isLocked} 
@@ -16490,7 +17389,7 @@ export default function App() {
                 <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
                   <div className="space-y-0.5">
                     <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Physical orientation</p>
+                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Physical orientation</p>
                   </div>
                   <Switch 
                     checked={actionStepForm.isOpen} 
@@ -16505,7 +17404,7 @@ export default function App() {
               )}>
                 <div className="space-y-0.5">
                   <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
-                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">Overall operational state</p>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Overall operational state</p>
                 </div>
                 <Switch 
                   checked={actionStepForm.isActive} 
@@ -16516,7 +17415,7 @@ export default function App() {
           </div>
           <DialogFooter className="p-6 flex items-center justify-center">
             <Button 
-              className="flex items-center justify-center gap-2 px-4 font-normal"
+              className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
               onClick={() => {
                 if (selectedAction && selectedActionStep) {
                   requestAuth(async () => {
@@ -16569,39 +17468,39 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-[95vw] w-[95vw] h-[92vh] sm:max-w-[95vw] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+        <DialogContent showCloseButton={false} className="max-w-[95vw] w-[95vw] h-[92vh] sm:max-w-[95vw] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black dark:border-zinc-800 shadow-2xl bg-white dark:bg-zinc-950 dark:text-zinc-100">
           {chats.length === 0 ? (
             <div className="flex flex-row w-full h-full relative">
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="absolute top-4 right-4 h-8 w-8 text-slate-500 hover:text-black z-50 rounded-full" 
+                className="absolute top-4 right-4 h-8 w-8 text-slate-500 hover:text-black dark:text-zinc-100 dark:hover:text-white z-50 rounded-full" 
                 onClick={() => setIsChatModalOpen(false)}
               >
                 <X className="h-4 w-4" />
               </Button>
-              <div className="w-[40%] bg-slate-50 border-r-[1px] border-slate-200 flex flex-col items-center justify-center p-8 text-center shrink-0 relative z-10">
+              <div className="w-[40%] bg-slate-50 dark:bg-zinc-950 border-r-[1px] border-slate-200 dark:border-zinc-800 flex flex-col items-center justify-center p-8 text-center shrink-0 relative z-10">
                 <div className="mb-8 flex items-center justify-center">
-                  <MessageSquare className="h-24 w-24 text-slate-300" />
+                  <MessageSquare className="h-24 w-24 text-slate-300 dark:text-zinc-700" />
                 </div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2 text-black">The HanssonHub Chats</h2>
-                <p className="text-sm text-slate-500 max-w-xs">Start connecting with your peers. Pick a contact to begin a conversation.</p>
+                <h2 className="text-2xl font-bold tracking-tight mb-2 text-black dark:text-zinc-100 dark:text-white">The HanssonHub Chats</h2>
+                <p className="text-sm text-slate-500 dark:text-zinc-400 max-w-xs">Start connecting with your peers. Pick a contact to begin a conversation.</p>
               </div>
               
-              <div className="flex-1 flex items-center bg-white p-8 relative overflow-hidden">
+              <div className="flex-1 flex items-center bg-white dark:bg-zinc-950 p-8 relative overflow-hidden">
                 <div className="w-full">
                   <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                     {allUsers.filter(u => u.id !== userProfile.id).map(user => (
                       <button 
                         key={user.id}
                         onClick={() => startDirectChat(user)}
-                        className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 rounded-3xl shadow-sm border border-slate-200 hover:shadow-md hover:border-primary transition-all shrink-0 group"
+                        className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 dark:bg-zinc-950 rounded-3xl shadow-sm border border-slate-200 dark:border-zinc-800 hover:shadow-md hover:border-primary transition-all shrink-0 group"
                       >
-                        <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white overflow-hidden bg-slate-100 group-hover:scale-105 transition-transform">
+                        <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white dark:border-zinc-800 overflow-hidden bg-slate-100 dark:bg-zinc-800 group-hover:scale-105 transition-transform">
                           <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                         </div>
-                        <span className="font-semibold text-lg text-slate-800">{user.getPersonDetailsDto.firstName}</span>
-                        <span className="text-xs text-slate-500 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
+                        <span className="font-semibold text-lg text-slate-800 dark:text-zinc-100">{user.getPersonDetailsDto.firstName}</span>
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
                       </button>
                     ))}
                   </div>
@@ -16611,19 +17510,19 @@ export default function App() {
           ) : (
             <>
               {/* WhatsApp Style Sidebar - List View (30% width if call history collapsed, 25% if open) */}
-              <div className={cn("bg-[#ffffff] flex flex-col shrink-0 relative z-10 border-r border-slate-200 transition-all duration-300", isChatCallHistoryOpen ? "w-[25%]" : "w-[30%]")}>
-            <div className="p-5 bg-[#f0f2f5] shrink-0 border-b space-y-4 w-full" style={{ borderColor: "#060101" }}>
+              <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", isChatCallHistoryOpen ? "w-[25%]" : "w-[30%]")}>
+            <div className="p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shadow-inner overflow-hidden border-2 border-white shrink-0">
+                  <div className="h-10 w-10 rounded-full bg-slate-200 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300 shadow-inner overflow-hidden border-2 border-white dark:border-zinc-700 shrink-0">
                     {userProfile?.getPersonDetailsDto?.imageUrl ? (
                       <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
-                      <UserIcon className="h-5 w-5 text-slate-500" />
+                      <UserIcon className="h-5 w-5 text-slate-500 dark:text-zinc-400" />
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold tracking-tight text-[#111b21]">Chats</h2>
+                    <h2 className="text-lg font-bold tracking-tight text-[#111b21] dark:text-zinc-100">Chats</h2>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -16631,7 +17530,7 @@ export default function App() {
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="h-9 w-9 rounded-full text-[#54656f] hover:bg-slate-200" 
+                    className="h-9 w-9 rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-800" 
                     onClick={() => {
                       fetchCallLogs(true);
                       setIsCallLogsOpen(true);
@@ -16646,20 +17545,20 @@ export default function App() {
                       <Button 
                         variant="ghost" 
                         size="icon" 
-                        className="h-9 w-9 rounded-full text-[#54656f] hover:bg-slate-200" 
+                        className="h-9 w-9 rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-800" 
                         title="New Chat / Group"
                       >
                         <PlusCircle className="h-5 w-5" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-200">
+                    <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-200 dark:border-zinc-800 dark:bg-zinc-950">
                       <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}>
-                        <UserPlus className="mr-3 h-4 w-4 text-[#54656f]" />
-                        <span className="font-medium text-[#111b21]">Start a chat</span>
+                        <UserPlus className="mr-3 h-4 w-4 text-[#54656f] dark:text-zinc-400" />
+                        <span className="font-medium text-[#111b21] dark:text-zinc-100">Start a chat</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(true); setIsNewChatOpen(true); }}>
-                        <Users className="mr-3 h-4 w-4 text-[#54656f]" />
-                        <span className="font-medium text-[#111b21]">Create a group</span>
+                        <Users className="mr-3 h-4 w-4 text-[#54656f] dark:text-zinc-400" />
+                        <span className="font-medium text-[#111b21] dark:text-zinc-100">Create a group</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -16667,22 +17566,26 @@ export default function App() {
               </div>
 
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input 
-                  placeholder="Search chats" 
-                  className="pl-10 h-10 bg-inherit border-none rounded-none text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black"
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-zinc-500" />
+                <Input autoComplete="off" placeholder="Search chats" 
+                  className="pl-10 h-10 bg-inherit border-none rounded-none text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black dark:text-zinc-100 dark:text-white"
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
                 />
               </div>
             </div>
 
-            <div className="flex-1 bg-white overflow-y-auto no-scrollbar">
-              <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
-                <div className="divide-y divide-slate-50 w-full">
-                  {(chats || [])
-                    .filter(c => !chatSearchQuery || (c.name || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
-                    .map((chat) => {
+            <div className="flex-1 bg-white dark:bg-zinc-950 overflow-y-auto no-scrollbar">
+              <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+                <div className="divide-y divide-slate-100 dark:divide-zinc-800/60 w-full">
+                  {isChatsLoading || (!hasLoadedChats && chats.length === 0) ? (
+                    <div className="p-6">
+                      <ThreeDotsLoading label="Loading conversations..." />
+                    </div>
+                  ) : (
+                    (chats || [])
+                      .filter(c => !chatSearchQuery || (c.name || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
+                      .map((chat) => {
                     const chatMsgs = chatMessages.filter(m => m.chatId === chat.id);
                     const sortedChatMsgs = [...chatMsgs].sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime());
                     const lastMsg = sortedChatMsgs.length > 0 ? sortedChatMsgs[sortedChatMsgs.length - 1] : chat.lastMessage;
@@ -16701,14 +17604,14 @@ export default function App() {
                           setIsChatSearchVisible(false);
                         }}
                         className={cn(
-                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] transition-all text-left group relative border-l-4 border-transparent",
-                          activeChatId === chat.id && "bg-[#f0f2f5] border-primary"
+                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] dark:hover:bg-zinc-800/60 transition-all text-left group relative border-l-4 border-transparent",
+                          activeChatId === chat.id && "bg-[#f0f2f5] dark:bg-zinc-800/80 border-primary"
                         )}
                       >
                         <div className="relative shrink-0 flex items-center">
                           <div className={cn(
-                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100 text-lg font-bold text-slate-600",
-                            activeChatId === chat.id ? "bg-primary/10" : "bg-slate-50"
+                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100 dark:border-zinc-800 text-lg font-bold text-slate-600 dark:text-zinc-300",
+                            activeChatId === chat.id ? "bg-primary/10 dark:bg-primary/20" : "bg-slate-50 dark:bg-zinc-950"
                           )}>
                             {(() => {
                               const displayImageUrl = getChatDisplayImageUrl(chat);
@@ -16717,16 +17620,16 @@ export default function App() {
                               if (displayImageUrl) {
                                 return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(chat)} className="h-full w-full object-cover" />;
                               }
-                              return chat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <span>{displayInitial}</span>;
+                              return chat.isGroup ? <Users className="h-6 w-6 text-slate-400 dark:text-zinc-500" /> : <span>{displayInitial}</span>;
                             })()}
                           </div>
                         </div>
-                        <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 group-last:border-none h-full">
+                        <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 dark:border-zinc-800/60 group-last:border-none h-full">
                           <div className="flex justify-between items-center mb-0.5">
-                            <span className="font-semibold text-[16px] text-[#111b21] truncate">{getChatDisplayName(chat)}</span>
+                            <span className="font-semibold text-[16px] text-[#111b21] dark:text-zinc-100 truncate">{getChatDisplayName(chat)}</span>
                             <span className={cn(
                               "text-[11px] font-medium tracking-tight px-1",
-                              chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781]"
+                              chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781] dark:text-zinc-400"
                             )}>
                               {(() => {
                                 const timeStr = lastMsg?.sentAt || chat.createdAt;
@@ -16750,7 +17653,7 @@ export default function App() {
                                   {typers[0].name} {typers[0].action?.toLowerCase() === 'recording voice message' ? 'recording voice message...' : 'typing...'}
                                 </p>
                               ) : (
-                                <p className="text-[14px] text-[#667781] truncate leading-relaxed w-full">
+                                <p className="text-[14px] text-[#667781] dark:text-zinc-400 truncate leading-relaxed w-full">
                                   {(() => {
                                     if (!lastMsg) return 'No messages yet';
                                     if (lastMsg.isDeleted) return 'This message was deleted';
@@ -16784,24 +17687,25 @@ export default function App() {
                         </div>
                       </button>
                     );
-                  })}
+                  })
+                )}
                 </div>
               </PullToRefresh>
             </div>
           </div>
-          <div className="flex flex-col bg-slate-50 relative overflow-hidden flex-1 h-full transition-all duration-300">
+          <div className="flex flex-col bg-slate-50 dark:bg-[#0b141a] relative overflow-hidden flex-1 h-full transition-all duration-300">
             {isCallLogsOpen ? (
-              /* Call History Panel replacing right side - Clean Light Theme */
-              <div className="flex-1 flex flex-col bg-slate-50 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
+              /* Call History Panel replacing right side */
+              <div className="flex-1 flex flex-col bg-slate-50 dark:bg-zinc-950 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
                 {/* Header */}
-                <header className="px-5 py-3 border-b border-slate-200/80 flex items-center justify-between bg-white shrink-0 z-20 shadow-xs h-[60px]">
+                <header className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px]">
                   <div className="flex items-center gap-3 text-left">
-                    <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                    <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
                       <History className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-base font-bold text-slate-900 leading-none">Call History</h3>
-                      <p className="text-xs text-slate-500 font-normal mt-0.5">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-none">Call History</h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 font-normal mt-0.5">
                         View call logs, filter status, and redial
                       </p>
                     </div>
@@ -16811,7 +17715,7 @@ export default function App() {
                       variant="ghost" 
                       size="icon" 
                       onClick={() => fetchCallLogs(true)} 
-                      className="rounded-full h-9 w-9 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50"
+                      className="rounded-full h-9 w-9 text-slate-500 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
                       title="Refresh Call History"
                     >
                       <RefreshCw className={cn("h-4 w-4", isCallLogsLoading && "animate-spin text-emerald-600")} />
@@ -16820,7 +17724,7 @@ export default function App() {
                       variant="ghost" 
                       size="icon" 
                       onClick={() => setIsCallLogsOpen(false)} 
-                      className="rounded-full h-9 w-9 text-slate-500 hover:bg-rose-50 hover:text-rose-600 group/close"
+                      className="rounded-full h-9 w-9 text-slate-500 dark:text-zinc-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 group/close"
                       title="Close Call History"
                     >
                       <XCircle className="h-5 w-5 group-hover/close:text-rose-600 transition-colors" />
@@ -16829,7 +17733,7 @@ export default function App() {
                 </header>
 
                 {/* Filter and Sort Control Bar */}
-                <div className="px-5 py-3 border-b border-slate-200/80 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0 z-10">
+                <div className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-3 shrink-0 z-10">
                   {/* Filter Tabs / Pills */}
                   <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
                     {[
@@ -16845,16 +17749,16 @@ export default function App() {
                         className={cn(
                           "px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 border",
                           callLogFilter === tab.id
-                            ? "bg-slate-900 text-white border-slate-900 shadow-xs"
-                            : "bg-slate-100/80 text-slate-600 border-slate-200 hover:bg-slate-200/70"
+                            ? "bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-slate-900 dark:border-zinc-100 shadow-xs"
+                            : "bg-slate-100/80 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:bg-slate-200/70 dark:hover:bg-zinc-700"
                         )}
                       >
                         <span>{tab.label}</span>
                         <span className={cn(
                           "px-1.5 py-0.2 rounded-full text-[10px] font-bold",
                           callLogFilter === tab.id
-                            ? "bg-white/20 text-white"
-                            : "bg-slate-200/80 text-slate-600"
+                            ? "bg-white/20 dark:bg-black/20 text-white dark:text-zinc-900"
+                            : "bg-slate-200/80 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300"
                         )}>
                           {tab.count}
                         </span>
@@ -16864,12 +17768,12 @@ export default function App() {
 
                   {/* Sort Selector with Styled Dropdown */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 flex items-center gap-1">
                       <ArrowDownUp className="h-3 w-3" /> Sort:
                     </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-8 border-slate-200/90 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg px-2.5 flex items-center gap-1.5 shadow-2xs">
+                        <Button variant="outline" size="sm" className="h-8 border-slate-200/90 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold rounded-lg px-2.5 flex items-center gap-1.5 shadow-2xs">
                           <span>
                             {callLogSort === 'newest' && 'Newest First'}
                             {callLogSort === 'oldest' && 'Oldest First'}
@@ -16880,25 +17784,25 @@ export default function App() {
                           <ChevronDown className="h-3.5 w-3.5 text-slate-400 ml-0.5" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-52 bg-white border border-slate-200 shadow-md rounded-xl p-1 z-50">
+                      <DropdownMenuContent align="end" className="w-52 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-md rounded-xl p-1 z-50">
                         <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">Sort Options</DropdownMenuLabel>
-                        <DropdownMenuSeparator className="bg-slate-100" />
+                        <DropdownMenuSeparator className="bg-slate-100 dark:bg-zinc-800" />
                         <DropdownMenuRadioGroup value={callLogSort} onValueChange={(val) => setCallLogSort(val as any)}>
-                          <DropdownMenuRadioItem value="newest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                          <DropdownMenuRadioItem value="newest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
                             Newest First
                           </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="oldest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                          <DropdownMenuRadioItem value="oldest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
                             Oldest First
                           </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="duration" className="text-xs font-medium cursor-pointer rounded-lg py-1.5">
+                          <DropdownMenuRadioItem value="duration" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
                             Longest Duration
                           </DropdownMenuRadioItem>
-                          <DropdownMenuSeparator className="bg-slate-100" />
-                          <DropdownMenuRadioItem value="type_video" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5">
+                          <DropdownMenuSeparator className="bg-slate-100 dark:bg-zinc-800" />
+                          <DropdownMenuRadioItem value="type_video" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
                             <Video className="h-3.5 w-3.5 text-emerald-600" />
                             <span>Video Calls First</span>
                           </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="type_voice" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5">
+                          <DropdownMenuRadioItem value="type_voice" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
                             <Phone className="h-3.5 w-3.5 text-blue-600" />
                             <span>Voice Calls First</span>
                           </DropdownMenuRadioItem>
@@ -16909,7 +17813,7 @@ export default function App() {
                 </div>
 
                 {/* Body Content with PullToRefresh */}
-                <div className="flex-1 overflow-y-auto no-scrollbar relative bg-slate-50" onScroll={handleCallLogsScroll}>
+                <div className="flex-1 overflow-y-auto no-scrollbar relative bg-slate-50 dark:bg-zinc-950" onScroll={handleCallLogsScroll}>
                   <PullToRefresh
                     onRefresh={() => fetchCallLogs(true)}
                     pullingContent={
@@ -16925,17 +17829,14 @@ export default function App() {
                   >
                     <div className="max-w-2xl mx-auto p-5 space-y-3 min-h-full">
                       {isCallLogsLoading ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
-                          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-                          <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Loading Call Logs...</span>
-                        </div>
+                        <ThreeDotsLoading label="Loading Call Logs..." />
                       ) : filteredAndSortedCallLogs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-3 bg-white rounded-2xl border border-slate-200/80 p-8 shadow-xs text-center">
-                          <div className="h-14 w-14 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center py-20 gap-3 bg-white dark:bg-zinc-950 rounded-2xl border border-slate-200/80 dark:border-zinc-800 p-8 shadow-xs text-center">
+                          <div className="h-14 w-14 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400">
                             <Phone className="h-7 w-7" />
                           </div>
-                          <span className="text-sm font-bold text-slate-700">No Call Logs Found</span>
-                          <p className="text-xs text-slate-400 max-w-xs">
+                          <span className="text-sm font-bold text-slate-700 dark:text-zinc-200">No Call Logs Found</span>
+                          <p className="text-xs text-slate-400 dark:text-zinc-400 max-w-xs">
                             {callLogFilter === 'all'
                               ? "Your voice and video call history will appear here."
                               : `No ${callLogFilter} call logs match your current filter.`}
@@ -16960,11 +17861,11 @@ export default function App() {
                             return (
                               <div 
                                 key={log.id ? `call-log-${log.id}` : `call-log-${log.callId || index}-${log.startedAt}-${index}`} 
-                                className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 bg-white hover:border-emerald-200 transition-all shadow-xs hover:shadow-md group text-left"
+                                className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:border-emerald-200 dark:hover:border-emerald-800 transition-all shadow-xs hover:shadow-md group text-left"
                               >
                                 <div className="flex items-center gap-3.5">
                                   {/* Chat Avatar */}
-                                  <div className="h-12 w-12 rounded-full bg-slate-100 border border-slate-200/60 flex items-center justify-center text-slate-600 font-bold overflow-hidden shadow-xs shrink-0">
+                                  <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200/60 dark:border-zinc-700 flex items-center justify-center text-slate-600 dark:text-zinc-300 font-bold overflow-hidden shadow-xs shrink-0">
                                     {logChat ? (
                                       (() => {
                                         const displayImageUrl = getChatDisplayImageUrl(logChat);
@@ -16981,10 +17882,10 @@ export default function App() {
 
                                   {/* Log Details */}
                                   <div className="flex flex-col">
-                                    <h4 className="font-bold text-sm text-slate-900">
+                                    <h4 className="font-bold text-sm text-slate-900 dark:text-zinc-100">
                                       {logChat ? getChatDisplayName(logChat) : `Call log #${log.id}`}
                                     </h4>
-                                    <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 flex-wrap">
+                                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-0.5 flex-wrap">
                                       {userStatus === 'ringing' ? (
                                         <span className="text-emerald-500 font-bold flex items-center gap-1 animate-pulse">
                                           <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 animate-ping" /> Active (Ringing)
@@ -16994,31 +17895,31 @@ export default function App() {
                                           <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" /> Active (Connected)
                                         </span>
                                       ) : userStatus === 'missed' ? (
-                                        <span className="text-rose-600 font-semibold flex items-center gap-1 bg-rose-50 px-1.5 py-0.5 rounded-sm border border-rose-100">
+                                        <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1 bg-rose-50 dark:bg-rose-950/50 px-1.5 py-0.5 rounded-sm border border-rose-100 dark:border-rose-900">
                                           <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
                                         </span>
                                       ) : userStatus === 'rejected' ? (
-                                        <span className="text-amber-600 font-semibold flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded-sm border border-amber-100">
+                                        <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded-sm border border-amber-100 dark:border-amber-900">
                                           <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
                                         </span>
                                       ) : userStatus === 'received' ? (
-                                        <span className="text-emerald-600 font-medium flex items-center gap-1">
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
                                           <PhoneIncoming className="h-3 w-3 text-emerald-500" /> Received
                                         </span>
                                       ) : (
-                                        <span className="text-blue-600 font-medium flex items-center gap-1">
+                                        <span className="text-blue-600 dark:text-zinc-300 font-medium flex items-center gap-1">
                                           <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
                                         </span>
                                       )}
                                       
-                                      <span className="text-slate-300">•</span>
-                                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-500">
+                                      <span className="text-slate-300 dark:text-zinc-700">•</span>
+                                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-zinc-400">
                                         <CalendarDays className="h-3 w-3 text-slate-400" />
                                         {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       </span>
 
-                                      <span className="text-slate-300">•</span>
-                                      <span className="flex items-center gap-1 font-mono text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-sm border border-emerald-100 font-bold" title="Duration">
+                                      <span className="text-slate-300 dark:text-zinc-700">•</span>
+                                      <span className="flex items-center gap-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.2 rounded-sm border border-emerald-100 dark:border-emerald-800 font-bold" title="Duration">
                                         <Clock className="h-3 w-3 text-emerald-600" />
                                         {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
                                           ? "0s"
@@ -17027,33 +17928,50 @@ export default function App() {
                                             : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
                                       </span>
                                     </div>
-                                    {logChat?.isGroup && log.participants && log.participants.length > 0 && log.callerPersonId === userProfile?.id && (
-                                      <div className="mt-2 text-[10px] text-slate-500 font-medium flex flex-wrap gap-1.5">
-                                        {log.participants.filter((p: any) => p.personId !== userProfile?.id).map((p: any, pIdx: number) => {
-                                          let statusColor = "text-slate-500 bg-slate-100";
-                                          let statusText = "Ringing";
-                                          if (p.status === CallParticipantStatus.Connected) {
-                                            statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
-                                            statusText = "Joined";
-                                          } else if (p.status === CallParticipantStatus.Declined) {
-                                            statusColor = "text-rose-700 bg-rose-50 border-rose-200";
-                                            statusText = "Declined";
-                                          } else if (p.status === CallParticipantStatus.Left) {
-                                            statusColor = "text-slate-600 bg-slate-100";
-                                            statusText = "Left";
-                                          } else if (p.status === CallParticipantStatus.Missed) {
-                                            statusColor = "text-rose-700 bg-rose-50 border-rose-200";
-                                            statusText = "Missed";
-                                          }
-                                          return (
-                                            <span key={p.personId ? `part-${p.personId}` : `part-${pIdx}`} className="flex items-center gap-1 border rounded-md px-1.5 py-0.5 bg-slate-50">
-                                              <span className="font-semibold">{p.fullName || 'User'}</span>
-                                              <span className={cn("text-[9px] px-1 py-0.2 rounded-sm border font-bold", statusColor)}>{statusText}</span>
-                                            </span>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const isGroup = !!logChat?.isGroup || !!(log as any).isGroupCall || !!(log as any).IsGroupCall || ((log.participants || []).length > 2);
+                                      const rawCallerId = log.callerPersonId ?? (log as any).CallerPersonId;
+                                      const rawIsIncoming = log.isIncoming ?? (log as any).IsIncoming;
+                                      const isCaller = (rawCallerId !== undefined && rawCallerId !== null && Number(rawCallerId) === Number(userProfile?.id)) || rawIsIncoming === false;
+
+                                      if (isGroup && isCaller && log.participants && log.participants.length > 0) {
+                                        const otherParticipants = log.participants.filter((p: any) => Number(p.personId ?? p.PersonId) !== Number(userProfile?.id));
+                                        if (otherParticipants.length === 0) return null;
+                                        return (
+                                          <div className="mt-2 text-[10px] text-slate-500 dark:text-zinc-400 font-medium flex flex-wrap gap-1.5">
+                                            {otherParticipants.map((p: any, pIdx: number) => {
+                                              const pStatus = p.status ?? p.Status;
+                                              let statusColor = "text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700";
+                                              let statusText = "Ringing";
+                                              if (pStatus === CallParticipantStatus.Connected || pStatus === 1 || pStatus === '1' || pStatus === 'Connected') {
+                                                statusColor = "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800";
+                                                statusText = "Joined";
+                                              } else if (pStatus === CallParticipantStatus.Declined || pStatus === 2 || pStatus === '2' || pStatus === 'Declined') {
+                                                statusColor = "text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800";
+                                                statusText = "Declined";
+                                              } else if (pStatus === CallParticipantStatus.Left || pStatus === 3 || pStatus === '3' || pStatus === 'Left') {
+                                                statusColor = "text-slate-600 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700";
+                                                statusText = "Left";
+                                              } else if (pStatus === CallParticipantStatus.Missed || pStatus === 4 || pStatus === '4' || pStatus === 'Missed') {
+                                                statusColor = "text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800";
+                                                statusText = "Missed";
+                                              }
+                                              const pid = p.personId ?? p.PersonId;
+                                              const matchedUser = allUsers.find(u => Number(u.id) === Number(pid));
+                                              const pName = p.fullName || p.name || (matchedUser?.getPersonDetailsDto?.firstName ? `${matchedUser.getPersonDetailsDto.firstName} ${matchedUser.getPersonDetailsDto.lastName || ''}`.trim() : null) || 'Participant';
+
+                                              return (
+                                                <span key={pid ? `part-${pid}` : `part-${pIdx}`} className="flex items-center gap-1 border rounded-md px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 shadow-2xs">
+                                                  <span className="font-semibold text-slate-800 dark:text-zinc-200">{pName}</span>
+                                                  <span className={cn("text-[9px] px-1 py-0.2 rounded-sm border font-bold", statusColor)}>{statusText}</span>
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
                                   </div>
                                 </div>
 
@@ -17061,7 +17979,7 @@ export default function App() {
                                 <div className="flex items-center gap-3">
                                   <Badge className={cn(
                                     "border text-[10px] font-extrabold uppercase tracking-wider py-0.5 px-2 rounded-md",
-                                    log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                    log.type === CallType.Video ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800" : "bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-800"
                                   )}>
                                     {log.type === CallType.Video ? "Video" : "Voice"}
                                   </Badge>
@@ -17084,7 +18002,7 @@ export default function App() {
                                       onClick={() => {
                                         handleStartCall(log.chatId, log.type);
                                       }}
-                                      className="h-9 w-9 rounded-full bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 transition-colors shadow-xs shrink-0"
+                                      className="h-9 w-9 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 text-slate-600 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors shadow-xs shrink-0"
                                       title="Redial"
                                     >
                                       {log.type === CallType.Video ? <Video className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
@@ -17117,7 +18035,7 @@ export default function App() {
                   const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
 
                   return (
-                    <header className="px-5 py-3 border-b flex items-center justify-between bg-[#f0f2f5] shrink-0 z-20 shadow-sm h-[60px]">
+                    <header className="px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
                       <div 
                         className={cn(
                           "flex items-center gap-3",
@@ -17137,7 +18055,7 @@ export default function App() {
                         }}
                       >
                         <div className="relative">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200 text-lg font-bold">
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200 dark:border-zinc-700 text-lg font-bold">
                             {(() => {
                               const displayImageUrl = getChatDisplayImageUrl(chat);
                               const displayInitial = getChatDisplayInitial(chat);
@@ -17150,7 +18068,7 @@ export default function App() {
                           </div>
                         </div>
                         <div>
-                          <h3 className="text-[16px] font-bold text-[#111b21] truncate max-w-[200px] hover:underline decoration-[#111b21]">
+                          <h3 className="text-[16px] font-bold text-[#111b21] dark:text-zinc-100 truncate max-w-[200px] hover:underline decoration-[#111b21] dark:decoration-zinc-100">
                             {getChatDisplayName(chat)}
                           </h3>
                           <div className="flex items-center gap-1.5 ">
@@ -17162,7 +18080,7 @@ export default function App() {
                                   ? 'is recording a voice message...' 
                                   : 'is typing...';
                                 return (
-                                  <span className="text-[12px] text-emerald-600 font-bold leading-none flex items-center gap-1 animate-pulse">
+                                  <span className="text-[12px] text-emerald-600 dark:text-emerald-400 font-bold leading-none flex items-center gap-1 animate-pulse">
                                     <span className="relative flex h-1.5 w-1.5">
                                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
@@ -17174,13 +18092,13 @@ export default function App() {
                               if (chat.isGroup) {
                                 const memberNames = getGroupMemberNames(chat);
                                 return (
-                                  <span className="text-[12px] text-[#667781] font-medium leading-none truncate max-w-[280px]">
+                                  <span className="text-[12px] text-[#667781] dark:text-zinc-400 font-medium leading-none truncate max-w-[280px]">
                                     {memberNames || 'No members'}
                                   </span>
                                 );
                               }
                               return (
-                                <span className="text-[12px] text-[#667781] font-medium leading-none">
+                                <span className="text-[12px] text-[#667781] dark:text-zinc-400 font-medium leading-none">
                                   {isOnline ? 'Online • Active now' : 'Offline'}
                                 </span>
                               );
@@ -17194,35 +18112,35 @@ export default function App() {
                           variant="ghost" 
                           size="icon" 
                           className={cn(
-                            "rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50 transition-colors",
-                            isChatCallHistoryOpen && "bg-emerald-100 text-emerald-700"
+                            "rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors",
+                            isChatCallHistoryOpen && "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400"
                           )}
                           onClick={() => setIsChatCallHistoryOpen(prev => !prev)}
                           title={isChatCallHistoryOpen ? "Collapse Chat Call History" : "Show Chat Call History"}
                         >
-                          <History className="h-5 w-5 text-emerald-600" />
+                          <History className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                         </Button>
 
                         {/* Video Call Button */}
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
+                          className="rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80"
                           onClick={() => handleStartCall(chat.id, CallType.Video)}
                           title="Start Video Call"
                         >
-                          <Video className="h-5 w-5 text-emerald-600" />
+                          <Video className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                         </Button>
 
                         {/* Voice Call Button */}
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50"
+                          className="rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80"
                           onClick={() => handleStartCall(chat.id, CallType.Audio)}
                           title="Start Voice Call"
                         >
-                          <Phone className="h-5 w-5 text-emerald-600" />
+                          <Phone className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                         </Button>
                         {isChatSearchVisible && (
                           <motion.div 
@@ -17231,8 +18149,7 @@ export default function App() {
                             className="mr-2 relative"
                           >
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                            <Input 
-                              placeholder="Search messages..." 
+                            <Input autoComplete="off" placeholder="Search messages..." 
                               className="h-8 pl-8 text-xs bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
                               value={messageSearchQuery}
                               onChange={(e) => setMessageSearchQuery(e.target.value)}
@@ -17320,7 +18237,7 @@ export default function App() {
                   );
                 })()}
 
-                <div ref={chatBoxMessagesContainerRef} className="flex-1 relative overflow-hidden bg-[#efeae2]">
+                <div ref={chatBoxMessagesContainerRef} className="flex-1 relative overflow-hidden bg-[#efeae2] dark:bg-[#0b141a]">
                   {/* WhatsApp background pattern */}
                   <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat z-0" />
                   
@@ -17365,9 +18282,17 @@ export default function App() {
                             ? currentMessages[unreadStartIndex].id 
                             : null;
 
+                          if (isPagingLoading && currentMessages.length === 0) {
+                            return (
+                              <div className="py-12">
+                                <ThreeDotsLoading label="Loading messages..." />
+                              </div>
+                            );
+                          }
+
                           if (currentMessages.length === 0) {
                             return (
-                              <div className="flex flex-col items-center justify-center py-20 text-[#667781]">
+                              <div className="flex flex-col items-center justify-center py-20 text-[#667781] dark:text-zinc-400">
                                 <p className="text-sm font-medium">No messages found.</p>
                               </div>
                             );
@@ -17438,8 +18363,8 @@ export default function App() {
                                             className={cn(
                                               "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all duration-300",
                                               highlightedMessageId === msg.id 
-                                                ? "bg-[#fff59d] ring-2 ring-amber-400 scale-[1.03] shadow-md rounded-xl ml-6 mr-6" 
-                                                : (isMe ? "bg-[#d9fdd3] rounded-tr-none ml-12" : "bg-white rounded-tl-none mr-12"),
+                                                ? "bg-[#fff59d] dark:bg-[#025143] ring-2 ring-amber-400 scale-[1.03] shadow-md rounded-xl ml-6 mr-6 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]" 
+                                                : (isMe ? "bg-[#d9fdd3] dark:bg-[#005c4b] rounded-tr-none ml-12 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]" : "bg-white dark:bg-[#202c33] rounded-tl-none mr-12 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]"),
                                               selectedMessageId === msg.id ? "shadow-2xl scale-[1.02]" : ""
                                             )}
                                             onTouchStart={(e) => {
@@ -17586,8 +18511,8 @@ export default function App() {
                                                                 <FileText className="h-7 w-7 text-white" />
                                                               </div>
                                                               <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-bold truncate text-[#111b21]">{att.fileName}</p>
-                                                                <p className="text-[10px] text-[#667781] uppercase font-bold tracking-tight">
+                                                                <p className="text-sm font-bold truncate text-[#111b21] dark:text-zinc-100">{att.fileName}</p>
+                                                                <p className="text-[10px] text-[#667781] dark:text-zinc-400 uppercase font-bold tracking-tight">
                                                                   {att.contentType?.split('/')[1]?.toUpperCase() || att.fileName?.split('.').pop()?.toUpperCase() || 'FILE'} • {(att.fileSize ? (att.fileSize / 1024 / 1024).toFixed(1) : '0.0')} MB
                                                                 </p>
                                                               </div>
@@ -17608,7 +18533,7 @@ export default function App() {
                                                   {/* Message text content */}
                                                   {msg.content && (
                                                     <p className={cn(
-                                                      "text-[14.5px] leading-[1.4] text-[#111b21] whitespace-pre-wrap",
+                                                      "text-[14.5px] leading-[1.4] text-[#111b21] dark:text-zinc-100 whitespace-pre-wrap",
                                                       msg.attachments && msg.attachments.length > 0 ? "mt-2" : "mt-0"
                                                     )}>
                                                       {msg.content}
@@ -17618,7 +18543,7 @@ export default function App() {
                                               )}
                                               
                                               <div className="flex items-center justify-end gap-1 mt-1 shrink-0 select-none whitespace-nowrap">
-                                                <span className="text-[10px] text-[#667781] font-medium uppercase tracking-tighter whitespace-nowrap shrink-0">
+                                                <span className="text-[10px] text-[#667781] dark:text-zinc-400 font-medium uppercase tracking-tighter whitespace-nowrap shrink-0">
                                                   {format(new Date(msg.sentAt), 'HH:mm')}
                                                 </span>
                                                 {isMe && (() => {
@@ -17688,7 +18613,7 @@ export default function App() {
                   
                   {/* Bottom Scroll Mask */}
                   {selectedMessageId === null && (
-                    <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#efeae2] to-transparent z-10 pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-[#efeae2]/80 dark:from-zinc-950/80 to-transparent z-10 pointer-events-none" />
                   )}
 
                   {/* Floating Scroll to Bottom Button with Triple Down Chevron Icon */}
@@ -17703,7 +18628,7 @@ export default function App() {
                             chatEndRef.current.scrollIntoView({ behavior: "smooth" });
                           }
                         }}
-                        className="absolute bottom-6 right-6 h-11 w-11 rounded-full bg-white text-[#54656f] hover:text-[#111b21] flex items-center justify-center shadow-[0_2px_5px_0_rgba(11,20,26,.26),0_2px_10px_0_rgba(11,20,26,.16)] transition-all active:scale-95 hover:bg-slate-50 z-20 cursor-pointer"
+                        className="absolute bottom-6 right-6 h-11 w-11 rounded-full bg-white dark:bg-zinc-900 text-[#54656f] dark:text-zinc-200 hover:text-[#111b21] dark:hover:text-white flex items-center justify-center shadow-md dark:shadow-none border border-slate-200/50 dark:border-zinc-800 transition-all active:scale-95 hover:bg-slate-50 dark:hover:bg-zinc-800 z-20 cursor-pointer"
                         title="Scroll to bottom"
                       >
                         <div className="flex flex-col items-center -space-y-1.5 select-none pointer-events-none">
@@ -17899,7 +18824,7 @@ export default function App() {
                   })()}
                 </div>
 
-                <footer className="p-3.5 bg-[#f0f2f5] border-t shrink-0 z-50">
+                <footer className="p-3.5 bg-[#f0f2f5] dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 shrink-0 z-50">
                   <div className="flex flex-col gap-2 relative">
 
                     <div className="flex items-center gap-2 max-w-[95%] mx-auto relative w-full">
@@ -17907,37 +18832,37 @@ export default function App() {
                         <Popover>
                           <PopoverTrigger 
                             render={
-                              <Button variant="ghost" size="icon" className="rounded-full h-11 w-11 text-[#54656f] hover:bg-slate-200/50" />
+                              <Button variant="ghost" size="icon" className="rounded-full h-11 w-11 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80" />
                             }
                           >
                             <Smile className="h-7 w-7" />
                           </PopoverTrigger>
-                          <PopoverContent side="top" align="start" className="w-[320px] p-2 rounded-2xl border shadow-xl bg-white mb-2">
+                          <PopoverContent side="top" align="start" className="w-[320px] p-2 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-xl bg-white dark:bg-zinc-950 mb-2">
                              <div className="grid grid-cols-6 gap-1 p-2">
                                 {['😀', '😂', '😍', '👍', '🙏', '🔥', '✨', '💯', '🏠', '🔑', '🚨', '🛠️'].map(emoji => (
                                    <button 
                                       key={emoji} 
-                                      className="h-10 w-10 flex items-center justify-center text-2xl hover:bg-slate-100 rounded-lg transition-colors"
+                                      className="h-10 w-10 flex items-center justify-center text-2xl hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                                       onClick={() => setChatInput(prev => prev + emoji)}
                                    >
                                       {emoji}
                                    </button>
                                 ))}
                              </div>
-                             <div className="p-2 border-t text-[11px] text-center text-muted-foreground uppercase font-bold tracking-widest text-[#111b21]">Emoji Panel</div>
+                             <div className="p-2 border-t border-slate-100 dark:border-zinc-800 text-[11px] text-center text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-widest text-[#111b21] dark:text-zinc-100">Emoji Panel</div>
                           </PopoverContent>
                         </Popover>
                         
                         <label htmlFor="file-upload" className="cursor-pointer">
                           <input type="file" id="file-upload" className="hidden" multiple onChange={(e) => handleFileUpload(e, 'file')} />
-                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
+                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors">
                             <Paperclip className="h-6 w-6" />
                           </div>
                         </label>
 
                         <label htmlFor="image-upload" className="cursor-pointer">
                           <input type="file" id="image-upload" className="hidden" accept="image/*,video/*" multiple onChange={(e) => handleFileUpload(e, 'image')} />
-                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] hover:bg-slate-200/50 transition-colors">
+                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors">
                             <ImageIcon className="h-6 w-6" />
                           </div>
                         </label>
@@ -17945,10 +18870,10 @@ export default function App() {
 
               <div className="flex flex-col flex-1 relative gap-1 min-w-0">
                 {replyingTo && (
-                  <div className="mx-2 p-2 bg-slate-100 rounded-t-lg border-l-4 border-primary flex items-center justify-between animate-in slide-in-from-bottom-2">
+                  <div className="mx-2 p-2 bg-slate-100 dark:bg-zinc-900 rounded-none border-l-4 border-primary flex items-center justify-between animate-in slide-in-from-bottom-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-bold text-primary truncate leading-tight uppercase tracking-widest">{replyingTo.senderName}</p>
-                      <p className="text-xs text-slate-500 truncate italic">
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 truncate italic">
                         {replyingTo.type === MessageType.Text ? replyingTo.content : `[${MessageType[replyingTo.type]}]`}
                       </p>
                     </div>
@@ -17957,15 +18882,15 @@ export default function App() {
                     </Button>
                   </div>
                 )}
-                <div className="relative">
+                <div className="relative bg-white dark:bg-zinc-900 rounded-none border border-slate-200/80 dark:border-zinc-800 shadow-xs overflow-hidden">
                   {recordingState !== 'inactive' ? (
-                        <div className="flex-1 h-12 flex items-center px-4 bg-white rounded-xl shadow-sm border animate-in fade-in slide-in-from-bottom-2">
+                        <div className="flex-1 h-12 flex items-center px-4 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 rounded-none shadow-sm border border-slate-200 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
                           <div className="flex items-center gap-3 w-full">
                             
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="text-destructive shrink-0 h-8 w-8 rounded-full"
+                              className="text-destructive shrink-0 h-8 w-8 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
                               onClick={() => {
                                 if (mediaRecorderRef.current) {
                                   (mediaRecorderRef.current as any).isCancelled = true;
@@ -17994,7 +18919,7 @@ export default function App() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100 shrink-0 animate-in fade-in"
+                                  className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 shrink-0 animate-in fade-in"
                                   onClick={() => {
                                      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                                        (mediaRecorderRef.current as any).isPauseStop = true;
@@ -18038,11 +18963,11 @@ export default function App() {
                                     }
                                   }}
                                   style={{ x: swipeX }}
-                                  className="flex-1 flex items-center justify-between px-3 py-1 bg-slate-50 border border-slate-100 rounded-full cursor-grab active:cursor-grabbing select-none"
+                                  className="flex-1 flex items-center justify-between px-3 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-full cursor-grab active:cursor-grabbing select-none"
                                 >
                                   <div className="flex items-center gap-2 shrink-0">
                                     <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-xs font-bold font-mono text-[#111b21] min-w-[36px]">
+                                    <span className="text-xs font-bold font-mono text-[#111b21] dark:text-zinc-100 min-w-[36px]">
                                       {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                                     </span>
                                   </div>
@@ -18050,7 +18975,7 @@ export default function App() {
                                   {/* Waveform Visualization */}
                                   <RecordingWaveform stream={activeStream} />
 
-                                  <div className="flex items-center gap-1 text-[#54656f] shrink-0">
+                                  <div className="flex items-center gap-1 text-[#54656f] dark:text-zinc-300 shrink-0">
                                     <motion.span
                                       animate={{ x: [0, -4, 0] }}
                                       transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
@@ -18069,7 +18994,7 @@ export default function App() {
                                      <Button
                                        variant="ghost"
                                        size="icon"
-                                       className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100"
+                                       className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
                                        onClick={async () => {
                                           if (!playbackPreviewUrl) {
                                              const mergedBlob = new Blob(voiceNotePartsRef.current, { type: 'audio/mp3' });
@@ -18101,7 +19026,7 @@ export default function App() {
                                      <Button
                                        variant="ghost"
                                        size="icon"
-                                       className="h-8 w-8 text-[#54656f] rounded-full hover:bg-slate-100"
+                                       className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
                                        onClick={async () => {
                                           try {
                                             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -18160,7 +19085,7 @@ export default function App() {
                                      </Button>
                                    </div>
                                 </div>
-                                <span className="text-sm font-bold text-[#111b21] min-w-[45px] shrink-0 text-right">
+                                <span className="text-sm font-bold text-[#111b21] dark:text-zinc-100 min-w-[45px] shrink-0 text-right">
                                   {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                                 </span>
                               </>
@@ -18168,9 +19093,8 @@ export default function App() {
                           </div>
                         </div>
                       ) : (
-                        <Input 
-                          placeholder="Type a message" 
-                          className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] text-black"
+                        <Input placeholder="Type a message" 
+                          className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
                           value={chatInput}
                           autoComplete="off"
                           autoCorrect="off"
@@ -18205,14 +19129,14 @@ export default function App() {
                               setRecordingState('inactive');
                             }
                           }}
-                          className="rounded-full h-11 w-11 bg-primary text-white shadow-lg flex items-center justify-center p-0 animate-in zoom-in"
+                          className="rounded-full h-11 w-11 bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-[#1fa855] border border-slate-200 dark:border-zinc-800 shadow-md flex items-center justify-center p-0 animate-in zoom-in"
                         >
-                          <Send className="h-6 w-6 fill-current" />
+                          <Send className="h-6 w-6 fill-current text-[#1fa855]" />
                         </Button>
                       ) : chatInput.trim() ? (
                         <Button 
                           onClick={() => handleSendMessage()}
-                          className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
+                          className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
                         >
                           <Send className="h-7 w-7 fill-current" />
                         </Button>
@@ -18221,7 +19145,7 @@ export default function App() {
                           variant="ghost" 
                           size="icon" 
                           className={cn(
-                            "rounded-full h-11 w-11 text-[#54656f] transition-all relative overflow-hidden",
+                            "rounded-full h-11 w-11 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-all relative overflow-hidden",
                             recordingState !== 'inactive' && "bg-destructive text-white scale-110 shadow-lg"
                           )}
                           onClick={async () => {
@@ -18297,24 +19221,24 @@ export default function App() {
                         animate={{ width: 320, opacity: 1 }}
                         exit={{ width: 0, opacity: 0 }}
                         transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="w-[320px] shrink-0 border-l border-slate-200 bg-white flex flex-col h-full overflow-hidden shadow-xs relative z-20"
+                        className="w-[320px] shrink-0 border-l border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full overflow-hidden shadow-xs relative z-20"
                       >
                         {/* Header */}
-                        <div className="px-4 py-3 border-b border-slate-200 bg-[#f0f2f5] flex items-center justify-between shrink-0 h-[60px]">
+                        <div className="px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px]">
                           <div className="flex items-center gap-2.5 text-left min-w-0">
-                            <div className="h-9 w-9 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 shadow-xs">
-                              <History className="h-4.5 w-4.5 text-emerald-600" />
+                            <div className="h-9 w-9 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 shadow-xs">
+                              <History className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
                             </div>
                             <div className="min-w-0">
-                              <h4 className="text-xs font-bold text-slate-900 truncate leading-tight">Chat Call History</h4>
-                              <p className="text-[10px] text-slate-500 font-medium truncate">Logs for this conversation</p>
+                              <h4 className="text-xs font-bold text-slate-900 dark:text-zinc-100 truncate leading-tight">Chat Call History</h4>
+                              <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium truncate">Logs for this conversation</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 rounded-full text-slate-500 hover:text-slate-700 hover:bg-slate-200/60"
+                              className="h-8 w-8 rounded-full text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800"
                               onClick={() => setIsChatCallHistoryOpen(false)}
                               title="Collapse Call History Panel"
                             >
@@ -18324,19 +19248,25 @@ export default function App() {
                         </div>
 
                         {/* Logs List */}
-                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2.5 bg-slate-50/50" onScroll={handleCallLogsScroll}>
+                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2.5 bg-slate-50/50 dark:bg-zinc-950" onScroll={handleCallLogsScroll}>
                           {(() => {
                             const chatCallLogs = callLogs.filter(l => l.chatId === activeChatId);
                             const sortedLogs = [...chatCallLogs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
+                            if (isCallLogsLoading && sortedLogs.length === 0) {
+                              return (
+                                <ThreeDotsLoading label="Loading call logs..." />
+                              );
+                            }
+
                             if (sortedLogs.length === 0) {
                               return (
-                                <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-white rounded-2xl border border-slate-200/80 p-6 shadow-2xs">
-                                  <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-2">
+                                <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-white dark:bg-zinc-950 rounded-2xl border border-slate-200/80 dark:border-zinc-800 p-6 shadow-2xs">
+                                  <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400 dark:text-zinc-500 mb-2">
                                     <Phone className="h-5 w-5" />
                                   </div>
-                                  <p className="text-xs font-bold text-slate-700">No Call History</p>
-                                  <p className="text-[11px] text-slate-400 mt-0.5 mb-3">Calls made in this chat will appear here.</p>
+                                  <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">No Call History</p>
+                                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 mb-3">Calls made in this chat will appear here.</p>
                                   <Button
                                     size="sm"
                                     className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 font-semibold shadow-2xs flex items-center gap-1.5"
@@ -18351,12 +19281,12 @@ export default function App() {
                             return sortedLogs.map((log, idx) => {
                               const userStatus = getUserCallStatus(log, userProfile?.id);
                               return (
-                                <div key={log.id ? `side-log-${log.id}` : `side-log-${log.callId || idx}-${log.startedAt}-${idx}`} className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs hover:border-emerald-300 transition-all text-left space-y-2">
+                                <div key={log.id ? `side-log-${log.id}` : `side-log-${log.callId || idx}-${log.startedAt}-${idx}`} className="p-3 bg-white dark:bg-zinc-950 rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-2xs hover:border-emerald-300 dark:hover:border-emerald-700 transition-all text-left space-y-2">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-1.5 min-w-0">
                                       <Badge className={cn(
                                         "text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-md border shrink-0",
-                                        log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                        log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800" : "bg-slate-50 text-slate-700 border-slate-200 dark:bg-zinc-950 dark:text-zinc-300 dark:border-zinc-800"
                                       )}>
                                         {log.type === CallType.Video ? "Video" : "Voice"}
                                       </Badge>
@@ -18366,25 +19296,25 @@ export default function App() {
                                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" /> Active
                                         </span>
                                       ) : userStatus === 'missed' ? (
-                                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded-sm border border-rose-100 flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.2 rounded-sm border border-rose-100 dark:border-rose-900/40 flex items-center gap-1">
                                           <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
                                         </span>
                                       ) : userStatus === 'rejected' ? (
-                                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.2 rounded-sm border border-amber-100 flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.2 rounded-sm border border-amber-100 dark:border-amber-900/40 flex items-center gap-1">
                                           <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
                                         </span>
                                       ) : userStatus === 'received' ? (
-                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-sm border border-emerald-100 flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.2 rounded-sm border border-emerald-100 dark:border-emerald-900/40 flex items-center gap-1">
                                           <PhoneIncoming className="h-3 w-3 text-emerald-600" /> Received
                                         </span>
                                       ) : (
-                                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded-sm border border-blue-100 flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-slate-700 dark:text-zinc-300 bg-slate-50 dark:bg-zinc-950 px-1.5 py-0.2 rounded-sm border border-slate-200 dark:border-zinc-800 flex items-center gap-1">
                                           <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
                                         </span>
                                       )}
                                     </div>
 
-                                    <span className="text-[10px] font-mono font-semibold text-slate-500 shrink-0">
+                                    <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-zinc-400 shrink-0">
                                       {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
                                         ? "0s"
                                         : (((log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && !log.endedAt)
@@ -18393,8 +19323,8 @@ export default function App() {
                                     </span>
                                   </div>
 
-                                  <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1.5 border-t border-slate-100">
-                                    <span className="font-mono text-slate-400">
+                                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400 pt-1.5 border-t border-slate-100 dark:border-zinc-800">
+                                    <span className="font-mono text-slate-400 dark:text-zinc-500">
                                       {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
 
@@ -18411,7 +19341,7 @@ export default function App() {
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => handleStartCall(log.chatId, log.type)}
-                                        className="h-6 w-6 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 rounded-md shrink-0 transition-colors"
+                                        className="h-6 w-6 text-slate-600 dark:text-zinc-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-700 dark:hover:text-emerald-400 rounded-md shrink-0 transition-colors"
                                         title="Redial"
                                       >
                                         {log.type === CallType.Video ? <Video className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
@@ -18437,42 +19367,42 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] text-[#667781] p-12 text-center">
+              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-zinc-950 text-[#667781] dark:text-zinc-400 p-12 text-center">
                 <div className="max-w-md w-full space-y-8 animate-in fade-in zoom-in duration-500">
                   <div className="flex justify-center">
-                    <div className="h-48 w-48 rounded-full bg-white flex items-center justify-center shadow-xl relative">
+                    <div className="h-48 w-48 rounded-full bg-white dark:bg-zinc-950 flex items-center justify-center shadow-xl relative">
                       <div className="absolute inset-0 rounded-full border-4 border-primary/10 border-dashed animate-[spin_20s_linear_infinite]" />
                       <MessageSquare className="h-24 w-24 text-primary/20" />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">HanssonHub Connect</h2>
-                    <p className="text-sm text-[#667781] font-medium leading-relaxed">
+                    <h2 className="text-2xl font-black text-slate-800 dark:text-zinc-100 tracking-tight">HanssonHub Connect</h2>
+                    <p className="text-sm text-[#667781] dark:text-zinc-400 font-medium leading-relaxed">
                       Select a contact from your sidebar to view history or start a new conversation.
                     </p>
                   </div>
                   
                   <div className="pt-4 space-y-4">
                     <div className="flex items-center gap-2 justify-center">
-                      <div className="h-px w-8 bg-slate-300" />
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Members</span>
-                      <div className="h-px w-8 bg-slate-300" />
+                      <div className="h-px w-8 bg-slate-300 dark:bg-zinc-800" />
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-300 uppercase tracking-widest">Active Members</span>
+                      <div className="h-px w-8 bg-slate-300 dark:bg-zinc-800" />
                     </div>
                     <div className="flex flex-wrap justify-center gap-2">
                       {allUsers.filter(u => u.id !== userProfile.id).slice(0, 4).map(user => (
                         <button 
                           key={user.id}
                           onClick={() => startDirectChat(user)}
-                          className="bg-white p-2 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
+                          className="bg-white dark:bg-zinc-900 p-2 rounded-2xl border border-slate-100 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
                         >
-                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50 flex items-center justify-center bg-primary/10 text-primary font-bold">
+                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50 dark:border-zinc-800 flex items-center justify-center bg-primary/10 text-primary font-bold">
                             {user.getPersonDetailsDto.imageUrl ? (
                               <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                             ) : (
                               <span className="text-sm uppercase">{user.getPersonDetailsDto.firstName ? user.getPersonDetailsDto.firstName[0] : '?'}</span>
                             )}
                           </div>
-                          <span className="text-[10px] font-bold text-slate-700 group-hover:text-primary transition-colors truncate w-full text-center">
+                          <span className="text-[10px] font-bold text-slate-700 dark:text-zinc-200 group-hover:text-primary transition-colors truncate w-full text-center">
                             {user.getPersonDetailsDto.firstName}
                           </span>
                         </button>
@@ -18483,7 +19413,7 @@ export default function App() {
                   <div className="pt-8">
                     <Button 
                       variant="outline" 
-                      className="rounded-full bg-white border-2 border-slate-100 text-[#54656f] font-bold h-12 px-8 hover:bg-slate-50 transition-all hover:scale-105 active:scale-95"
+                      className="rounded-full bg-white dark:bg-zinc-900 border-2 border-slate-100 dark:border-zinc-800 text-[#54656f] dark:text-zinc-200 font-bold h-12 px-8 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all hover:scale-105 active:scale-95"
                       onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}
                     >
                       <PlusCircle className="mr-2 h-5 w-5" />
@@ -18501,21 +19431,21 @@ export default function App() {
       </Dialog>
 
             <Dialog open={isViewGroupOpen} onOpenChange={setIsViewGroupOpen}>
-        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
-          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
+        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col">
+          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 -mt-4 -mx-4 mb-0">
             <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
               <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
                   <Info className="h-5 w-5" />
                 </div>
                 <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
                     {(() => {
                       const currentChat = chats.find(c => c.id === activeChatId || c.id === editingGroupId);
                       return currentChat?.isGroup ? "Group Details" : "Chat Details";
                     })()}
                   </DialogTitle>
-                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
+                  <DialogDescription className="text-xs text-slate-500 dark:text-zinc-400 font-normal leading-none mt-1">
                     View description and members
                   </DialogDescription>
                 </div>
@@ -18529,10 +19459,10 @@ export default function App() {
           {/* Scrollable Container split 40:60 */}
           <div className="flex-1 flex min-h-0 overflow-hidden">
             {/* Left Column (40%) */}
-            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 bg-white">
+            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900">
               <div className="space-y-4">
                 <div className="flex justify-center">
-                  <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm shrink-0">
+                  <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm shrink-0">
                     {newGroupImageUrl ? (
                       <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
                     ) : (
@@ -18541,7 +19471,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-2 text-center">
-                  <h3 className="text-xl font-bold text-slate-900 leading-tight">{newGroupName}</h3>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-zinc-100 leading-tight">{newGroupName}</h3>
                   {newGroupDescription ? (
                     <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">{newGroupDescription}</p>
                   ) : (
@@ -18555,13 +19485,13 @@ export default function App() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  className="flex-1 h-10 gap-1.5 rounded-xl border border-black bg-white text-black hover:bg-slate-50 font-bold"
+                  className="flex-1 h-10 gap-1.5 rounded-xl border border-black bg-white text-black dark:text-zinc-100 hover:bg-slate-50 font-bold"
                   onClick={() => {
                     setIsViewGroupOpen(false);
                     setIsEditGroupOpen(true);
                   }}
                 >
-                  <Edit2 className="h-4 w-4 text-black" />
+                  <Edit2 className="h-4 w-4 text-black dark:text-zinc-100" />
                   <span>Edit</span>
                 </Button>
                 <Button 
@@ -18580,7 +19510,7 @@ export default function App() {
             </div>
 
             {/* Right Column (60%) */}
-            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
               <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
                 <div className="p-6">
                   {(() => {
@@ -18644,7 +19574,7 @@ export default function App() {
                                 }
                               }}
                               className={cn(
-                                "p-4 flex flex-col items-center text-center bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-all relative gap-2",
+                                "p-4 flex flex-col items-center text-center bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl shadow-sm hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all relative gap-2",
                                 member.id !== userProfile?.id ? "cursor-pointer" : ""
                               )}
                             >
@@ -18656,7 +19586,7 @@ export default function App() {
                                 </div>
                               )}
 
-                              <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 relative shadow-inner">
+                              <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 relative shadow-inner">
                                 {member.imageUrl ? (
                                   <img src={getFullImageUrl(member.imageUrl)} alt={member.name} className="h-full w-full object-cover" />
                                 ) : (
@@ -18665,7 +19595,7 @@ export default function App() {
                               </div>
 
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-sm text-slate-800 truncate px-1">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate px-1">
                                   {member.id === userProfile?.id ? "You" : member.name}
                                 </h4>
                                 <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
@@ -18675,12 +19605,12 @@ export default function App() {
                                       Online
                                     </span>
                                   ) : (
-                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                    <span className="text-slate-400 dark:text-zinc-400 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
                                       Offline
                                     </span>
                                   )}
-                                  <span className="text-slate-400 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{member.role}</span>
+                                  <span className="text-slate-400 dark:text-zinc-500 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{member.role}</span>
                                 </div>
                               </div>
                             </div>
@@ -18804,7 +19734,7 @@ export default function App() {
                     /* Single 1-on-1 Ringing State */
                     return (activeCall.type === CallType.Video && !isIncomingCall) ? (
                       <div className="flex flex-col items-center justify-center gap-6">
-                        <div className="relative w-64 h-48 md:w-80 md:h-60 bg-slate-900 border-2 border-emerald-500/30 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
+                        <div className="relative w-64 h-48 md:w-80 md:h-60 bg-zinc-950 border-2 border-emerald-500/30 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
                           {isCallCameraEnabled ? (
                             <LocalVideoFeed />
                           ) : (
@@ -18884,7 +19814,7 @@ export default function App() {
                           "grid-cols-3"
                         )}>
                           {/* Current User Card */}
-                          <div className="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px]">
+                          <div className="relative bg-zinc-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px]">
                             {isCallCameraEnabled ? (
                               <LocalVideoFeed />
                             ) : (
@@ -18914,7 +19844,7 @@ export default function App() {
 
                             return (
                               <div key={p.personId} className={cn(
-                                "relative bg-slate-900 border rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px] transition-all",
+                                "relative bg-zinc-950 border rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px] transition-all",
                                 isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/40 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
                               )}>
                                 {p.isCameraEnabled && isConnected ? (
@@ -19174,15 +20104,15 @@ export default function App() {
           setNewGroupImageUrl("");
         }
       }}>
-        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col">
-          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 -mt-4 -mx-4 mb-0">
+        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col">
+          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 -mt-4 -mx-4 mb-0">
             <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
               <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
                   <Settings className="h-5 w-5" />
                 </div>
                 <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
                     Edit Group Details
                   </DialogTitle>
                   <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
@@ -19199,7 +20129,7 @@ export default function App() {
           {/* Scrollable Container split 40:60 */}
           <div className="flex-1 flex min-h-0 overflow-hidden">
             {/* Left Column (40%) */}
-            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 bg-white overflow-y-auto no-scrollbar shrink-0">
+            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 overflow-y-auto no-scrollbar shrink-0">
               <div className="space-y-4">
                 {/* Group Image Photo Selector */}
                 <div className="flex flex-col items-center gap-4">
@@ -19207,7 +20137,7 @@ export default function App() {
                     className="relative group cursor-pointer"
                     onClick={() => groupImageInputRef.current?.click()}
                   >
-                    <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors relative">
+                    <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors relative">
                       {newGroupImageUrl ? (
                         <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
                       ) : (
@@ -19225,11 +20155,10 @@ export default function App() {
                   <div className="w-full space-y-3">
                     <div className="space-y-1">
                       <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
-                      <Input 
-                        placeholder="e.g., Family Hub" 
+                      <Input autoComplete="off" placeholder="e.g., Family Hub" 
                         value={newGroupName}
                         onChange={(e) => setNewGroupName(e.target.value)}
-                        className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                        className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                       />
                     </div>
                   </div>
@@ -19237,18 +20166,17 @@ export default function App() {
 
                 <div className="space-y-1.5 pt-1">
                   <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
-                  <Input 
-                    placeholder="What is this group about?" 
+                  <Input autoComplete="off" placeholder="What is this group about?" 
                     value={newGroupDescription}
                     onChange={(e) => setNewGroupDescription(e.target.value)}
-                    className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                   />
                 </div>
               </div>
             </div>
 
             {/* Right Column (60%) */}
-            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
               <div className="flex-1 overflow-y-auto no-scrollbar">
                 <div className="p-6 space-y-6">
                   {/* Manage Members */}
@@ -19303,7 +20231,7 @@ export default function App() {
                           return (
                             <div 
                               key={member.id} 
-                              className="w-full p-3 flex items-center gap-4 bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-colors"
+                              className="w-full p-3 flex items-center gap-4 bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl shadow-sm hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
                             >
                               <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
                                 {member.imageUrl ? (
@@ -19313,7 +20241,7 @@ export default function App() {
                                 )}
                               </div>
                               <div className="flex-1 text-left min-w-0">
-                                <h4 className="font-bold text-sm text-slate-800 truncate">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate">
                                   {member.isMe ? "You" : `${member.firstName} ${member.lastName}`}
                                 </h4>
                                 <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
@@ -19328,8 +20256,8 @@ export default function App() {
                                       Offline
                                     </span>
                                   )}
-                                  <span className="text-slate-300">•</span>
-                                  <span className="text-slate-400 font-semibold">{member.roleName || 'Member'}</span>
+                                  <span className="text-slate-300 dark:text-zinc-600">•</span>
+                                  <span className="text-slate-400 dark:text-zinc-400 font-semibold">{member.roleName || 'Member'}</span>
                                 </div>
                               </div>
                               {!member.isMe && (
@@ -19380,7 +20308,7 @@ export default function App() {
                           return (
                             <div 
                               key={user.id} 
-                              className="w-full p-3 flex items-center gap-4 bg-white hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all shadow-sm"
+                              className="w-full p-3 flex items-center gap-4 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-100 dark:border-zinc-800 rounded-2xl transition-all shadow-sm"
                             >
                               <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
                                 {user.getPersonDetailsDto.imageUrl ? (
@@ -19447,7 +20375,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="p-4 border-t bg-slate-50 shrink-0 flex justify-end">
+          <div className="p-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 flex justify-end">
              <Button 
               className="bg-primary text-primary-foreground font-bold rounded-xl h-11 px-6 shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all" 
               onClick={handleUpdateGroup}
@@ -19461,15 +20389,15 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isDeleteChatModalOpen} onOpenChange={setIsDeleteChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-md p-6 overflow-hidden rounded-2xl border border-black shadow-2xl bg-white flex flex-col gap-5">
+        <DialogContent showCloseButton={false} className="max-w-md p-6 overflow-hidden rounded-2xl border border-black dark:border-zinc-800 shadow-2xl bg-white dark:bg-zinc-950 flex flex-col gap-5">
           <DialogHeader className="p-0 border-none bg-transparent -mt-0 -mx-0 mb-0 flex flex-col items-center text-center">
-            <div className="h-12 w-12 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-600 shrink-0 mb-4 shadow-sm">
+            <div className="h-12 w-12 rounded-full bg-red-50 dark:bg-red-950/50 border border-red-100 dark:border-red-900 flex items-center justify-center text-red-600 shrink-0 mb-4 shadow-sm">
               <Trash2 className="h-6 w-6" />
             </div>
-            <DialogTitle className="text-lg font-bold text-slate-900 leading-tight">
+            <DialogTitle className="text-lg font-bold text-slate-900 dark:text-zinc-100 leading-tight">
               Delete "{newGroupName}"?
             </DialogTitle>
-            <DialogDescription className="text-sm text-slate-500 mt-2 leading-relaxed font-sans">
+            <DialogDescription className="text-sm text-slate-500 dark:text-zinc-400 mt-2 leading-relaxed font-sans">
               Are you sure you want to delete this chat? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -19484,7 +20412,7 @@ export default function App() {
             <Button 
               variant="outline" 
               onClick={handleDeleteChat}
-              className="px-5 h-10 rounded-xl font-semibold shadow-sm bg-slate-100 hover:bg-slate-200 text-black border border-slate-300 active:scale-95 transition-all"
+              className="px-5 h-10 rounded-xl font-semibold shadow-sm bg-slate-100 hover:bg-slate-200 text-black dark:text-zinc-100 border border-slate-300 active:scale-95 transition-all"
             >
               Delete
             </Button>
@@ -19499,11 +20427,11 @@ export default function App() {
           setForwardSearchQuery("");
         }
       }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white">
+        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white dark:bg-zinc-950">
           <DialogHeader className="p-6 pb-2 mb-0">
             <div className="flex items-center gap-2">
               <Forward className="h-5 w-5 text-primary animate-pulse" />
-              <DialogTitle className="text-xl font-bold text-slate-900 mb-[3px]">
+              <DialogTitle className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-[3px]">
                 Forward Message
               </DialogTitle>
             </div>
@@ -19515,16 +20443,15 @@ export default function App() {
           <div className="px-6 py-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input 
-                placeholder="Search chats..." 
-                className="pl-10 h-10 bg-slate-50 border-none rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black"
+              <Input autoComplete="off" placeholder="Search chats..." 
+                className="pl-10 h-10 bg-slate-50 dark:bg-zinc-950 border-none rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black dark:text-zinc-100"
                 value={forwardSearchQuery}
                 onChange={(e) => setForwardSearchQuery(e.target.value)}
               />
             </div>
           </div>
 
-          <ScrollArea className="h-[280px] bg-white border-t mt-4">
+          <ScrollArea className="h-[280px] bg-white dark:bg-zinc-950 border-t border-slate-100 dark:border-zinc-800 mt-4">
             <div className="p-4 space-y-2">
               {(() => {
                 const filtered = (chats || [])
@@ -19548,9 +20475,9 @@ export default function App() {
                     <button
                       key={chat.id}
                       onClick={() => handleForwardMessage(chat.id)}
-                      className="w-full p-3 flex items-center gap-4 rounded-xl hover:bg-slate-50 transition-all text-left group border border-transparent hover:border-slate-100"
+                      className="w-full p-3 flex items-center gap-4 rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-900 transition-all text-left group border border-transparent hover:border-slate-100 dark:hover:border-zinc-800"
                     >
-                      <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 flex items-center justify-center bg-slate-50 shrink-0 text-slate-600 font-bold">
+                      <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 dark:border-zinc-800 flex items-center justify-center bg-slate-50 dark:bg-zinc-950 shrink-0 text-slate-600 dark:text-zinc-300 font-bold">
                         {displayImageUrl ? (
                           <img src={getFullImageUrl(displayImageUrl)} alt={chat.name} className="h-full w-full object-cover" />
                         ) : (
@@ -19558,10 +20485,10 @@ export default function App() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-sm text-slate-800 truncate group-hover:text-primary transition-colors">
+                        <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate group-hover:text-primary transition-colors">
                           {chat.name || 'Private Chat'}
                         </h4>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">
+                        <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
                           {chat.isGroup ? 'Group Chat' : 'Direct Message'}
                         </p>
                       </div>
@@ -19575,7 +20502,7 @@ export default function App() {
             </div>
           </ScrollArea>
           
-          <div className="p-4 bg-slate-50 border-t flex justify-end">
+          <div className="p-4 bg-slate-50 dark:bg-zinc-950 border-t border-slate-100 dark:border-zinc-800 flex justify-end">
             <Button variant="outline" className="rounded-full px-6 text-xs font-bold" onClick={() => setIsForwardModalOpen(false)}>
               Cancel
             </Button>
@@ -19610,31 +20537,31 @@ export default function App() {
         <DialogContent 
           showCloseButton={false} 
           className={cn(
-            "p-0 overflow-hidden rounded-2xl border border-slate-200 shadow-2xl bg-white max-h-[90vh] flex flex-col", 
+            "p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col", 
             isGroupMode 
               ? "max-w-4xl w-[90vw] duration-0 transition-none animate-none data-open:animate-none data-closed:animate-none data-open:transition-none data-closed:transition-none" 
               : "max-w-md w-[90vw] transition-all duration-300"
           )}
         >
-          <DialogHeader className="p-0 border-b border-slate-100 bg-white shrink-0 mb-0">
+          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 mb-0">
             <div className={cn(
               "flex flex-row items-center justify-between w-full",
               isGroupMode ? "pt-7 px-7 pb-5" : "pt-8 pl-8 pr-5 pb-5"
             )}>
               <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
                   {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
                 </div>
                 <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 leading-tight">
+                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
                     {isGroupMode ? "Create New Group" : "Start New Chat"}
                   </DialogTitle>
-                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
+                  <DialogDescription className="text-xs text-slate-500 dark:text-zinc-300 font-normal leading-none mt-1">
                     {isGroupMode ? "Add members to the group" : "Select a person to start a chat"}
                   </DialogDescription>
                 </div>
               </div>
-              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
+              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 dark:text-zinc-300 hover:text-slate-600 dark:hover:text-zinc-100 transition-colors shrink-0" />}>
                 <X className="h-5 w-5" />
               </DialogClose>
             </div>
@@ -19644,75 +20571,72 @@ export default function App() {
             {isGroupMode ? (
               <div className="flex flex-1 overflow-hidden min-h-0 w-full">
                 {/* Left Side: 40% */}
-                <div className="w-[40%] flex flex-col border-r border-slate-100 p-6 space-y-4 bg-white overflow-y-auto no-scrollbar text-left shrink-0">
+                <div className="w-[40%] flex flex-col border-r border-slate-100 dark:border-zinc-800 p-6 space-y-4 bg-slate-50 dark:bg-zinc-900 overflow-y-auto no-scrollbar text-left shrink-0">
                   <div className="flex flex-col items-center gap-4">
                     <div 
                       className="relative group cursor-pointer"
                       onClick={() => groupImageInputRef.current?.click()}
                     >
-                      <div className="h-24 w-24 rounded-full bg-slate-50 border-2 border-slate-200 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors">
+                      <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors">
                         {newGroupImageUrl ? (
                           <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
                         ) : (
-                          <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
+                          <div className="flex flex-col items-center justify-center text-slate-400 dark:text-zinc-400 group-hover:text-primary transition-colors">
                             <Camera className="h-8 w-8 mb-1" />
-                            <span className="text-[9px] font-bold uppercase tracking-widest">Add Photo</span>
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-300">Add Photo</span>
                           </div>
                         )}
                       </div>
                     </div>
                     <div className="w-full space-y-3">
                       <div className="space-y-1">
-                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1.5">
+                        <Label className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest pl-1 flex items-center gap-1.5">
                           <Tag className="h-3.5 w-3.5 text-primary" />
                           Group Name
                         </Label>
-                        <Input 
-                          placeholder="e.g., Family Hub" 
+                        <Input autoComplete="off" placeholder="e.g., Family Hub" 
                           value={newGroupName}
                           onChange={(e) => setNewGroupName(e.target.value)}
-                          className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                          className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                         />
                       </div>
                     </div>
                   </div>
                   <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-1.5">
+                    <Label className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest pl-1 flex items-center gap-1.5">
                       <FileText className="h-3.5 w-3.5 text-primary" />
                       Description (Optional)
                     </Label>
-                    <Input 
-                      placeholder="What is this group about?" 
+                    <Input autoComplete="off" placeholder="What is this group about?" 
                       value={newGroupDescription}
                       onChange={(e) => setNewGroupDescription(e.target.value)}
-                      className="bg-white border-slate-200 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                      className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
                     />
                   </div>
                 </div>
 
                 {/* Right Side: 60% */}
-                <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/30">
+                <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
                   <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
                     <div className="p-6">
-                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
+                      <h3 className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
                         <Users className="h-4 w-4 text-emerald-600" />
                         Select Members
                       </h3>
                       
                       {/* Search bar with search icon for group members selection */}
                       <div className="mb-4 relative flex items-center">
-                        <Search className="absolute left-3.5 h-4 w-4 text-slate-400 z-10 pointer-events-none" />
-                        <Input 
-                          placeholder="Search members to add..." 
+                        <Search className="absolute left-3.5 h-4 w-4 text-slate-400 dark:text-zinc-400 z-10 pointer-events-none" />
+                        <Input autoComplete="off" placeholder="Search members to add..." 
                           value={homeMemberSearchQuery}
                           onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                          className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm placeholder:text-slate-400/70 transition-all w-full"
+                          className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 dark:border-zinc-800 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400/70 dark:placeholder:text-zinc-400 transition-all w-full"
                         />
                         {homeMemberSearchQuery && (
                           <button
                             type="button"
                             onClick={() => setHomeMemberSearchQuery("")}
-                            className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors"
+                            className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition-colors"
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -19763,9 +20687,9 @@ export default function App() {
                                   );
                                 }}
                                 className={cn(
-                                  "flex flex-col items-center text-center p-4 rounded-2xl border transition-all bg-white shadow-sm relative gap-2 cursor-pointer w-full",
-                                  isMe ? "cursor-default border-emerald-500 bg-emerald-50/25 ring-2 ring-emerald-500/10" : "hover:border-emerald-200 hover:bg-slate-50/50",
-                                  (!isMe && isSelected) ? "border-emerald-500 bg-emerald-50/25 ring-2 ring-emerald-500/10" : (!isMe ? "border-slate-100" : "")
+                                  "flex flex-col items-center text-center p-4 rounded-2xl border transition-all bg-white dark:bg-zinc-950 shadow-sm relative gap-2 cursor-pointer w-full",
+                                  isMe ? "cursor-default border-emerald-500 bg-emerald-50/25 dark:bg-emerald-950/25 ring-2 ring-emerald-500/10 dark:ring-emerald-500/20" : "hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-slate-50/50 dark:hover:bg-zinc-900/50",
+                                  (!isMe && isSelected) ? "border-emerald-500 bg-emerald-50/25 dark:bg-emerald-950/25 ring-2 ring-emerald-500/10 dark:ring-emerald-500/20" : (!isMe ? "border-slate-100 dark:border-zinc-800" : "")
                                 )}
                               >
                                 {/* Checkbox badge on top-right */}
@@ -19774,39 +20698,39 @@ export default function App() {
                                     "h-5 w-5 rounded-full border flex items-center justify-center transition-all",
                                     isSelected 
                                       ? "bg-emerald-600 border-emerald-600 text-white" 
-                                      : "border-slate-300 bg-white"
+                                      : "border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950"
                                   )}>
                                     {isSelected && <Check className="h-3 w-3 stroke-[3.5]" />}
                                   </div>
                                 </div>
 
                                 {/* Profile Picture */}
-                                <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 relative shadow-inner">
+                                <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 relative shadow-inner">
                                   {item.imageUrl ? (
                                     <img src={getFullImageUrl(item.imageUrl)} alt={item.name} className="h-full w-full object-cover" />
                                   ) : (
-                                    <UserIcon className="h-6 w-6 text-slate-400" />
+                                    <UserIcon className="h-6 w-6 text-slate-400 dark:text-zinc-400" />
                                   )}
                                 </div>
 
                                 {/* Name & Status */}
                                 <div className="flex-1 min-w-0">
-                                  <h4 className="font-bold text-sm text-slate-800 truncate px-1">
+                                  <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate px-1">
                                     {item.name}
                                   </h4>
                                   <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
                                     {item.isOnline ? (
-                                      <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                      <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
                                         <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
                                         Online
                                       </span>
                                     ) : (
-                                      <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                        <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                      <span className="text-slate-400 dark:text-zinc-300 font-semibold flex items-center gap-1">
+                                        <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
                                         Offline
                                       </span>
                                     )}
-                                    <span className="text-slate-400 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{item.role}</span>
+                                    <span className="text-slate-400 dark:text-zinc-300 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{item.role}</span>
                                   </div>
                                 </div>
                               </button>
@@ -19819,21 +20743,20 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0 w-full">
-                <div className="px-4 py-2.5 bg-white border-b shrink-0">
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0 w-full bg-slate-50 dark:bg-zinc-900">
+                <div className="px-4 py-2.5 bg-slate-50 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 shrink-0">
                   <div className="relative flex items-center">
-                    <Search className="absolute left-3.5 h-4 w-4 text-slate-400 z-10 pointer-events-none" />
-                    <Input 
-                      placeholder="Search home members..." 
+                    <Search className="absolute left-3.5 h-4 w-4 text-slate-400 dark:text-zinc-400 z-10 pointer-events-none" />
+                    <Input autoComplete="off" placeholder="Search home members..." 
                       value={homeMemberSearchQuery}
                       onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                      className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm placeholder:text-slate-400/70 transition-all w-full"
+                      className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 dark:border-zinc-800 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400/70 dark:placeholder:text-zinc-400 transition-all w-full"
                     />
                     {homeMemberSearchQuery && (
                       <button
                         type="button"
                         onClick={() => setHomeMemberSearchQuery("")}
-                        className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors"
+                        className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 dark:text-zinc-400 hover:text-slate-600 dark:hover:text-zinc-100 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition-colors"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -19845,6 +20768,9 @@ export default function App() {
                   <div className="p-4">
                     <div className="space-y-3">
                       {(() => {
+                        if (isViewLoading('manage-users') || isViewLoading('all-users')) {
+                          return <ThreeDotsLoading label="Loading members..." />;
+                        }
                         const filteredUsers = allUsers.filter(u => {
                           if (u.id === userProfile.id) return false;
                           if (!homeMemberSearchQuery.trim()) return true;
@@ -19860,39 +20786,39 @@ export default function App() {
                             <button
                               key={user.id}
                               onClick={() => startDirectChat(user)}
-                              className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 bg-white hover:bg-slate-50 text-left shadow-sm group"
+                              className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-slate-50 dark:hover:bg-zinc-900 text-left shadow-sm group"
                             >
-                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative shadow-inner">
+                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 shrink-0 relative shadow-inner">
                                 {user.getPersonDetailsDto.imageUrl ? (
                                   <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
                                 ) : (
-                                  <UserIcon className="h-5 w-5 text-slate-400" />
+                                  <UserIcon className="h-5 w-5 text-slate-400 dark:text-zinc-400" />
                                 )}
                               </div>
 
                               <div className="flex-1 min-w-0 text-left">
-                                <h4 className="font-bold text-sm text-slate-800 truncate">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate">
                                   {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
                                 </h4>
                                 <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
                                   {isOnline ? (
-                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
                                       <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
                                       Online
                                     </span>
                                   ) : (
-                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
+                                    <span className="text-slate-400 dark:text-zinc-300 font-semibold flex items-center gap-1">
+                                      <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
                                       Offline
                                     </span>
                                   )}
-                                  <span className="text-slate-300">•</span>
-                                  <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
+                                  <span className="text-slate-300 dark:text-zinc-600">•</span>
+                                  <span className="text-slate-400 dark:text-zinc-300 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
                                 </div>
                               </div>
 
                               <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all ml-auto">
-                                <ChevronRight className="h-5 w-5 text-slate-400" />
+                                <ChevronRight className="h-5 w-5 text-slate-400 dark:text-zinc-400" />
                               </div>
                             </button>
                           );
@@ -19906,7 +20832,7 @@ export default function App() {
           </div>
 
           {isGroupMode && (
-            <div className="p-4 border-t bg-slate-50 flex items-center justify-end shrink-0">
+            <div className="p-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end shrink-0">
                <Button 
                  className="px-4 rounded-xl h-10 font-bold shadow-sm flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" 
                  onClick={handleCreateGroup}
@@ -19922,21 +20848,21 @@ export default function App() {
 
       {/* Upload Preview Dialog */}
       <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b flex flex-row items-center justify-between select-none">
+        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-b border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
+          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b border-slate-200 dark:border-zinc-800 flex flex-row items-center justify-between select-none">
             <div className="flex flex-col gap-0.5 text-left">
               <div className="flex items-center gap-2">
                 <ImageIcon className="h-6 w-6 text-primary shrink-0" />
                 <DialogTitle className="text-xl font-bold tracking-tight">Send file(s)</DialogTitle>
               </div>
-              <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider ml-1">Preview and add captions</p>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider ml-1">Preview and add captions</p>
             </div>
             <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full flex items-center justify-center shrink-0" onClick={() => setIsUploadPreviewOpen(false)}>
               <X className="h-6 w-6" />
             </Button>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50">
+          <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50 dark:bg-zinc-950">
             {uploadPreviewFiles.length > 0 ? (
                <div className="flex-1 w-full relative flex flex-col items-center justify-center -translate-y-8">
                  <div className="flex-1 w-full flex items-center justify-center p-6 relative">
@@ -20070,9 +20996,8 @@ export default function App() {
             );
           })()}
 
-          <div className="bg-[#f0f2f5] p-3 flex items-center gap-2 border-t shrink-0">
-            <Input 
-              autoFocus
+          <div className="bg-[#f0f2f5] dark:bg-zinc-950 p-3 flex items-center gap-2 border-t dark:border-zinc-800 shrink-0">
+            <Input autoComplete="off" autoFocus
               placeholder="Add a caption..." 
               value={uploadPreviewText}
               onChange={(e) => setUploadPreviewText(e.target.value)}
@@ -20082,7 +21007,7 @@ export default function App() {
                   handleSendUpload();
                 }
               }}
-              className="flex-1 bg-inherit border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-none text-black"
+              className="flex-1 bg-inherit border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-none text-black dark:text-zinc-100"
             />
             <Button 
               className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
@@ -20096,8 +21021,8 @@ export default function App() {
 
       {/* Media Preview Modal */}
       <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-[480px] p-0 overflow-hidden bg-white text-slate-900 border border-slate-200 shadow-2xl rounded-[12px] flex flex-col h-[85vh]">
-          <DialogHeader className="pl-10 pt-8 pr-6 pb-4 border-b border-slate-100 flex flex-row items-center justify-between shrink-0 bg-white mb-0">
+        <DialogContent showCloseButton={false} className="sm:max-w-[480px] p-0 overflow-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-[12px] flex flex-col h-[85vh]">
+          <DialogHeader className="pl-10 pt-8 pr-6 pb-4 border-b border-slate-100 dark:border-zinc-800 flex flex-row items-center justify-between shrink-0 bg-white dark:bg-zinc-950 mb-0">
             {(() => {
               const hasGallery = galleryMedia && galleryMedia.length > 0;
               const activeItem = hasGallery ? galleryMedia[galleryIndex] : null;
@@ -20111,7 +21036,7 @@ export default function App() {
                     ) : (
                       <ImageIcon className="h-5 w-5 text-[#00a884] shrink-0" />
                     )}
-                    <DialogTitle className="text-lg font-bold tracking-tight text-slate-900">
+                    <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-zinc-100">
                       {isVid ? "Video Preview" : "Image Preview"}
                     </DialogTitle>
                   </div>
@@ -20132,7 +21057,7 @@ export default function App() {
           </DialogHeader>
           
           <div 
-            className="flex-1 flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden select-none"
+            className="flex-1 flex items-center justify-center p-6 bg-slate-50 dark:bg-zinc-950 relative overflow-hidden select-none"
             onTouchStart={(e) => {
               touchStartX.current = e.changedTouches[0].clientX;
             }}
@@ -20189,7 +21114,7 @@ export default function App() {
                   {showBack && (
                     <Button 
                       variant="ghost" 
-                      className="absolute left-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 hover:scale-105 transition-all duration-200" 
+                      className="absolute left-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 dark:text-zinc-100 hover:scale-105 transition-all duration-200" 
                       onClick={(e) => {
                         e.stopPropagation();
                         setSlideDirection(-1);
@@ -20202,7 +21127,7 @@ export default function App() {
                   {showNext && (
                     <Button 
                       variant="ghost" 
-                      className="absolute right-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 hover:scale-105 transition-all duration-200" 
+                      className="absolute right-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 dark:text-zinc-100 hover:scale-105 transition-all duration-200" 
                       onClick={(e) => {
                         e.stopPropagation();
                         setSlideDirection(1);
@@ -20269,26 +21194,26 @@ export default function App() {
 
       {/* Add Fingerprint Modal */}
       <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px] flex flex-col max-h-[90vh]">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl flex flex-col max-h-[90vh]">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
                 <Fingerprint className="h-6 w-6 text-primary shrink-0" />
                 Add Fingerprint
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register biometric data for a user</DialogDescription>
+              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register biometric data for a user</DialogDescription>
             </div>
           </DialogHeader>
           <div className="px-10 pt-3 pb-6 space-y-4 overflow-y-auto flex-1">
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
                     <UserIcon className="h-3 w-3" />
                     Select User
                   </label>
                   <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
-                    <SelectTrigger className="h-10">
+                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
                       <SelectValue placeholder="Chose a user">
                         {selectedFingerprintUserId
                           ? (() => {
@@ -20308,12 +21233,12 @@ export default function App() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
                     <Cpu className="h-3 w-3" />
                     Select Hardware
                   </label>
                   <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
-                    <SelectTrigger className="h-10">
+                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
                       <SelectValue placeholder="Chose a hardware">
                         {selectedFingerprintHardwareId
                           ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedFingerprintHardwareId.toString())?.name || 'Chose a hardware')
@@ -20332,7 +21257,7 @@ export default function App() {
               </div>
               <div className="flex justify-end">
                 <Button 
-                  className="w-[220px] px-4 font-medium bg-black text-white hover:bg-black/90 flex items-center justify-center gap-2"
+                  className="w-[220px] px-4 font-medium bg-black dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-200 flex items-center justify-center gap-2"
                   disabled={!selectedFingerprintUserId || !selectedFingerprintHardwareId}
                   onClick={async () => {
                     try {
@@ -20356,13 +21281,13 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
                 <ImageIcon className="h-3 w-3" />
                 Fingerprint Previews
               </label>
-              <div className="border border-dashed border-slate-300 rounded-2xl p-4 h-[150px] bg-white flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <div className="border border-dashed border-slate-300 dark:border-zinc-700 rounded-2xl p-4 h-[150px] bg-white dark:bg-zinc-950 flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {(fingerprintImages || []).map((img, idx) => (
-                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 flex items-center justify-center overflow-hidden shrink-0">
                     <img src={img || undefined} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Button 
@@ -20377,16 +21302,16 @@ export default function App() {
                   </div>
                 ))}
                 {fingerprintImages.length === 0 && (
-                  <div className="col-span-full flex items-center justify-center text-slate-400 text-xs italic">
+                  <div className="col-span-full flex items-center justify-center text-slate-400 dark:text-zinc-500 text-xs italic">
                     Images will appear here...
                   </div>
                 )}
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pr-8 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
             <Button 
-              className="w-[220px] bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
+              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
               disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
               onClick={async () => {
                 const payload = {
@@ -20418,19 +21343,19 @@ export default function App() {
       
       {/* Register NFID Modal */}
       <Dialog open={messageToDelete !== null} onOpenChange={(open) => !open && setMessageToDelete(null)}>
-        <DialogContent className="sm:max-w-[400px] p-8 overflow-hidden bg-white border border-black shadow-2xl rounded-2xl text-center">
+        <DialogContent className="sm:max-w-[400px] p-8 overflow-hidden bg-white dark:bg-zinc-950 border border-black dark:border-zinc-800 shadow-2xl rounded-2xl text-center">
           <div className="flex flex-col items-center gap-4 py-4">
-             <div className="h-16 w-16 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-2">
+             <div className="h-16 w-16 rounded-full bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-500 mb-2">
                 <Trash2 className="h-8 w-8" />
              </div>
-             <p className="text-lg font-bold text-slate-900">Are you sure you want to delete this message?</p>
-             <p className="text-sm text-slate-500">This action cannot be undone and the message will be removed from your history.</p>
+             <p className="text-lg font-bold text-slate-900 dark:text-zinc-100">Are you sure you want to delete this message?</p>
+             <p className="text-sm text-slate-500 dark:text-zinc-400">This action cannot be undone and the message will be removed from your history.</p>
           </div>
           <DialogFooter className="flex items-center justify-center gap-3 sm:justify-center border-none p-0 mt-2">
             <Button 
                variant="ghost" 
                onClick={() => setMessageToDelete(null)}
-               className="h-11 px-8 rounded-xl font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-100"
+               className="h-11 px-8 rounded-xl font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:bg-zinc-800"
             >
               Cancel
             </Button>
@@ -20458,15 +21383,14 @@ export default function App() {
       </Dialog>
 
       <Dialog open={messageToEdit !== null} onOpenChange={(open) => !open && setMessageToEdit(null)}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-[400px] bg-white dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100">
           <DialogHeader>
             <DialogTitle>Edit Message</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <Input 
-              value={editMessageContent}
+            <Input autoComplete="off" value={editMessageContent}
               onChange={(e) => setEditMessageContent(e.target.value)}
-              className="bg-white border-slate-200"
+              className="bg-white dark:bg-zinc-950 border-slate-200"
               autoFocus
               onKeyDown={async (e) => {
                 if (e.key === 'Enter' && messageToEdit) {
@@ -20512,28 +21436,28 @@ export default function App() {
 
       {/* Register NFID Modal */}
       <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 border border-black shadow-2xl rounded-[9px]">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b bg-white pr-16">
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
                 <ScanLine className="h-6 w-6 text-primary shrink-0" />
                 Register NFID
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">Register NFID tag or device for a user</DialogDescription>
+              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register NFID tag or device for a user</DialogDescription>
             </div>
           </DialogHeader>
           <div className="p-6 space-y-6">
-            <div className="bg-slate-100 p-4 rounded-xl border border-dashed border-slate-300 text-center text-sm font-medium text-slate-600">
+            <div className="bg-slate-100 dark:bg-zinc-900 p-4 rounded-xl border border-dashed border-slate-300 dark:border-zinc-800 text-center text-sm font-medium text-slate-600 dark:text-zinc-300">
                Kindly place the Card/Tag/Device on the RFID Sensor.
             </div>
             <div className="flex gap-3 items-end">
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
                   <UserIcon className="h-3 w-3" />
                   Select User
                 </label>
                 <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
                     <SelectValue placeholder="Choose a user">
                       {selectedNfidUserId
                         ? (() => {
@@ -20553,12 +21477,12 @@ export default function App() {
                 </Select>
               </div>
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1 flex items-center gap-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
                   <Cpu className="h-3 w-3" />
                   Select Hardware
                 </label>
                 <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
                     <SelectValue placeholder="Choose hardware">
                       {selectedNfidHardwareId
                         ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedNfidHardwareId.toString())?.name || 'Choose hardware')
@@ -20576,9 +21500,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pr-8 border-t bg-slate-100/50 flex items-center justify-center">
+          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
             <Button 
-              className="bg-black hover:bg-black/90 text-white font-medium flex items-center justify-center gap-2"
+              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
               disabled={!selectedNfidUserId || !selectedNfidHardwareId}
               onClick={async () => {
                 console.log("Sending NFID Data for user", selectedNfidUserId, "to hardware", selectedNfidHardwareId);
@@ -20670,7 +21594,7 @@ export default function App() {
       {activeCall && !isCallModalOpen && (
         <div 
           onClick={() => setIsCallModalOpen(true)}
-          className="fixed bottom-24 right-6 z-[10000] bg-slate-900/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+          className="fixed bottom-24 right-6 z-[10000] bg-zinc-950/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"
         >
           {/* Pulsing Avatar indicator */}
           <div className="relative">
@@ -20781,7 +21705,7 @@ export default function App() {
                   : (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
                 
                 return (
-                  <div key={i} className="relative bg-slate-900 rounded-sm overflow-hidden border border-white/5">
+                  <div key={i} className="relative bg-zinc-950 rounded-sm overflow-hidden border border-white/5">
                     {camName ? (
                       <>
                         <HlsVideo 
@@ -20845,7 +21769,18 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      
+      {isMicOverlayActive && (
+        <GrainyAudioOverlay transcription={transcription} 
+          theme={theme} 
+          isMinimized={isMicMinimized}
+          onToggleMinimize={setIsMicMinimized}
+          onClose={() => {
+            setIsMicOverlayActive(false);
+            setIsHeaderMicMuted(true);
+          }} 
+          onExecuteCommand={handleVoiceCommand}
+        />
+      )}
     </div>
   );
 }

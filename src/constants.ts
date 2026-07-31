@@ -30,6 +30,9 @@ export const INITIAL_ACTIONS: GetActionDto[] = [
     actionName: "Secure Perimeter",
     actionDescription: "Locks all external doors and windows",
     actionActive: true,
+    isPrivate: true,
+    isRecurring: true,
+    time: "22:00:00",
     getActionStepDtos: [
       { id: 1, actionId: 1, facilityType: 3, facilityTypeId: 10, brightnessLevel: 0, isLocked: true, isOpen: false, isActive: true },
       { id: 2, actionId: 1, facilityType: 3, facilityTypeId: 15, brightnessLevel: 0, isLocked: true, isOpen: false, isActive: true },
@@ -52,6 +55,9 @@ export const INITIAL_ACTIONS: GetActionDto[] = [
     actionName: "Evening Ambiance",
     actionDescription: "Dim lights for a cozy evening",
     actionActive: true,
+    isPrivate: false,
+    isRecurring: true,
+    time: "19:30:00",
     getActionStepDtos: [
       { id: 4, actionId: 2, facilityType: 5, facilityTypeId: 1, brightnessLevel: 30, isLocked: false, isOpen: false, isActive: true },
       { id: 5, actionId: 2, facilityType: 5, facilityTypeId: 5, brightnessLevel: 20, isLocked: false, isOpen: false, isActive: true }

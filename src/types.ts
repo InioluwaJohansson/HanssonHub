@@ -10,14 +10,18 @@ export enum FacilityType {
 export interface CreateActionDto {
   actionName: string;
   description: string;
-  personId: number;
+  isPrivate: boolean;
+  isRecurring: boolean;
+  time: string;
 }
 
 export interface UpdateActionDto {
   id: number;
-  personId: number;
   actionName: string;
   description: string;
+  isPrivate: boolean;
+  isRecurring: boolean;
+  time: string;
 }
 
 export interface CreateActionStepDto {
@@ -51,6 +55,9 @@ export interface GetActionDto extends UserBaseDefaultDto {
   actionName: string;
   actionDescription: string;
   actionActive: boolean;
+  isPrivate?: boolean;
+  isRecurring?: boolean;
+  time?: string | any;
   getActionStepDtos: GetActionStepDto[];
 }
 
@@ -548,17 +555,17 @@ export interface UpdateRoomDto {
 }
 
 export interface UserBaseDefaultDto {
-  createdBy: number;
-  createdByName: string;
-  createdOn: string;
-  lastModifiedBy: number;
-  lastModifiedByName: string;
+  createdBy?: number;
+  createdByName?: string;
+  createdOn?: string;
+  lastModifiedBy?: number;
+  lastModifiedByName?: string;
   lastModifiedOn?: string;
   deletedOn?: string;
-  deletedBy: number;
-  isDeleted: boolean;
-  personId: number;
-  peronName: string;
+  deletedBy?: number;
+  isDeleted?: boolean;
+  personId?: number;
+  peronName?: string;
 }
 
 export interface CreateSectionDto {

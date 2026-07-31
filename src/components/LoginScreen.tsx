@@ -11,13 +11,18 @@ import {
   EyeOff, 
   User,
   Key,
-  Trash2
+  Trash2,
+  Sun,
+  Moon,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { API_BASE_URL } from '../config';
 import { UserLoginResponse, GetUserDto } from '../api/types';
+import { cn } from '../lib/utils';
 
 import api from '../api/client';
 import { RememberedUsersManager, RememberedUser } from '../utils/rememberedUsers';
@@ -38,6 +43,10 @@ const getFullImageUrl = (url: string | null | undefined): string | undefined => 
 
 interface LoginScreenProps {
   onLoginSuccess: (userData: GetUserDto, token: string) => void;
+  theme?: 'light' | 'dark';
+  toggleTheme?: () => void;
+  isMicMuted?: boolean;
+  onToggleMic?: () => void;
 }
 
 const PAGES = [
@@ -48,7 +57,7 @@ const PAGES = [
   { id: 'chat', label: 'Chats', icon: MessageSquare, desc: 'Collaborative safe space and secure multi-user messaging.' },
 ];
 
-export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = true, onToggleMic }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -108,10 +117,47 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-full bg-gradient-to-tr from-slate-50 via-slate-100 to-slate-200 text-black overflow-hidden font-sans relative">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-slate-50 dark:bg-zinc-950 text-foreground dark:text-zinc-100 overflow-hidden font-sans relative transition-colors duration-300">
       
+      {/* Top Right Controls: Theme Toggle & Microphone Button */}
+      <div className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-slate-100/90 dark:bg-zinc-800/90 p-1.5 px-2 rounded-2xl border border-slate-200 dark:border-zinc-700 shadow-sm backdrop-blur-md">
+        {/* Theme Toggle Button */}
+        {toggleTheme && (
+          <button 
+            type="button"
+            onClick={toggleTheme}
+            className="flex items-center bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-full p-1 cursor-pointer transition-all shadow-xs gap-0.5 select-none"
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          >
+            <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'light' ? "bg-amber-500 text-white shadow-xs" : "text-slate-400 hover:text-slate-200")}>
+              <Sun className="h-3.5 w-3.5" />
+            </div>
+            <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'dark' ? "bg-indigo-600 text-white shadow-xs" : "text-slate-400 hover:text-slate-700")}>
+              <Moon className="h-3.5 w-3.5" />
+            </div>
+          </button>
+        )}
+
+        {/* Microphone Button */}
+        {onToggleMic && (
+          <button 
+            type="button"
+            className={cn(
+              "relative rounded-full p-1.5 transition-all flex items-center justify-center border shadow-xs cursor-pointer",
+              isMicMuted 
+                ? "bg-rose-500/10 text-rose-600 border-rose-200 dark:border-rose-900/50 hover:bg-rose-500/20" 
+                : "bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-900 text-slate-700 dark:text-zinc-200 border-slate-200 dark:border-zinc-700"
+            )}
+            onClick={onToggleMic}
+            title={isMicMuted ? "Unmute Microphone" : "Mute Microphone"}
+          >
+            {isMicMuted ? <MicOff className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
+
       {isChoosingAccount && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/90 backdrop-blur-xl p-8 select-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/90 dark:bg-zinc-950/90 backdrop-blur-xl p-8 select-none overflow-hidden animate-fade-in">
           {/* Grainy CSS Overlay */}
           <div 
             className="absolute inset-0 pointer-events-none opacity-[0.06] bg-[repeat] mix-blend-overlay"
@@ -123,10 +169,10 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           {/* Header details inside the overlay */}
           <div className="text-center space-y-3 mb-10 z-10">
             <div className="flex items-center justify-center gap-2.5">
-              <ShieldCheck className="h-9 w-9 text-slate-900 filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.1)]" />
-              <h2 className="text-3xl font-black text-slate-900 tracking-wider uppercase">Hansson Hub</h2>
+              <ShieldCheck className="h-9 w-9 text-slate-900 dark:text-zinc-100 filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.1)]" />
+              <h2 className="text-3xl font-black text-slate-900 dark:text-zinc-100 tracking-wider uppercase">Hansson Hub</h2>
             </div>
-            <p className="text-xs text-slate-500 font-bold tracking-[0.2em] uppercase">
+            <p className="text-xs text-slate-500 dark:text-zinc-400 font-bold tracking-[0.2em] uppercase">
               Select an authorized profile to unlock
             </p>
           </div>
@@ -151,7 +197,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   setUsername(user.username);
                   setIsChoosingAccount(false);
                 }}
-                className="relative flex flex-col items-center bg-white/70 backdrop-blur-md border border-slate-200 hover:border-slate-400 hover:bg-white/95 rounded-2xl p-6 w-48 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
+                className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-6 w-48 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
               >
                 {/* Delete icon to delete that particular stored user metadata */}
                 <button
@@ -165,14 +211,14 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                       setIsChoosingAccount(false);
                     }
                   }}
-                  className="absolute top-3.5 right-3.5 p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-red-600 transition-colors bg-transparent border-0 outline-none cursor-pointer"
+                  className="absolute top-3.5 right-3.5 p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-400 transition-colors bg-transparent border-0 outline-none cursor-pointer"
                   title="Remove profile"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
 
                 {/* Big Image with circular black border around it */}
-                <div className="h-28 w-28 rounded-full border-4 border-black flex items-center justify-center overflow-hidden bg-slate-100 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                <div className="h-28 w-28 rounded-full border-4 border-slate-900 dark:border-zinc-100 flex items-center justify-center overflow-hidden bg-slate-100 dark:bg-zinc-800 shadow-inner group-hover:scale-105 transition-transform duration-300">
                   {user.imageUrl ? (
                     <img
                       src={getFullImageUrl(user.imageUrl)}
@@ -181,16 +227,16 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <User className="h-12 w-12 text-slate-400" />
+                    <User className="h-12 w-12 text-slate-400 dark:text-zinc-500" />
                   )}
                 </div>
 
                 {/* Name & username stacked below the image */}
                 <div className="mt-5 text-center w-full">
-                  <span className="block text-sm font-extrabold text-slate-900 tracking-wide truncate group-hover:text-black transition-colors">
+                  <span className="block text-sm font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
                     {user.name}
                   </span>
-                  <span className="block text-xs text-slate-500 font-semibold tracking-wider mt-1 truncate">
+                  <span className="block text-xs text-slate-500 dark:text-zinc-400 font-semibold tracking-wider mt-1 truncate">
                     @{user.username}
                   </span>
                 </div>
@@ -205,7 +251,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               setUsername('');
               setIsChoosingAccount(false);
             }}
-            className="mt-10 px-8 h-12 border border-slate-300 hover:border-black bg-white hover:bg-slate-50 text-black font-extrabold rounded-xl text-xs tracking-widest uppercase transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer select-none z-10 flex items-center justify-center gap-2"
+            className="mt-10 px-8 h-12 border border-slate-300 dark:border-zinc-700 hover:border-black dark:hover:border-zinc-400 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-extrabold rounded-xl text-xs tracking-widest uppercase transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer select-none z-10 flex items-center justify-center gap-2"
           >
             Use another account
           </button>
@@ -213,11 +259,11 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       )}
 
       {/* LEFT SECTION (65% width) - 3D Rotating Icons carousel */}
-      <div className="hidden md:flex flex-[0.75] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r border-slate-200/65">
+      <div className="hidden md:flex flex-[0.75] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r border-slate-200/65 dark:border-zinc-800/80">
         
         {/* Orbit track helper ellipse */}
         <div 
-          className="absolute border border-dashed border-slate-300 rounded-full pointer-events-none" 
+          className="absolute border border-dashed border-slate-300 dark:border-zinc-700 rounded-full pointer-events-none" 
           style={{
             width: '420px',
             height: '130px',
@@ -258,27 +304,27 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               >
                 {/* Glowing Hexagonal Orb */}
                 <div 
-                  className={`h-24 w-24 rounded-2xl flex items-center justify-center shadow-lg text-black relative transition-all duration-300 ${
+                  className={`h-24 w-24 rounded-2xl flex items-center justify-center shadow-lg relative transition-all duration-300 ${
                     zIndex >= 15 
-                      ? 'bg-white border-2 border-black' 
-                      : 'bg-white/80 border border-slate-200'
+                      ? 'bg-white dark:bg-zinc-800 border-2 border-slate-900 dark:border-zinc-100 text-slate-900 dark:text-zinc-100' 
+                      : 'bg-white/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300'
                   }`}
                   style={{
                     boxShadow: zIndex >= 15 ? '0 10px 30px rgba(0,0,0,0.12)' : 'none'
                   }}
                 >
-                  <Icon className={`h-12 w-12 text-black transition-transform duration-300 ${zIndex >= 15 ? 'scale-105' : ''}`} />
+                  <Icon className={`h-12 w-12 transition-transform duration-300 ${zIndex >= 15 ? 'scale-105' : ''}`} />
                 </div>
                 
                 {/* Visual Connector Line */}
-                <div className="h-5 w-[1px] bg-slate-300" />
+                <div className="h-5 w-[1px] bg-slate-300 dark:bg-zinc-700" />
 
                 {/* Tag details with increased font sizes */}
                 <div className="text-center px-1">
-                  <div className={`text-lg font-extrabold tracking-tight transition-colors duration-300 ${zIndex >= 15 ? 'text-black font-black' : 'text-slate-700'}`}>
+                  <div className={`text-lg font-extrabold tracking-tight transition-colors duration-300 ${zIndex >= 15 ? 'text-slate-900 dark:text-zinc-100 font-black' : 'text-slate-700 dark:text-zinc-400'}`}>
                     {item.label}
                   </div>
-                  <div className="text-xs text-slate-700 mt-1 max-w-[170px] mx-auto leading-normal line-clamp-2">
+                  <div className="text-xs text-slate-700 dark:text-zinc-400 mt-1 max-w-[170px] mx-auto leading-normal line-clamp-2">
                     {item.desc}
                   </div>
                 </div>
@@ -292,9 +338,9 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       {/* RIGHT SECTION (35% width login card form) aligned to absolute center of the right side */}
       <div className="w-full md:w-[35%] flex flex-col justify-center items-center p-4 bg-transparent relative z-10">
         
-        {/* Card Component with slightly rounded edges + 1px black border and glowing shadow effect */}
+        {/* Card Component with slightly rounded edges + 1px border and glowing shadow effect */}
         <div 
-          className="w-full max-w-sm p-8 bg-white border border-black rounded-2xl space-y-8 transition-all duration-300 md:translate-x-[70px]"
+          className="w-full max-w-sm p-8 bg-white dark:bg-zinc-900 border border-slate-900 dark:border-zinc-700 rounded-2xl space-y-8 transition-all duration-300 md:translate-x-[70px]"
           style={{
             boxShadow: '0 0 35px rgba(0,0,0,0.12), 0 0 15px rgba(0,0,0,0.06)'
           }}
@@ -302,10 +348,10 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           {/* Header element: ShieldCheck icon before "Hansson Hub", subtext below */}
           <div className="space-y-2 select-none">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="h-7 w-7 text-black shrink-0" />
-              <h2 className="text-2xl font-black text-black tracking-tight uppercase">Hansson Hub</h2>
+              <ShieldCheck className="h-7 w-7 text-slate-900 dark:text-zinc-100 shrink-0" />
+              <h2 className="text-2xl font-black text-slate-900 dark:text-zinc-100 tracking-tight uppercase">Hansson Hub</h2>
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed font-semibold uppercase tracking-wider">
+            <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed font-semibold uppercase tracking-wider">
               Enter authorized credentials to proceed
             </p>
           </div>
@@ -315,8 +361,8 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               
               {/* Username Field */}
               <div className="space-y-1.5">
-                <Label htmlFor="login-username" className="text-[10px] uppercase font-bold text-slate-500 tracking-wider flex items-center gap-1.5 select-none">
-                  <User className="h-3 w-3 text-black" />
+                <Label htmlFor="login-username" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
+                  <User className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
                   Username
                 </Label>
                 <div className="relative">
@@ -327,15 +373,15 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     placeholder="e.g. admin"
                     required
                     autoComplete="off"
-                    className={username ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-black" : "border-b-2 border-b-slate-200 text-base font-medium bg-transparent text-black"}
+                    className={username ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100"}
                   />
                 </div>
               </div>
 
               {/* Password Field */}
               <div className="space-y-1.5 font-sans">
-                <Label htmlFor="login-password" className="text-[10px] uppercase font-bold text-slate-500 tracking-wider flex items-center gap-1.5 select-none">
-                  <Key className="h-3 w-3 text-black" />
+                <Label htmlFor="login-password" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
+                  <Key className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
                   Password
                 </Label>
                 <div className="relative flex items-center">
@@ -347,14 +393,14 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     placeholder="••••••••"
                     required
                     autoComplete="new-password"
-                    className={password ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-black pr-8" : "border-b-2 border-b-slate-200 text-base font-medium bg-transparent text-black pr-8"}
+                    className={password ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8"}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors bg-transparent border-0 outline-none p-1 cursor-pointer"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors bg-transparent border-0 outline-none p-1 cursor-pointer"
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4 text-black" /> : <Eye className="h-4 w-4 text-black" />}
+                    {showPassword ? <EyeOff className="h-4 w-4 text-slate-900 dark:text-zinc-100" /> : <Eye className="h-4 w-4 text-slate-900 dark:text-zinc-100" />}
                   </button>
                 </div>
               </div>
@@ -365,17 +411,17 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <button
               type="submit"
               disabled={isLoggingIn}
-              className="w-full h-11 border border-black hover:bg-slate-50 text-black font-bold rounded-xl text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer bg-white disabled:opacity-50"
+              className="w-full h-11 border border-slate-900 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-bold rounded-xl text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer bg-white dark:bg-zinc-900 disabled:opacity-50"
             >
               {isLoggingIn ? (
                 <div className="flex items-center justify-center gap-1.5 h-4">
-                  <span className="h-2 w-2 rounded-full bg-black animate-bounce [animation-delay:-0.3s]" style={{ animationDuration: '0.6s' }}></span>
-                  <span className="h-2 w-2 rounded-full bg-black animate-bounce [animation-delay:-0.15s]" style={{ animationDuration: '0.6s' }}></span>
-                  <span className="h-2 w-2 rounded-full bg-black animate-bounce" style={{ animationDuration: '0.6s' }}></span>
+                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.3s]" style={{ animationDuration: '0.6s' }}></span>
+                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.15s]" style={{ animationDuration: '0.6s' }}></span>
+                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce" style={{ animationDuration: '0.6s' }}></span>
                 </div>
               ) : (
                 <>
-                  <LogIn className="h-4 w-4 text-black" />
+                  <LogIn className="h-4 w-4 text-slate-900 dark:text-zinc-100" />
                   Login
                 </>
               )}

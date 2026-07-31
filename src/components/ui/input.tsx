@@ -8,6 +8,7 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
     <div className="relative w-full group">
       <InputPrimitive
         type={type}
+        autoComplete="off"
         data-slot="input"
         className={cn(
           "peer h-9 w-full min-w-0 bg-transparent px-0 py-1 text-base outline-none transition-all placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
