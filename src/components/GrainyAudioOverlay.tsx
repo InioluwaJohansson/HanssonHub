@@ -32,7 +32,15 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
 
     async function initMic() {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const s = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 48000
+          }
+        });
         activeStream = s;
         audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         analyser = audioCtx.createAnalyser();
@@ -118,7 +126,11 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
         initial={{ scale: 0.8, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.8, opacity: 0, y: 20 }}
-        className="fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-4 py-2.5 rounded-full bg-zinc-900/95 text-white shadow-2xl border border-emerald-500/40 backdrop-blur-xl select-none group cursor-pointer hover:border-emerald-400 transition-all"
+        className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-4 py-2.5 rounded-full shadow-2xl border backdrop-blur-xl select-none group cursor-pointer hover:border-emerald-400 transition-all ${
+          isDark 
+            ? 'bg-zinc-900/95 text-white border-emerald-500/40' 
+            : 'bg-white/95 text-zinc-900 border-emerald-500/30 shadow-xl'
+        }`}
         onClick={() => onToggleMinimize?.(false)}
       >
         <div className="relative flex items-center justify-center shrink-0">
@@ -129,8 +141,8 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
         </div>
 
         <div className="flex flex-col text-left pr-1">
-          <span className="text-xs font-bold text-emerald-400 tracking-wide">Friday</span>
-          <span className="text-[10px] text-zinc-300 truncate max-w-[150px]">
+          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tracking-wide">Friday</span>
+          <span className="text-[10px] text-slate-600 dark:text-zinc-300 truncate max-w-[150px]">
             {transcription || "Listening..."}
           </span>
         </div>
@@ -140,7 +152,7 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
             e.stopPropagation();
             onClose();
           }}
-          className="p-1.5 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+          className="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-slate-400 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-white transition-colors"
           title="Stop Friday"
         >
           <X className="h-4 w-4" />
@@ -209,9 +221,32 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
       {/* Center Content */}
       <div className="relative z-10 flex flex-col items-center gap-12 text-center px-6 w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
         
-        {/* Header Text - "Hi there, I'm Friday!" */}
+        {/* Header Text - "Hi there, I'm Friday!" with glowing multi-color gradient moving left-right-left */}
         <div className="flex items-center justify-center">
-          <span className="text-3xl sm:text-5xl md:text-6xl font-normal tracking-tight text-slate-800 dark:text-zinc-200 select-none">
+          <style>{`
+            @keyframes glowingGradientShift {
+              0% {
+                background-position: 0% 50%;
+                filter: drop-shadow(0 0 16px rgba(16, 185, 129, 0.6)) drop-shadow(0 0 28px rgba(6, 182, 212, 0.4));
+              }
+              50% {
+                background-position: 100% 50%;
+                filter: drop-shadow(0 0 22px rgba(139, 92, 246, 0.7)) drop-shadow(0 0 34px rgba(236, 72, 153, 0.5));
+              }
+              100% {
+                background-position: 0% 50%;
+                filter: drop-shadow(0 0 16px rgba(16, 185, 129, 0.6)) drop-shadow(0 0 28px rgba(6, 182, 212, 0.4));
+              }
+            }
+            .animated-friday-title {
+              background: linear-gradient(90deg, #10b981, #06b6d4, #8b5cf6, #ec4899, #f59e0b, #10b981);
+              background-size: 300% 100%;
+              -webkit-background-clip: text;
+              -webkit-text-fill-color: transparent;
+              animation: glowingGradientShift 5s ease-in-out infinite;
+            }
+          `}</style>
+          <span className="animated-friday-title text-3xl sm:text-5xl md:text-6xl font-normal tracking-tight select-none py-2">
             Hi there, I'm Friday!
           </span>
         </div>
@@ -234,21 +269,10 @@ export const GrainyAudioOverlay: React.FC<GrainyAudioOverlayProps> = ({
         </div>
 
         {/* Live Transcription */}
-        <div className="space-y-4 h-36 flex flex-col items-center justify-center">
+        <div className="space-y-4 h-24 flex flex-col items-center justify-center">
            <h3 className="text-2xl font-semibold tracking-tight text-emerald-500">
              {transcription || "Listening..."}
            </h3>
-           {transcription && onExecuteCommand && (
-             <button
-               onClick={(e) => {
-                 e.stopPropagation();
-                 onExecuteCommand(transcription);
-               }}
-               className="mt-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-full shadow-lg hover:shadow-emerald-500/20 transition-all flex items-center gap-2 cursor-pointer border border-emerald-400"
-             >
-               Execute Command
-             </button>
-           )}
         </div>
       </div>
     </motion.div>

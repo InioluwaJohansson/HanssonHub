@@ -100,7 +100,6 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
       });
 
       const result = response.data;
-      console.log(response.data);
       
       if (result.success || result.status || result.token) {
         toast.success("Successfully logged in!");

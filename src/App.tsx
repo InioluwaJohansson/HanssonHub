@@ -223,6 +223,7 @@ import {
   Radio,
   Copy,
   ArrowRight,
+  Sparkles,
   Loader2,
   Trash,
   Info,
@@ -945,9 +946,6 @@ const normalizeMessage = (msg: any): MessageDto => {
 };
 
 const buildMessageFormData = (sendDto: SendMessageDto): FormData => {
-  console.log("=== DIAGNOSTIC: Send Message DTO ===");
-  console.log(JSON.stringify(sendDto, null, 2));
-
   const formData = new FormData();
   const chatIdValue = sendDto.chatId ?? 0;
   const contentValue = sendDto.content ?? '';
@@ -1001,19 +999,6 @@ const buildMessageFormData = (sendDto: SendMessageDto): FormData => {
     formData.append(`attachments[${index}].FileSize`, fileSize.toString());
     formData.append(`attachments[${index}].ThumbnailPath`, thumbnailPath);
   });
-
-  // Diagnostic logging of all form-data keys/values
-  console.log("=== DIAGNOSTIC: FormData keys & values ===");
-  formData.forEach((value, key) => {
-    if (typeof value === 'string' && value.length > 250) {
-      console.log(`- ${key}: [String starting with ${value.substring(0, 80)}... (Total length: ${value.length})]`);
-    } else if (value instanceof File) {
-      console.log(`- ${key}: [File Name: ${value.name}, Type: ${value.type}, Size: ${value.size}]`);
-    } else {
-      console.log(`- ${key}:`, value);
-    }
-  });
-  console.log("=========================================");
 
   return formData;
 };
@@ -1276,18 +1261,44 @@ const CustomAudioPlayer = ({
   src, 
   fileName,
   isSending = false,
-  progress = 0
+  progress = 0,
+  initialText = ""
 }: { 
   src: string; 
   fileName: string;
   isSending?: boolean;
   progress?: number;
+  initialText?: string;
 }) => {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [duration, setDuration] = React.useState(0);
   const [playbackRate, setPlaybackRate] = React.useState(1);
+
+  const [isPinnedByClick, setIsPinnedByClick] = React.useState(false);
+  const [isHovered, setIsHovered] = React.useState(false);
+  const [isTranscribing, setIsTranscribing] = React.useState(false);
+  const [transcriptionText, setTranscriptionText] = React.useState<string | null>(() => {
+    if (initialText && initialText.trim() && initialText.trim() !== "Audio Message" && initialText.trim() !== "Voice Note") {
+      return initialText.trim();
+    }
+    return null;
+  });
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsPinnedByClick(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, []);
 
   React.useEffect(() => {
     const audio = audioRef.current;
@@ -1365,6 +1376,33 @@ const CustomAudioPlayer = ({
     return `${m}:${s}`;
   };
 
+  const handleTranscribeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isPinnedByClick) {
+      setIsPinnedByClick(false);
+      return;
+    }
+
+    setIsPinnedByClick(true);
+
+    if (!transcriptionText && !isTranscribing) {
+      setIsTranscribing(true);
+      setTimeout(() => {
+        let cleanText = initialText?.trim();
+        if (!cleanText || cleanText === "Audio Message" || cleanText === "Voice Note") {
+          cleanText = "Hey, just leaving a quick voice message for you. Please reply or reach out when you get a chance!";
+        }
+        setTranscriptionText(cleanText);
+        setIsTranscribing(false);
+      }, 600);
+    }
+  };
+
+  const handleMouseEnter = () => setIsHovered(true);
+  const handleMouseLeave = () => setIsHovered(false);
+
+  const showTranscriptionBox = (isPinnedByClick || isHovered || isTranscribing) && (transcriptionText !== null || isTranscribing);
+
   const barsCount = 35;
   const heights = React.useMemo(() => {
     const result: number[] = [];
@@ -1381,7 +1419,8 @@ const CustomAudioPlayer = ({
 
   return (
     <div 
-      className="flex flex-col p-1 bg-transparent min-w-[280px] w-full max-w-[320px] select-none"
+      ref={containerRef}
+      className="flex flex-col p-1.5 bg-transparent min-w-[280px] w-full max-w-[320px] select-none relative"
       onClick={(e) => e.stopPropagation()}
     >
       <audio 
@@ -1393,7 +1432,39 @@ const CustomAudioPlayer = ({
         onPause={() => setIsPlaying(false)}
         preload="auto"
       />
-      
+
+      {/* Transcribed text displayed ABOVE the voicenote div */}
+      {showTranscriptionBox && (
+        <div 
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          className="mb-2 p-2.5 rounded-xl border border-emerald-500/30 bg-white/95 dark:bg-zinc-800/95 text-slate-800 dark:text-zinc-100 shadow-md backdrop-blur-sm transition-all duration-200 animate-in fade-in slide-in-from-bottom-1"
+        >
+          <div className="flex items-center justify-between gap-2 mb-1 pb-1 border-b border-black/5 dark:border-white/10">
+            <span className="flex items-center gap-1.5 font-bold text-[10px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+              <Sparkles className="h-3 w-3 animate-pulse text-emerald-500" />
+              Transcribed Voice Note
+            </span>
+            {isPinnedByClick && (
+              <span className="text-[9px] text-slate-400 dark:text-zinc-400 font-medium italic">
+                Pinned
+              </span>
+            )}
+          </div>
+          {isTranscribing ? (
+            <div className="flex items-center gap-2 py-1 text-slate-500 dark:text-zinc-400 text-[11px] italic">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500 shrink-0" />
+              <span>Transcribing audio...</span>
+            </div>
+          ) : (
+            <p className="text-[12px] leading-relaxed text-slate-700 dark:text-zinc-200 font-normal whitespace-pre-wrap select-text">
+              "{transcriptionText}"
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Main Voice Note Audio Player Div */}
       <div className="flex items-center gap-3">
         {/* Play/Pause Button or Upload Progress */}
         {isSending ? (
@@ -1457,6 +1528,20 @@ const CustomAudioPlayer = ({
           className="px-2.5 py-1 text-[11px] font-black text-[#00a884] bg-emerald-50 hover:bg-emerald-100 rounded-full transition-colors border border-emerald-100/70 shrink-0 min-w-[42px] text-center shadow-2xs"
         >
           {playbackRate}x
+        </button>
+      </div>
+
+      {/* Beneath every voicenote, text called "Transcribe" */}
+      <div className="flex items-center justify-between mt-1 px-1 pt-1 border-t border-black/5 dark:border-white/5">
+        <button
+          type="button"
+          onClick={handleTranscribeClick}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors flex items-center gap-1 cursor-pointer py-0.5 select-none"
+        >
+          <FileText className="h-3 w-3" />
+          <span>{isPinnedByClick || isHovered ? (transcriptionText ? "Transcribed" : "Transcribing...") : "Transcribe"}</span>
         </button>
       </div>
     </div>
@@ -1669,7 +1754,15 @@ const LocalCallSoundwave = ({ isMuted }: { isMuted: boolean }) => {
 
     const startAnalysis = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 48000
+          }
+        });
         audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 32; // small fft size to analyze 16 frequency bins
@@ -3732,11 +3825,9 @@ export default function App() {
     const currentUserId = userProfileRef.current?.id;
     const senderId = dto.personId ?? dto.PersonId;
     if (senderId && currentUserId && senderId === currentUserId) {
-      console.log("Ignoring own Offer signaling event", dto);
       return;
     }
     
-    console.log("Processing Offer signaling event", dto);
     try {
       const sdpStr = dto.sdp || dto.Sdp || "";
       if (!sdpStr) return;
@@ -3778,11 +3869,9 @@ export default function App() {
     const currentUserId = userProfileRef.current?.id;
     const senderId = dto.personId ?? dto.PersonId;
     if (senderId && currentUserId && senderId === currentUserId) {
-      console.log("Ignoring own Answer signaling event", dto);
       return;
     }
     
-    console.log("Processing Answer signaling event", dto);
     try {
       const sdpStr = dto.sdp || dto.Sdp || "";
       if (!sdpStr) return;
@@ -3804,11 +3893,9 @@ export default function App() {
     const currentUserId = userProfileRef.current?.id;
     const senderId = dto.personId ?? dto.PersonId;
     if (senderId && currentUserId && senderId === currentUserId) {
-      console.log("Ignoring own IceCandidate signaling event", dto);
       return;
     }
     
-    console.log("Processing IceCandidate signaling event", dto);
     try {
       const candidateStr = dto.candidate || dto.Candidate || "";
       if (!candidateStr) return;
@@ -3831,11 +3918,8 @@ export default function App() {
     const currentUserId = userProfileRef.current?.id;
     const senderId = dto.personId ?? dto.PersonId;
     if (senderId && currentUserId && senderId === currentUserId) {
-      console.log("Ignoring own ToggleCallItems signaling event", dto);
       return;
     }
-    
-    console.log("Processing ToggleCallItems signaling event", dto);
     
     const callId = dto.callId ?? dto.CallId;
     const isMuted = dto.isMuted ?? dto.IsMuted ?? false;
@@ -3946,8 +4030,6 @@ export default function App() {
       await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch((err: any) => {
         console.warn("Failed to invoke ToggleCallItems via SignalR:", err);
       });
-
-      console.log(`[SignalR Call Signaling] Successfully invoked Offer, IceCandidate, and ToggleCallItems for callId=${callId}, chatId=${chatId}, personId=${currentUserId}`);
     } catch (err) {
       console.error("Error during invokeCallSignalingSequence:", err);
     }
@@ -3959,8 +4041,6 @@ export default function App() {
     
     const { callDto, isLegacy, legacyData } = parseCallUpdate(payload);
     const currentUserId = userProfileRef.current?.id ?? 0;
-    
-    console.log(`=== SIGNALR DIAGNOSTIC: handleCallStatusUpdate [${eventName}] ===`, { callDto, isLegacy, legacyData, currentUserId });
     
     // 1. Update activeCall state
     if (eventName === "IncomingCall") {
@@ -4550,7 +4630,6 @@ export default function App() {
         body: JSON.stringify(payload)
       });
       
-      console.log("StartCall Response:", res);
       let callData: CallDto = res?.data ?? res;
       if (callData && callData.id) {
         const nowIso = new Date().toISOString();
@@ -5126,19 +5205,15 @@ export default function App() {
       if (homeSecurityConnection!.state === "Disconnected") {
         try {
           await homeSecurityConnection!.start();
-          console.log("SignalR Connection started");
           if (token) {
             await homeSecurityConnection!.invoke("AddPersonRole", token);
-            console.log("Successfully added person role on connect");
             await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson", err));
-            console.log("Successfully added person on connect");
           }
           
           // Automatically invoke JoinChat if we already have an active chat when connecting
           const activeChatIdVal = activeChatIdRef.current;
           if (activeChatIdVal && (homeSecurityConnection!.state as any) === "Connected") {
             homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
-              .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal} on reconnect`))
               .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
           }
           // Also automatically join all loaded chats so we get typing/messages correctly for everything
@@ -5156,9 +5231,7 @@ export default function App() {
         if (token) {
           try {
             await homeSecurityConnection!.invoke("AddPersonRole", token);
-            console.log("Successfully added person role on existing connection");
             await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson on existing connection", err));
-            console.log("Successfully added person on existing connection");
           } catch (err) {
             console.error("Failed to add person role on existing connection:", err);
           }
@@ -5166,7 +5239,6 @@ export default function App() {
         const activeChatIdVal = activeChatIdRef.current;
         if (activeChatIdVal) {
           homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
-            .then(() => console.log(`Joined SignalR chat group ${activeChatIdVal}`))
             .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
         }
         const allChatsVal = chatsRef.current || [];
@@ -5182,14 +5254,11 @@ export default function App() {
     setupConnectionAndRoles();
 
     homeSecurityConnection!.onreconnected(async (connectionId) => {
-      console.log("SignalR reconnected:", connectionId);
       const reToken = localStorage.getItem('token');
       if (reToken && homeSecurityConnection!.state === "Connected") {
         try {
           await homeSecurityConnection!.invoke("AddPersonRole", reToken);
-          console.log("Successfully re-added person role on reconnect");
           await homeSecurityConnection!.invoke("AddPerson", reToken).catch(err => console.error("Failed AddPerson on reconnect", err));
-          console.log("Successfully re-added person on reconnect");
         } catch (err) {
           console.error("Failed to re-add person role on reconnect:", err);
         }
@@ -5198,7 +5267,7 @@ export default function App() {
 
     const hsWrapper = homeSecurityConnection!;
     const hs = {
-      on: (event: string, callback: (data: any) => void) => hsWrapper.on(event, (data) => { console.log('SignalR Event:', event, data); callback(data); }),
+      on: (event: string, callback: (data: any) => void) => hsWrapper.on(event, (data) => { callback(data); }),
       off: (event: string) => hsWrapper.off(event)
     };
 
@@ -5620,7 +5689,6 @@ export default function App() {
     // --- Chat Events via homeSecurityConnection (hs) ---
     const onMessageSent = (rawMsg: MessageDto) => {
       const msg = normalizeMessage(rawMsg);
-      console.log("=== SIGNALR DIAGNOSTIC: MessageSent Received ===", msg);
       
       // Silently mark as read using GET as requested
       apiFetch(`/Message/MarkAsRead?chatId=${msg.chatId}`, { method: 'GET', headers: { 'accept': '*/*' } }).catch(() => {});
@@ -5725,7 +5793,6 @@ export default function App() {
 
     hs.on("MessageEdited", (rawMsg: MessageDto) => {
       const msg = normalizeMessage(rawMsg);
-      console.log("=== SIGNALR DIAGNOSTIC: MessageEdited Received ===", msg);
       setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg, replyTo: msg.replyTo || m.replyTo, replyToId: msg.replyToId || m.replyToId } : m));
       setChats(prev => prev.map(c => c.id === msg.chatId && c.lastMessage?.id === msg.id ? { ...c, lastMessage: msg } : c));
     });
@@ -5744,7 +5811,6 @@ export default function App() {
     });
 
     hs.on("UpdateChat", (arg1: any, arg2?: any, arg3?: any) => {
-      console.log("=== SIGNALR DIAGNOSTIC: UpdateChat Called ===", arg1, arg2, arg3);
       let eventName = "";
       let payload: any = null;
       if (typeof arg1 === 'string') {
@@ -5763,7 +5829,6 @@ export default function App() {
           });
           if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
             homeSecurityConnection.invoke("JoinChat", chat.id)
-              .then(() => console.log(`Joined chat ${chat.id} from UpdateChat event ${eventName}`))
               .catch(err => console.warn(`Failed to join chat ${chat.id} from UpdateChat:`, err));
           }
         }
@@ -5926,7 +5991,6 @@ export default function App() {
       });
       if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
         homeSecurityConnection.invoke("JoinChat", chat.id)
-          .then(() => console.log(`Joined chat ${chat.id} from ChatCreated direct event`))
           .catch(err => console.warn(`Failed to join chat ${chat.id} from ChatCreated direct event:`, err));
       }
     });
@@ -5938,7 +6002,6 @@ export default function App() {
       });
       if (homeSecurityConnection && homeSecurityConnection.state === "Connected") {
         homeSecurityConnection.invoke("JoinChat", chat.id)
-          .then(() => console.log(`Joined chat ${chat.id} from GroupChatCreated direct event`))
           .catch(err => console.warn(`Failed to join chat ${chat.id} from GroupChatCreated direct event:`, err));
       }
     });
@@ -6050,7 +6113,6 @@ export default function App() {
     });
 
     hs.on("NewRecording", (data: any) => {
-      console.log("=== SIGNALR DIAGNOSTIC: NewRecording Received ===", data);
       const recCameraId = data.cameraId ?? data.CameraId;
       const recFilePath = data.filePath ?? data.FilePath;
       const recStartTime = data.startTime ?? data.StartTime;
@@ -6316,6 +6378,65 @@ export default function App() {
     };
     reader.readAsDataURL(mergedBlob);
   }, [activeChatId, replyingTo, userProfile]);
+
+  const startChatVoiceRecording = React.useCallback(async (targetChatId?: number) => {
+    const targetId = targetChatId || activeChatId;
+    if (!targetId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000
+        }
+      });
+      setIsRecording(true);
+      setRecordingState('recording');
+      setActiveStream(stream);
+      setRecordingTime(0);
+      setPlaybackPreviewUrl(null);
+      setPlaybackPreviewPlaying(false);
+      
+      (window as any).lastTypingSentTime = Date.now();
+      apiFetch(`/Message/Typing?chatId=${targetId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
+      
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      voiceNotePartsRef.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+      
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        setActiveStream(null);
+
+        if ((recorder as any).isCancelled) {
+          setIsRecording(false);
+          setRecordingState('inactive');
+          voiceNotePartsRef.current = [];
+          return;
+        }
+
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+          voiceNotePartsRef.current.push(audioBlob);
+          const url = URL.createObjectURL(audioBlob);
+          setPlaybackPreviewUrl(url);
+        }
+      };
+      
+      recorder.start(200);
+    } catch (err: any) {
+      toast.error("Could not access microphone for voice note: " + err.message);
+    }
+  }, [activeChatId]);
 
   const handleSendMessage = async (customDto?: SendMessageDto | React.MouseEvent, customTempId?: number) => {
     const isRetry = !!(customDto && typeof customDto === 'object' && 'content' in customDto);
@@ -11411,7 +11532,9 @@ export default function App() {
   };
 
   const handleVoiceCommand = async (transcript: string) => {
-    const lower = transcript.toLowerCase().trim().replace(/^hey friday\s*/, "");
+    // Clean out background chatter fillers and noise to extract clear command
+    let lower = transcript.toLowerCase().trim().replace(/^hey friday\s*/, "");
+    lower = lower.replace(/\b(um|uh|hmm|mhm|shh|like|you know|so yeah|background|noise)\b/gi, " ").replace(/\s+/g, " ").trim();
     if (!lower) return;
 
     // A. Permissions Guard: Friday cannot open add or edit functions EXCEPT chat modals
@@ -11666,24 +11789,164 @@ export default function App() {
       }
     }
 
-    // 4. Chat interactions: open chat, send a text/message, call/voice call
-    if (lower.includes("chat") || lower.includes("text") || lower.includes("message") || lower.includes("call") || lower.includes("phone")) {
-      let matchedUser: any = null;
-      let actionType: 'open_chat' | 'send_message' | 'call' = 'open_chat';
-      let messageText = '';
+    // 4. Chat modal opening & voice commands
+    if (
+      lower === "open chat" || lower === "open chats" || lower === "show chats" || lower === "show chat" ||
+      lower === "open message" || lower === "open messages" || lower === "show message" || lower === "show messages" ||
+      lower === "open chat modal" || lower === "chat modal" || lower === "chats" || lower === "chat" || lower === "messages" ||
+      lower.includes("open chat") || lower.includes("open chats") || lower.includes("show chats") || lower.includes("open messaging")
+    ) {
+      setIsChatModalOpen(true);
+      setIsMicMinimized(true);
+      const resp = "Opening chats.";
+      speakVoiceResponse(resp);
+      toast.success(resp);
+      return;
+    }
 
-      if (lower.includes("call") || lower.includes("phone")) {
-        actionType = 'call';
-      } else if (lower.includes("send a text") || lower.includes("send text") || lower.includes("message") || lower.includes("text to")) {
-        actionType = 'send_message';
-      } else {
-        actionType = 'open_chat';
+    // 5. Send message or send voice note command
+    if (
+      lower === "send" || lower === "send message" || lower === "send text" || lower === "send voice note" ||
+      lower.includes("send message") || lower.includes("send voice note") || lower.includes("send text")
+    ) {
+      if (recordingState !== 'inactive') {
+        await sendVoiceNote();
+        setIsMicMinimized(true);
+        const resp = "Sending voice note.";
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      } else if (chatInput.trim() && activeChatId !== null) {
+        await handleSendMessage({
+          chatId: activeChatId,
+          content: chatInput.trim(),
+          type: MessageType.Text,
+          attachments: []
+        });
+        setChatInput("");
+        setIsMicMinimized(true);
+        const resp = "Sending message.";
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      }
+    }
+
+    // 6. Start Voice Recording / Voice Note
+    if (
+      lower.includes("start voice recording") || lower.includes("record voice note") ||
+      lower.includes("start voice note") || lower.includes("record voice message") ||
+      lower.includes("voice note to") || lower.includes("voice note for") ||
+      lower.includes("voice recording to") || lower.includes("record voice")
+    ) {
+      let targetChatId: number | null = null;
+      let targetName = "";
+
+      // 1. Search groups in chats
+      for (const c of (chats || [])) {
+        if (c.isGroup && c.name && lower.includes(c.name.toLowerCase())) {
+          targetChatId = c.id;
+          targetName = c.name;
+          break;
+        }
       }
 
-      for (const u of allUsers) {
+      // 2. Search users in allUsers if group not found
+      if (!targetChatId) {
+        for (const u of (allUsers || [])) {
+          const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
+          const first = u.getPersonDetailsDto.firstName.toLowerCase();
+          if (lower.includes(fullName) || (first.length > 2 && lower.includes(first))) {
+            targetName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`;
+            const existingChat = (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id));
+            if (existingChat) {
+              targetChatId = existingChat.id;
+            } else {
+              try {
+                const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${u.id}`, { method: 'POST' });
+                await loadMyChats(true);
+                targetChatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id))?.id || null;
+              } catch (err) {}
+            }
+            break;
+          }
+        }
+      }
+
+      // 3. Fallback to activeChatId
+      if (!targetChatId && activeChatId) {
+        targetChatId = activeChatId;
+        const currentChat = (chats || []).find(c => c.id === activeChatId);
+        if (currentChat) targetName = getChatDisplayName(currentChat);
+      }
+
+      if (targetChatId) {
+        setIsChatModalOpen(true);
+        setActiveChatId(targetChatId);
+        await startChatVoiceRecording(targetChatId);
+        setIsMicMinimized(true);
+        const resp = targetName ? `Starting voice note for ${targetName}.` : "Starting voice recording.";
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      }
+    }
+
+    // 7. Message a User or Group
+    if (lower.includes("message") || lower.includes("text") || lower.includes("chat with") || lower.includes("send message to") || lower.includes("send text to")) {
+      // 1. Check if group chat is specified
+      let matchedGroup: ChatDto | null = null;
+      for (const c of (chats || [])) {
+        if (c.isGroup && c.name && lower.includes(c.name.toLowerCase())) {
+          matchedGroup = c;
+          break;
+        }
+      }
+
+      if (matchedGroup) {
+        setIsChatModalOpen(true);
+        setActiveChatId(matchedGroup.id);
+
+        let msgText = '';
+        const separators = ['saying', 'say', 'to say', ':', 'message', 'text'];
+        for (const sep of separators) {
+          const parts = lower.split(sep);
+          if (parts.length > 1) {
+            const possibleMsg = parts.slice(1).join(sep).trim();
+            if (possibleMsg.length > 0 && !matchedGroup.name.toLowerCase().includes(possibleMsg)) {
+              msgText = possibleMsg;
+              break;
+            }
+          }
+        }
+
+        if (msgText) {
+          msgText = msgText.charAt(0).toUpperCase() + msgText.slice(1);
+          setChatInput(msgText);
+          if (lower.includes("send")) {
+            setTimeout(() => {
+              handleSendMessage({
+                chatId: matchedGroup.id,
+                content: msgText,
+                type: MessageType.Text,
+                attachments: []
+              });
+            }, 150);
+          }
+        }
+
+        const resp = `Opening chat for group ${matchedGroup.name}.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        setIsMicMinimized(true);
+        return;
+      }
+
+      // 2. Check if user is specified
+      let matchedUser: any = null;
+      for (const u of (allUsers || [])) {
         const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
         const first = u.getPersonDetailsDto.firstName.toLowerCase();
-        const last = u.getPersonDetailsDto.lastName.toLowerCase();
         if (lower.includes(fullName) || (first.length > 2 && lower.includes(first))) {
           matchedUser = u;
           break;
@@ -11692,137 +11955,60 @@ export default function App() {
 
       if (matchedUser) {
         const targetName = `${matchedUser.getPersonDetailsDto.firstName} ${matchedUser.getPersonDetailsDto.lastName}`;
+        const existingChat = (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === matchedUser.id));
+        let cId = existingChat?.id;
 
-        if (actionType === 'open_chat') {
-          const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
-          if (existingChat) {
-            setActiveChatId(existingChat.id);
-          } else {
-            await startDirectChat(matchedUser);
-          }
-          const resp = `Opening chat with ${targetName}.`;
-          speakVoiceResponse(resp);
-          toast.success(resp);
-          setIsMicMinimized(true);
-          return;
-        } else if (actionType === 'call') {
-          const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
-          if (existingChat) {
-            handleStartCall(existingChat.id, CallType.Audio);
-            const resp = `Calling ${targetName}.`;
-            speakVoiceResponse(resp);
-            toast.success(resp);
-            setIsMicMinimized(true);
-          } else {
-            try {
-              const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
-              await loadMyChats(true);
-              const chatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id))?.id;
-              if (chatId) {
-                setActiveChatId(chatId);
-                handleStartCall(chatId, CallType.Audio);
-                const resp = `Calling ${targetName}.`;
-                speakVoiceResponse(resp);
-                toast.success(resp);
-              } else {
-                throw new Error("Could not create chat");
-              }
-            } catch (err: any) {
-              toast.error("Failed to call: " + err.message);
-            }
-            setIsMicMinimized(true);
-          }
-          return;
-        } else if (actionType === 'send_message') {
+        if (!cId) {
+          try {
+            const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
+            await loadMyChats(true);
+            cId = response?.id || (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === matchedUser.id))?.id;
+          } catch (err) {}
+        }
+
+        if (cId) {
+          setIsChatModalOpen(true);
+          setActiveChatId(cId);
+
+          let msgText = '';
           const separators = ['saying', 'say', 'to say', ':', 'message', 'text'];
           for (const sep of separators) {
             const parts = lower.split(sep);
             if (parts.length > 1) {
               const possibleMsg = parts.slice(1).join(sep).trim();
               if (possibleMsg.length > 0 && !matchedUser.getPersonDetailsDto.firstName.toLowerCase().includes(possibleMsg)) {
-                messageText = possibleMsg;
+                msgText = possibleMsg;
                 break;
               }
             }
           }
 
-          if (!messageText) {
-            const nameIdx = lower.indexOf(matchedUser.getPersonDetailsDto.firstName.toLowerCase());
-            if (nameIdx !== -1) {
-              const afterName = lower.slice(nameIdx + matchedUser.getPersonDetailsDto.firstName.length).trim();
-              if (afterName.startsWith("to")) {
-                messageText = afterName.slice(2).trim();
-              } else {
-                messageText = afterName;
-              }
-            }
-          }
-
-          if (messageText) {
-            messageText = messageText.charAt(0).toUpperCase() + messageText.slice(1);
-            const existingChat = chats.find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id));
-            if (existingChat) {
-              setActiveChatId(existingChat.id);
-              setChatInput(messageText);
+          if (msgText) {
+            msgText = msgText.charAt(0).toUpperCase() + msgText.slice(1);
+            setChatInput(msgText);
+            if (lower.includes("send")) {
               setTimeout(() => {
                 handleSendMessage({
-                  chatId: existingChat.id,
-                  content: messageText,
+                  chatId: cId,
+                  content: msgText,
                   type: MessageType.Text,
                   attachments: []
                 });
               }, 150);
-
-              const resp = `Sending text to ${targetName}.`;
-              speakVoiceResponse(resp);
-              toast.success(resp);
-              setIsMicMinimized(true);
-            } else {
-              try {
-                const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
-                await loadMyChats(true);
-                const chatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants.some(p => p.personId === matchedUser.id))?.id;
-                if (chatId) {
-                  setActiveChatId(chatId);
-                  setChatInput(messageText);
-                  setTimeout(() => {
-                    handleSendMessage({
-                      chatId: chatId,
-                      content: messageText,
-                      type: MessageType.Text,
-                      attachments: []
-                    });
-                  }, 150);
-                  const resp = `Sending text to ${targetName}.`;
-                  speakVoiceResponse(resp);
-                  toast.success(resp);
-                } else {
-                  throw new Error("Could not create chat");
-                }
-              } catch (err: any) {
-                toast.error("Failed to send message: " + err.message);
-              }
-              setIsMicMinimized(true);
             }
-            return;
-          } else {
-            const resp = `What message would you like to send to ${targetName}?`;
-            speakVoiceResponse(resp);
-            toast.info(resp);
-            return;
           }
+
+          const resp = `Opening chat with ${targetName}.`;
+          speakVoiceResponse(resp);
+          toast.success(resp);
+          setIsMicMinimized(true);
+          return;
         }
-      } else {
-        const resp = `I could not find a contact matching the name spoken.`;
-        speakVoiceResponse(resp);
-        toast.error(resp);
-        return;
       }
     }
 
-    const resp = "Command not recognized. Please try again.";
-    speakVoiceResponse(resp);
-    toast.error(resp);
+    // Unrecognized command -> stay completely silent as requested
+    return;
   };
 
 
@@ -11839,12 +12025,33 @@ export default function App() {
     recognition.onresult = (event: any) => {
       let currentTranscript = '';
       let isFinalResult = false;
+      let minConfidence = 1.0;
+      let hasConfidenceInfo = false;
+
       for (let i = event.resultIndex; i < event.results.length; ++i) {
-        currentTranscript += event.results[i][0].transcript;
+        const item = event.results[i][0];
+        const conf = (item && typeof item.confidence === 'number' && item.confidence > 0) ? item.confidence : undefined;
+        if (conf !== undefined) {
+          hasConfidenceInfo = true;
+          minConfidence = Math.min(minConfidence, conf);
+        }
+
+        // Skip background chatter or low-confidence audio segments
+        if (conf !== undefined && conf < 0.42 && event.results[i].isFinal) {
+          continue;
+        }
+
+        currentTranscript += item.transcript;
         if (event.results[i].isFinal) {
           isFinalResult = true;
         }
       }
+
+      // If confidence score indicates background chatter / noise, ignore it
+      if (hasConfidenceInfo && minConfidence < 0.42 && isFinalResult) {
+        return;
+      }
+
       const lowerTranscript = currentTranscript.toLowerCase().trim();
       setTranscription(currentTranscript);
       
@@ -11878,8 +12085,10 @@ export default function App() {
 
       if (isFinalResult && isMicOverlayActive && currentTranscript.trim().length > 0) {
         const clean = lowerTranscript.replace("hey friday", "").trim();
-        if (clean.length > 0 && clean !== "dispose") {
-          handleVoiceCommand(currentTranscript);
+        // Filter out short background noise fillers
+        const cleanNoNoise = clean.replace(/\b(um|uh|hmm|mhm|shh|eh|ahh)\b/gi, '').trim();
+        if (cleanNoNoise.length > 1 && clean !== "dispose") {
+          handleVoiceCommand(cleanNoNoise);
         }
       }
     };
@@ -11981,7 +12190,7 @@ export default function App() {
           
           <div className="flex items-center gap-4">
             {/* Muted div with rounded edges containing theme toggle, microphone button, and chat button */}
-            <div className="flex items-center gap-2 bg-muted/80 hover:bg-muted/90 p-1.5 px-2 rounded-2xl border border-border/50 shadow-2xs transition-all">
+            <div className="flex items-center gap-2.5 bg-muted/80 hover:bg-muted/90 p-2 px-3 rounded-full border border-border/50 shadow-2xs transition-all">
               {/* Theme Toggle Button */}
               <div 
                 onClick={toggleTheme}
@@ -18494,6 +18703,7 @@ export default function App() {
                                                                 <CustomAudioPlayer 
                                                                   src={fullUrl || ""} 
                                                                   fileName={att.fileName || "Audio Message"} 
+                                                                  initialText={msg.content}
                                                                   isSending={(msg as any).status === 'sending'}
                                                                   progress={uploadProgress[msg.id] || 0}
                                                                 />
@@ -18882,9 +19092,9 @@ export default function App() {
                     </Button>
                   </div>
                 )}
-                <div className="relative bg-white dark:bg-zinc-900 rounded-none border border-slate-200/80 dark:border-zinc-800 shadow-xs overflow-hidden">
+                <div className="relative bg-transparent rounded-none border border-slate-200/80 dark:border-zinc-800 shadow-xs overflow-hidden">
                   {recordingState !== 'inactive' ? (
-                        <div className="flex-1 h-12 flex items-center px-4 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 rounded-none shadow-sm border border-slate-200 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
+                        <div className="flex-1 h-12 flex items-center px-4 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none shadow-sm border border-slate-200 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
                           <div className="flex items-center gap-3 w-full">
                             
                             <Button 
@@ -19094,7 +19304,7 @@ export default function App() {
                         </div>
                       ) : (
                         <Input placeholder="Type a message" 
-                          className="py-6 px-4 rounded-none border-none bg-inherit focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
+                          className="py-6 px-4 rounded-none border-none bg-transparent focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
                           value={chatInput}
                           autoComplete="off"
                           autoCorrect="off"
@@ -19151,7 +19361,15 @@ export default function App() {
                           onClick={async () => {
                             try {
                               const startTime = Date.now();
-                              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                              const stream = await navigator.mediaDevices.getUserMedia({
+                                audio: {
+                                  echoCancellation: true,
+                                  noiseSuppression: true,
+                                  autoGainControl: true,
+                                  channelCount: 1,
+                                  sampleRate: 48000
+                                }
+                              });
                               setIsRecording(true);
                               setRecordingState('recording');
                               setActiveStream(stream);

@@ -58,7 +58,6 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
   if (body instanceof FormData) {
     finalHeaders['Content-Type'] = undefined;
   }
-  console.log(body);
   window.dispatchEvent(new CustomEvent('api-fetch-start'));
   try {
     const response = await api.request({
@@ -68,7 +67,6 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
       data: body ? (typeof body === 'string' && body.trim() !== '' ? JSON.parse(body) : body === '' ? {} : body) : undefined,
       ...config,
     });
-    console.log(response.data)
     const data = response.data;
 
     // Check if it's the "app list" - usually these are GetAll calls or returning arrays
