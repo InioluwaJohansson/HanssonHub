@@ -72,6 +72,30 @@ export const INITIAL_ACTIONS: GetActionDto[] = [
     personId: 1,
     peronName: "Owner",
     deletedBy: 0
+  },
+  {
+    id: 3,
+    actionId: "ACT-003",
+    actionName: "Home run",
+    actionDescription: "Automated sequence to welcome home and unlock essential doors",
+    actionActive: false,
+    isPrivate: false,
+    isRecurring: false,
+    time: "18:00:00",
+    getActionStepDtos: [
+      { id: 6, actionId: 3, facilityType: 5, facilityTypeId: 1, brightnessLevel: 100, isLocked: false, isOpen: false, isActive: true },
+      { id: 7, actionId: 3, facilityType: 3, facilityTypeId: 10, brightnessLevel: 0, isLocked: false, isOpen: true, isActive: true }
+    ],
+    createdBy: 1,
+    createdByName: "System",
+    createdOn: new Date().toISOString(),
+    lastModifiedBy: 1,
+    lastModifiedByName: "System",
+    lastModifiedOn: new Date().toISOString(),
+    isDeleted: false,
+    personId: 1,
+    peronName: "Owner",
+    deletedBy: 0
   }
 ];
 

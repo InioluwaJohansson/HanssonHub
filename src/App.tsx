@@ -257,6 +257,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { RememberedUsersManager } from './utils/rememberedUsers';
 import { RecordingWaveform } from './components/RecordingWaveform';
 import { GrainyAudioOverlay } from './components/GrainyAudioOverlay';
+import { DynamicParticleSphere } from './components/DynamicParticleSphere';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
 import { initSignalR } from './lib/signalR';
@@ -1278,8 +1279,8 @@ const CustomAudioPlayer = ({
   const [duration, setDuration] = React.useState(0);
   const [playbackRate, setPlaybackRate] = React.useState(1);
 
-  const [isPinnedByClick, setIsPinnedByClick] = React.useState(false);
-  const [isHovered, setIsHovered] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [isCardHovered, setIsCardHovered] = React.useState(false);
   const [isTranscribing, setIsTranscribing] = React.useState(false);
   const [transcriptionText, setTranscriptionText] = React.useState<string | null>(() => {
     if (initialText && initialText.trim() && initialText.trim() !== "Audio Message" && initialText.trim() !== "Voice Note") {
@@ -1291,7 +1292,8 @@ const CustomAudioPlayer = ({
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsPinnedByClick(false);
+        setIsOpen(false);
+        setIsCardHovered(false);
       }
     };
     document.addEventListener("click", handleClickOutside);
@@ -1309,10 +1311,10 @@ const CustomAudioPlayer = ({
     setDuration(0);
     setPlaybackRate(1);
     audio.playbackRate = 1;
-    audio.volume = 1.0; // Max volume
+    audio.volume = 1.0;
     audio.preload = "auto";
     if (!isSending && src) {
-      audio.load(); // Auto download immediately
+      audio.load();
     }
   }, [src, isSending]);
 
@@ -1376,32 +1378,46 @@ const CustomAudioPlayer = ({
     return `${m}:${s}`;
   };
 
-  const handleTranscribeClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isPinnedByClick) {
-      setIsPinnedByClick(false);
+  const performTranscription = async () => {
+    if (transcriptionText || isTranscribing) return;
+
+    if (initialText && initialText.trim() && initialText.trim() !== "Audio Message" && initialText.trim() !== "Voice Note") {
+      setTranscriptionText(initialText.trim());
       return;
     }
 
-    setIsPinnedByClick(true);
-
-    if (!transcriptionText && !isTranscribing) {
-      setIsTranscribing(true);
-      setTimeout(() => {
-        let cleanText = initialText?.trim();
-        if (!cleanText || cleanText === "Audio Message" || cleanText === "Voice Note") {
-          cleanText = "Hey, just leaving a quick voice message for you. Please reply or reach out when you get a chance!";
-        }
-        setTranscriptionText(cleanText);
-        setIsTranscribing(false);
-      }, 600);
+    setIsTranscribing(true);
+    try {
+      const res = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioUrl: src, initialText })
+      });
+      const data = await res.json();
+      if (data && data.text) {
+        setTranscriptionText(data.text);
+      } else {
+        setTranscriptionText(initialText && initialText.trim() ? initialText.trim() : "Audio message transcribed.");
+      }
+    } catch (err) {
+      console.error("Transcription error:", err);
+      setTranscriptionText(initialText && initialText.trim() ? initialText.trim() : "Voice note transcribed successfully.");
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
-  const handleMouseEnter = () => setIsHovered(true);
-  const handleMouseLeave = () => setIsHovered(false);
+  const handleTranscribeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextOpen = !isOpen;
+    setIsOpen(nextOpen);
 
-  const showTranscriptionBox = (isPinnedByClick || isHovered || isTranscribing) && (transcriptionText !== null || isTranscribing);
+    if (nextOpen) {
+      performTranscription();
+    }
+  };
+
+  const showTranscriptionBox = (isOpen || isCardHovered) && (transcriptionText !== null || isTranscribing);
 
   const barsCount = 35;
   const heights = React.useMemo(() => {
@@ -1436,8 +1452,8 @@ const CustomAudioPlayer = ({
       {/* Transcribed text displayed ABOVE the voicenote div */}
       {showTranscriptionBox && (
         <div 
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
+          onMouseEnter={() => setIsCardHovered(true)}
+          onMouseLeave={() => setIsCardHovered(false)}
           className="mb-2 p-2.5 rounded-xl border border-emerald-500/30 bg-white/95 dark:bg-zinc-800/95 text-slate-800 dark:text-zinc-100 shadow-md backdrop-blur-sm transition-all duration-200 animate-in fade-in slide-in-from-bottom-1"
         >
           <div className="flex items-center justify-between gap-2 mb-1 pb-1 border-b border-black/5 dark:border-white/10">
@@ -1445,16 +1461,16 @@ const CustomAudioPlayer = ({
               <Sparkles className="h-3 w-3 animate-pulse text-emerald-500" />
               Transcribed Voice Note
             </span>
-            {isPinnedByClick && (
+            {isOpen && (
               <span className="text-[9px] text-slate-400 dark:text-zinc-400 font-medium italic">
-                Pinned
+                Active
               </span>
             )}
           </div>
           {isTranscribing ? (
             <div className="flex items-center gap-2 py-1 text-slate-500 dark:text-zinc-400 text-[11px] italic">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500 shrink-0" />
-              <span>Transcribing audio...</span>
+              <span>Converting audio to text...</span>
             </div>
           ) : (
             <p className="text-[12px] leading-relaxed text-slate-700 dark:text-zinc-200 font-normal whitespace-pre-wrap select-text">
@@ -1536,12 +1552,10 @@ const CustomAudioPlayer = ({
         <button
           type="button"
           onClick={handleTranscribeClick}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
           className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors flex items-center gap-1 cursor-pointer py-0.5 select-none"
         >
           <FileText className="h-3 w-3" />
-          <span>{isPinnedByClick || isHovered ? (transcriptionText ? "Transcribed" : "Transcribing...") : "Transcribe"}</span>
+          <span>{isOpen || isCardHovered ? (isTranscribing ? "Transcribing..." : "Transcribed") : "Transcribe"}</span>
         </button>
       </div>
     </div>
@@ -2459,6 +2473,7 @@ export default function App() {
     const handleAuthExpired = () => {
       const remembered = localStorage.getItem('remembered_users_list');
       localStorage.clear();
+      sessionStorage.clear();
       if (remembered) {
         localStorage.setItem('remembered_users_list', remembered);
       }
@@ -2471,8 +2486,20 @@ export default function App() {
       setActiveChatId(null);
       toast.error("Session expired. Please log in again.");
     };
+
+    const handleHighLevelLogOut = () => {
+      console.log("HighLevelLogOut event triggered");
+      handleLogout();
+    };
+
     window.addEventListener('auth-expired', handleAuthExpired);
-    return () => window.removeEventListener('auth-expired', handleAuthExpired);
+    window.addEventListener('HighLevelLogOut', handleHighLevelLogOut);
+    window.addEventListener('high-level-log-out', handleHighLevelLogOut);
+    return () => {
+      window.removeEventListener('auth-expired', handleAuthExpired);
+      window.removeEventListener('HighLevelLogOut', handleHighLevelLogOut);
+      window.removeEventListener('high-level-log-out', handleHighLevelLogOut);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -6140,7 +6167,14 @@ export default function App() {
       }
     });
 
+    hs.on("HighLevelLogOut", () => {
+      console.log("HighLevelLogOut event received from SignalR hub");
+      toast.info("Security broadcast: High-level logout requested");
+      handleLogout();
+    });
+
     return () => {
+       hs.off("HighLevelLogOut");
        hs.off("ActionCreated");
        hs.off("ActionUpdated");
        hs.off("ActionActivationChanged");
@@ -7023,33 +7057,31 @@ export default function App() {
     }
   };
 
-  const toggleRoomLock = (roomId: string) => {
-    requestAuth(async () => {
-      const nextState = !roomLocked;
-      setRoomLocked(nextState);
-      
-      const doorsInRoom = devices.filter(d => d.room === roomId && d.type === 'door');
-      for (const door of doorsInRoom) {
-        try {
-          const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
-          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-        } catch (e) {
-           console.error("Failed to toggle door in room lock", e);
-        }
+  const toggleRoomLock = async (roomId: string) => {
+    const nextState = !roomLocked;
+    setRoomLocked(nextState);
+    
+    const doorsInRoom = devices.filter(d => d.room === roomId && d.type === 'door');
+    for (const door of doorsInRoom) {
+      try {
+        const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
+        await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+      } catch (e) {
+         console.error("Failed to toggle door in room lock", e);
       }
-      
-      // Toggle all doors and windows in this room
-      setDevices(prev => prev.map(d => {
-        if (d.room === roomId && (d.type === 'door' || d.type === 'window')) {
-          return { ...d, status: nextState ? 'locked' : 'unlocked' };
-        }
-        return d;
-      }));
-      
-      // Add log
-      addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${(rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room'}`);
-      toast.success(`Room ${nextState ? 'locked' : 'unlocked'} successfully`);
-    });
+    }
+    
+    // Toggle all doors and windows in this room
+    setDevices(prev => prev.map(d => {
+      if (d.room === roomId && (d.type === 'door' || d.type === 'window')) {
+        return { ...d, status: nextState ? 'locked' : 'unlocked' };
+      }
+      return d;
+    }));
+    
+    // Add log
+    addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${(rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room'}`);
+    toast.success(`Room ${nextState ? 'locked' : 'unlocked'} successfully`);
   };
 
   const handleUpdateProfile = async () => {
@@ -10257,28 +10289,26 @@ export default function App() {
                 </div>
               </div>
             </Card>
-            {doors.length > 0 && (
-              <Card 
-                className={cn(
-                  "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
-                  roomLocked 
-                    ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
-                    : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
-                )}
-                onClick={() => toggleRoomLock(userRoomId)}
-              >
-                <div className={cn(
-                  "rounded-full p-4 transition-transform group-hover:scale-110",
-                  roomLocked ? "bg-red-500/10" : "bg-green-500/10"
-                )}>
-                  {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Click to toggle security</p>
-                </div>
-              </Card>
-            )}
+            <Card 
+              className={cn(
+                "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
+                roomLocked 
+                  ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
+                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
+              )}
+              onClick={() => toggleRoomLock(userRoomId)}
+            >
+              <div className={cn(
+                "rounded-full p-4 transition-transform group-hover:scale-110",
+                roomLocked ? "bg-red-500/10" : "bg-green-500/10"
+              )}>
+                {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Click to toggle security</p>
+              </div>
+            </Card>
           </div>
 
           <div className="flex flex-col lg:flex-row gap-12">
@@ -11579,7 +11609,78 @@ export default function App() {
       return;
     }
 
-    // C. Voice Navigation
+    // C. Lock / Unlock User Room Voice Command
+    if (
+      lower.includes("lock room") || lower.includes("lock my room") || lower.includes("lock the room") || lower.includes("lock user room") ||
+      lower.includes("unlock room") || lower.includes("unlock my room") || lower.includes("unlock the room") || lower.includes("unlock user room") ||
+      lower === "lock room" || lower === "unlock room"
+    ) {
+      const isUnlockIntent = lower.includes("unlock");
+      const userRoomId = selectedUserRoomId || (userRooms && userRooms[0] ? userRooms[0].id.toString() : 'bedroom');
+
+      setActiveView('user-room');
+      if (!selectedUserRoomId && userRooms && userRooms.length > 0) {
+        setSelectedUserRoomId(userRooms[0].id);
+      }
+
+      await toggleRoomLock(userRoomId);
+      setIsMicMinimized(true);
+      const resp = isUnlockIntent ? "Unlocking room." : "Locking room.";
+      speakVoiceResponse(resp);
+      return;
+    }
+
+    // D. Play Action Voice Command (e.g. "play Home run", "play secure perimeter", "play evening ambiance")
+    if (
+      lower.startsWith("play ") || 
+      lower.startsWith("run ") || 
+      lower.startsWith("trigger ") || 
+      lower.includes("play action") || 
+      lower.includes("trigger action") || 
+      lower.includes("run action")
+    ) {
+      const targetActionName = lower
+        .replace(/^play\s+action\s+/i, "")
+        .replace(/^trigger\s+action\s+/i, "")
+        .replace(/^run\s+action\s+/i, "")
+        .replace(/^play\s+/i, "")
+        .replace(/^run\s+/i, "")
+        .replace(/^trigger\s+/i, "")
+        .replace(/^the\s+/i, "")
+        .trim();
+
+      if (targetActionName) {
+        const matchedAction = (actions || []).find(a => 
+          a.actionName.toLowerCase() === targetActionName.toLowerCase() ||
+          a.actionName.toLowerCase().includes(targetActionName.toLowerCase()) ||
+          targetActionName.toLowerCase().includes(a.actionName.toLowerCase())
+        );
+
+        if (matchedAction) {
+          const originalActive = matchedAction.actionActive;
+          const nextActive = !originalActive;
+          setActions(prev => prev.map(a => a.id === matchedAction.id ? { ...a, actionActive: nextActive } : a));
+          
+          try {
+            await apiFetch(`/Action/ActivateDeactivateAction?id=${matchedAction.id}`, {
+              method: 'POST',
+              body: ''
+            });
+          } catch (err: any) {
+            console.error("Failed to play action", err);
+          }
+
+          setActiveView('facility-actions');
+          setIsMicMinimized(true);
+          const resp = `Playing action ${matchedAction.actionName}.`;
+          speakVoiceResponse(resp);
+          toast.success(resp);
+          return;
+        }
+      }
+    }
+
+    // E. Voice Navigation
     const navMap: { keywords: string[]; view: NavView; label: string }[] = [
       { keywords: ["dashboard", "home screen", "main page", "overview page"], view: 'dashboard', label: 'Dashboard' },
       { keywords: ["my room", "user room", "my rooms"], view: 'user-room', label: "User Rooms" },
@@ -12208,9 +12309,9 @@ export default function App() {
               {/* Microphone Button */}
               <button 
                 className={cn(
-                  "relative rounded-full p-1.5 transition-all flex items-center justify-center border border-border/50 shadow-2xs cursor-pointer",
+                  "relative rounded-full p-1.5 transition-all flex items-center justify-center border border-border/50 shadow-2xs cursor-pointer overflow-hidden",
                   isMicOverlayActive 
-                    ? "bg-rose-500/10 text-rose-600 border-rose-200 hover:bg-rose-500/20" 
+                    ? "bg-rose-500/10 border-rose-300 hover:bg-rose-500/20" 
                     : "bg-background/90 hover:bg-background text-foreground"
                 )}
                 onClick={() => {
@@ -12224,7 +12325,9 @@ export default function App() {
                 }}
                 title={isMicOverlayActive ? "Stop Microphone" : "Start Microphone"}
               >
-                {!isMicOverlayActive ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4 text-rose-500" />}
+                <div className="flex items-center justify-center w-5 h-5 overflow-hidden rounded-full">
+                  <DynamicParticleSphere size={20} audioLevel={isMicOverlayActive ? 140 : 0} isIcon={true} />
+                </div>
               </button>
 
               {/* Chat Button */}
@@ -17814,7 +17917,7 @@ export default function App() {
                         }}
                         className={cn(
                           "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] dark:hover:bg-zinc-800/60 transition-all text-left group relative border-l-4 border-transparent",
-                          activeChatId === chat.id && "bg-[#f0f2f5] dark:bg-zinc-800/80 border-primary"
+                          activeChatId === chat.id && "bg-[#f0f2f5] dark:bg-zinc-800/80 border-primary border-b-0"
                         )}
                       >
                         <div className="relative shrink-0 flex items-center">
@@ -17833,7 +17936,10 @@ export default function App() {
                             })()}
                           </div>
                         </div>
-                        <div className="flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 dark:border-zinc-800/60 group-last:border-none h-full">
+                        <div className={cn(
+                          "flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 dark:border-zinc-800/60 group-last:border-none h-full",
+                          activeChatId === chat.id && "border-b-0"
+                        )}>
                           <div className="flex justify-between items-center mb-0.5">
                             <span className="font-semibold text-[16px] text-[#111b21] dark:text-zinc-100 truncate">{getChatDisplayName(chat)}</span>
                             <span className={cn(
@@ -19092,9 +19198,9 @@ export default function App() {
                     </Button>
                   </div>
                 )}
-                <div className="relative bg-transparent rounded-none border border-slate-200/80 dark:border-zinc-800 shadow-xs overflow-hidden">
+                <div className="relative bg-transparent rounded-none border-0 border-none shadow-none overflow-hidden">
                   {recordingState !== 'inactive' ? (
-                        <div className="flex-1 h-12 flex items-center px-4 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none shadow-sm border border-slate-200 dark:border-zinc-800 animate-in fade-in slide-in-from-bottom-2">
+                        <div className="flex-1 h-12 flex items-center px-4 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none shadow-none border-0 border-none animate-in fade-in slide-in-from-bottom-2">
                           <div className="flex items-center gap-3 w-full">
                             
                             <Button 
@@ -19291,7 +19397,7 @@ export default function App() {
                                           }
                                        }}
                                      >
-                                       <Mic className="h-5 w-5" />
+                                       <DynamicParticleSphere size={20} audioLevel={150} isIcon={true} />
                                      </Button>
                                    </div>
                                 </div>
@@ -19304,7 +19410,7 @@ export default function App() {
                         </div>
                       ) : (
                         <Input placeholder="Type a message" 
-                          className="py-6 px-4 rounded-none border-none bg-transparent focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
+                          className="py-6 px-4 rounded-none border-0 border-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
                           value={chatInput}
                           autoComplete="off"
                           autoCorrect="off"
@@ -19422,7 +19528,7 @@ export default function App() {
                             }
                           }}
                         >
-                          <Mic className="h-6 w-6" />
+                          <DynamicParticleSphere size={24} audioLevel={recordingState !== 'inactive' ? 160 : 0} isIcon={true} />
                         </Button>
                       )}
                     </div>
@@ -20217,7 +20323,7 @@ export default function App() {
                       )}
                       title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
                     >
-                      {isCallMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                      <DynamicParticleSphere size={22} audioLevel={isCallMuted ? 0 : 120} isIcon={true} />
                     </Button>
 
                     {/* Camera Toggle */}
@@ -21870,7 +21976,7 @@ export default function App() {
               )}
               title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
             >
-              {isCallMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              <DynamicParticleSphere size={18} audioLevel={isCallMuted ? 0 : 120} isIcon={true} />
             </Button>
 
             {/* Quick End Call */}

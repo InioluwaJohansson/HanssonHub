@@ -26,6 +26,7 @@ import { cn } from '../lib/utils';
 
 import api from '../api/client';
 import { RememberedUsersManager, RememberedUser } from '../utils/rememberedUsers';
+import { DynamicParticleSphere } from './DynamicParticleSphere';
 
 const getFullImageUrl = (url: string | null | undefined): string | undefined => {
   if (!url) return undefined;
@@ -118,7 +119,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
   return (
     <div className="flex flex-col md:flex-row h-screen w-full bg-slate-50 dark:bg-zinc-950 text-foreground dark:text-zinc-100 overflow-hidden font-sans relative transition-colors duration-300">
       
-      {/* Top Right Controls: Theme Toggle & Microphone Button */}
+      {/* Top Right Controls: Theme Toggle */}
       <div className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-slate-100/90 dark:bg-zinc-800/90 p-1.5 px-2 rounded-2xl border border-slate-200 dark:border-zinc-700 shadow-sm backdrop-blur-md">
         {/* Theme Toggle Button */}
         {toggleTheme && (
@@ -139,18 +140,18 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
 
         {/* Microphone Button */}
         {onToggleMic && (
-          <button 
+          <button
             type="button"
-            className={cn(
-              "relative rounded-full p-1.5 transition-all flex items-center justify-center border shadow-xs cursor-pointer",
-              isMicMuted 
-                ? "bg-rose-500/10 text-rose-600 border-rose-200 dark:border-rose-900/50 hover:bg-rose-500/20" 
-                : "bg-white/90 dark:bg-zinc-900/90 hover:bg-white dark:hover:bg-zinc-900 text-slate-700 dark:text-zinc-200 border-slate-200 dark:border-zinc-700"
-            )}
             onClick={onToggleMic}
-            title={isMicMuted ? "Unmute Microphone" : "Mute Microphone"}
+            className={cn(
+              "relative rounded-full p-1 transition-all flex items-center justify-center border border-slate-200 dark:border-zinc-700 shadow-2xs cursor-pointer overflow-hidden",
+              !isMicMuted ? "bg-rose-500/10 border-rose-300" : "bg-white/90 dark:bg-zinc-900/90 hover:bg-white"
+            )}
+            title={!isMicMuted ? "Stop Friday AI" : "Start Friday AI"}
           >
-            {isMicMuted ? <MicOff className="h-4 w-4 text-rose-500" /> : <Mic className="h-4 w-4" />}
+            <div className="flex items-center justify-center w-6 h-6 overflow-hidden rounded-full">
+              <DynamicParticleSphere size={22} audioLevel={!isMicMuted ? 120 : 0} isIcon={true} />
+            </div>
           </button>
         )}
       </div>
