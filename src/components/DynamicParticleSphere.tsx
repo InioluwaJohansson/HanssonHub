@@ -5,6 +5,7 @@ interface DynamicParticleSphereProps {
   size?: number; // width & height in px
   className?: string;
   isIcon?: boolean; // optimize for small rendering
+  isGreyscale?: boolean; // render in greyscale (white, gray, black)
 }
 
 export const DynamicParticleSphere: React.FC<DynamicParticleSphereProps> = ({
@@ -12,6 +13,7 @@ export const DynamicParticleSphere: React.FC<DynamicParticleSphereProps> = ({
   size = 320,
   className = '',
   isIcon = false,
+  isGreyscale = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -80,8 +82,13 @@ export const DynamicParticleSphere: React.FC<DynamicParticleSphereProps> = ({
 
       const time = Date.now() * 0.0015;
 
-      // Dynamic color interpolation matching magenta/purple/blue glowing palette
+      // Dynamic color interpolation matching magenta/purple/blue glowing palette (or greyscale if isGreyscale is true)
       const getRgbColor = (normY: number, normZ: number) => {
+        if (isGreyscale) {
+          const intensity = Math.min(255, Math.max(90, Math.floor(125 + normY * 115 + normZ * 30)));
+          return { r: intensity, g: intensity, b: intensity };
+        }
+
         const hueBase = (colorOffset + normY * 110 + normZ * 70 + normalizedAudio * 180) % 360;
         
         const h = (hueBase + 360) % 360;
@@ -189,7 +196,7 @@ export const DynamicParticleSphere: React.FC<DynamicParticleSphereProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [size, isIcon]);
+  }, [size, isIcon, isGreyscale]);
 
   return (
     <canvas

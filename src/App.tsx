@@ -1078,6 +1078,40 @@ const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: st
   }
 };
 
+export const formatRelativeTime = (dateInput: string | Date | number): string => {
+  if (!dateInput) return '';
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return String(dateInput);
+
+  const now = new Date();
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffInSeconds < 5) {
+    return 'just now';
+  }
+  if (diffInSeconds < 60) {
+    return `${diffInSeconds}s ago`;
+  }
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes} ${diffInMinutes === 1 ? 'min' : 'mins'} ago`;
+  }
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours} ${diffInHours === 1 ? 'hr' : 'hrs'} ago`;
+  }
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 30) {
+    return `${diffInDays} ${diffInDays === 1 ? 'day' : 'days'} ago`;
+  }
+  const diffInMonths = Math.floor(diffInDays / 30);
+  if (diffInMonths < 12) {
+    return `${diffInMonths} ${diffInMonths === 1 ? 'month' : 'months'} ago`;
+  }
+  const diffInYears = Math.floor(diffInDays / 365);
+  return `${diffInYears} ${diffInYears === 1 ? 'year' : 'years'} ago`;
+};
+
 const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick: (url: string, isVideo: boolean) => void }) => {
   const totalCount = media.length;
   if (totalCount === 0) return null;
@@ -1258,6 +1292,15 @@ const CircularProgress = ({ progress }: { progress: number }) => {
   );
 };
 
+const getSupportedAudioMimeType = (): string => {
+  if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') return 'audio/webm';
+  if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+  if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+  if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
+  if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) return 'audio/ogg;codecs=opus';
+  return 'audio/webm';
+};
+
 const CustomAudioPlayer = ({ 
   src, 
   fileName,
@@ -1282,12 +1325,7 @@ const CustomAudioPlayer = ({
   const [isOpen, setIsOpen] = React.useState(false);
   const [isCardHovered, setIsCardHovered] = React.useState(false);
   const [isTranscribing, setIsTranscribing] = React.useState(false);
-  const [transcriptionText, setTranscriptionText] = React.useState<string | null>(() => {
-    if (initialText && initialText.trim() && initialText.trim() !== "Audio Message" && initialText.trim() !== "Voice Note") {
-      return initialText.trim();
-    }
-    return null;
-  });
+  const [transcriptionText, setTranscriptionText] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1379,29 +1417,24 @@ const CustomAudioPlayer = ({
   };
 
   const performTranscription = async () => {
-    if (transcriptionText || isTranscribing) return;
-
-    if (initialText && initialText.trim() && initialText.trim() !== "Audio Message" && initialText.trim() !== "Voice Note") {
-      setTranscriptionText(initialText.trim());
-      return;
-    }
+    if ((transcriptionText && transcriptionText !== "Unable to transcribe message") || isTranscribing) return;
 
     setIsTranscribing(true);
     try {
       const res = await fetch("/api/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioUrl: src, initialText })
+        body: JSON.stringify({ audioUrl: src })
       });
       const data = await res.json();
-      if (data && data.text) {
-        setTranscriptionText(data.text);
+      if (data && data.text && data.text.trim()) {
+        setTranscriptionText(data.text.trim());
       } else {
-        setTranscriptionText(initialText && initialText.trim() ? initialText.trim() : "Audio message transcribed.");
+        setTranscriptionText("Unable to transcribe message");
       }
     } catch (err) {
       console.error("Transcription error:", err);
-      setTranscriptionText(initialText && initialText.trim() ? initialText.trim() : "Voice note transcribed successfully.");
+      setTranscriptionText("Unable to transcribe message");
     } finally {
       setIsTranscribing(false);
     }
@@ -1728,14 +1761,18 @@ const playImessageReceivedSynth = () => {
   }
 };
 
-const LocalVideoFeed = () => {
+const LocalVideoFeed = ({ stream }: { stream?: MediaStream | null }) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   React.useEffect(() => {
-    let stream: MediaStream | null = null;
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      return;
+    }
+    let localSubStream: MediaStream | null = null;
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ video: true, audio: false })
         .then(s => {
-          stream = s;
+          localSubStream = s;
           if (videoRef.current) {
             videoRef.current.srcObject = s;
           }
@@ -1743,12 +1780,63 @@ const LocalVideoFeed = () => {
         .catch(err => console.warn("Failed to get local video feed:", err));
     }
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+      if (localSubStream) {
+        localSubStream.getTracks().forEach(t => t.stop());
       }
     };
-  }, []);
+  }, [stream]);
   return <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover rounded-xl" />;
+};
+
+const RemoteVideoFeed = ({ stream }: { stream: MediaStream | null }) => {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  React.useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  if (!stream) return null;
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      className="w-full h-full object-cover rounded-2xl"
+    />
+  );
+};
+
+const RemoteAudioFeed = ({ stream }: { stream: MediaStream | null; key?: string | number }) => {
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+  React.useEffect(() => {
+    const el = audioRef.current;
+    if (el && stream) {
+      el.srcObject = stream;
+      el.volume = 1.0;
+      const promise = el.play();
+      if (promise !== undefined) {
+        promise.catch(err => {
+          console.warn("[WebRTC Log] RemoteAudioFeed autoplay warning:", err);
+        });
+      }
+    }
+  }, [stream]);
+
+  if (!stream) return null;
+
+  return <audio ref={audioRef} autoPlay playsInline controls={false} />;
+};
+
+const GlobalRemoteAudioFeeds = ({ remoteStreams }: { remoteStreams: Record<number, MediaStream> }) => {
+  return (
+    <div style={{ display: 'none' }}>
+      {Object.entries(remoteStreams).map(([personId, stream]) => (
+        <RemoteAudioFeed key={personId} stream={stream} />
+      ))}
+    </div>
+  );
 };
 
 const LocalCallSoundwave = ({ isMuted }: { isMuted: boolean }) => {
@@ -2366,6 +2454,8 @@ export default function App() {
   const [isHeaderMicMuted, setIsHeaderMicMuted] = React.useState<boolean>(false);
   const [isMicOverlayActive, setIsMicOverlayActive] = React.useState<boolean>(false);
   const [isMicMinimized, setIsMicMinimized] = React.useState<boolean>(false);
+  const [fridayResponse, setFridayResponse] = React.useState<string | null>(null);
+  const [isFridaySpeaking, setIsFridaySpeaking] = React.useState<boolean>(false);
 
   const [transcription, setTranscription] = React.useState<string>("");
   const wasCallMutedBeforeHeyFridayRef = React.useRef<boolean>(false);
@@ -2521,12 +2611,68 @@ export default function App() {
   }, [activeView, isLoggedIn, userProfile]);
 
   const handleLogout = () => {
-    // const { homeSecurityConnection } = initSignalR();
-    // if (homeSecurityConnection && activeChatId && homeSecurityConnection.state === "Connected") {
-    //   homeSecurityConnection.invoke("LeaveChat", activeChatId)
-    //     .then(() => console.log(`Left SignalR chat group ${activeChatId}`))
-    //     .catch(err => console.error("Failed to leave chat on logout:", err));
-    // }
+    // 1. Cancel Speech Synthesis
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+
+    // 2. Stop Speech Recognition
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.onend = null;
+        speechRecognitionRef.current.stop();
+      } catch (e) {}
+    }
+
+    // 3. Disable Friday Assistant Mic Overlay & header mic
+    setIsMicOverlayActive(false);
+    setIsHeaderMicMuted(true);
+    setIsMicMinimized(false);
+
+    // 4. Stop Active Voice Recording & Microphone Stream
+    if (mediaRecorderRef.current) {
+      try {
+        (mediaRecorderRef.current as any).isCancelled = true;
+        if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (e) {}
+    }
+    if (activeStream) {
+      try {
+        activeStream.getTracks().forEach(track => track.stop());
+      } catch (e) {}
+      setActiveStream(null);
+    }
+    setIsRecording(false);
+    setRecordingState('inactive');
+
+    // 5. Disable Call Camera & Mute Microphone / End active calls
+    if (activeCall) {
+      try {
+        if (typeof handleEndCall === 'function') {
+          handleEndCall(activeCall.id).catch(() => {});
+        }
+      } catch (e) {}
+    }
+    setActiveCall(null);
+    setIsCallModalOpen(false);
+    setIsCallCameraEnabled(false);
+    setIsCallMuted(true);
+    if (typeof cleanupAllPeerConnections === 'function') {
+      try { cleanupAllPeerConnections(); } catch (e) {}
+    }
+
+    // 6. Stop all active media tracks across video/audio elements
+    try {
+      const mediaElements = document.querySelectorAll('video, audio');
+      mediaElements.forEach((el: any) => {
+        if (el.srcObject && typeof el.srcObject.getTracks === 'function') {
+          el.srcObject.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+          el.srcObject = null;
+        }
+      });
+    } catch (e) {}
 
     const remembered = localStorage.getItem('remembered_users_list');
     localStorage.clear();
@@ -3571,6 +3717,22 @@ export default function App() {
   const [isCallMuted, setIsCallMuted] = React.useState(false);
   const [isCallCameraEnabled, setIsCallCameraEnabled] = React.useState(false);
   const [isCallScreenSharing, setIsCallScreenSharing] = React.useState(false);
+
+  const isCallMutedRef = React.useRef(isCallMuted);
+  const isCallCameraEnabledRef = React.useRef(isCallCameraEnabled);
+  const isCallScreenSharingRef = React.useRef(isCallScreenSharing);
+
+  React.useEffect(() => {
+    isCallMutedRef.current = isCallMuted;
+  }, [isCallMuted]);
+
+  React.useEffect(() => {
+    isCallCameraEnabledRef.current = isCallCameraEnabled;
+  }, [isCallCameraEnabled]);
+
+  React.useEffect(() => {
+    isCallScreenSharingRef.current = isCallScreenSharing;
+  }, [isCallScreenSharing]);
   const [isCallSpeakerEnabled, setIsCallSpeakerEnabled] = React.useState(false);
   const [callLogs, setCallLogs] = React.useState<CallLogDto[]>([]);
   const [isCallLogsOpen, setIsCallLogsOpen] = React.useState(false);
@@ -3782,169 +3944,511 @@ export default function App() {
     return `${pad(minutes)}:${pad(seconds)}`;
   }, []);
 
-  // WebRTC Peer Connection and signaling handlers
-  const pcRef = React.useRef<RTCPeerConnection | null>(null);
+  // WebRTC Peer Connection and signaling handlers (Multi-Peer Group Call Support)
+  const activeCallRef = React.useRef<CallDto | null>(activeCall);
+  React.useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
 
-  const cleanupPeerConnection = React.useCallback(() => {
-    if (pcRef.current) {
-      console.log("Cleaning up RTCPeerConnection");
-      pcRef.current.onicecandidate = null;
-      pcRef.current.ontrack = null;
-      pcRef.current.oniceconnectionstatechange = null;
-      pcRef.current.close();
-      pcRef.current = null;
+  const peerConnectionsRef = React.useRef<Record<number, RTCPeerConnection>>({});
+  const remoteStreamsRef = React.useRef<Record<number, MediaStream>>({});
+  const pendingIceCandidatesRef = React.useRef<Record<number, RTCIceCandidateInit[]>>({});
+  const localStreamRef = React.useRef<MediaStream | null>(null);
+  const screenStreamRef = React.useRef<MediaStream | null>(null);
+
+  const [remoteStreams, setRemoteStreams] = React.useState<Record<number, MediaStream>>({});
+
+  const cleanupPeerConnectionForPerson = React.useCallback((personId: number) => {
+    const pc = peerConnectionsRef.current[personId];
+    if (pc) {
+      console.log(`[WebRTC Log] Closing RTCPeerConnection for personId=${personId}`);
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.onsignalingstatechange = null;
+      pc.oniceconnectionstatechange = null;
+      pc.onconnectionstatechange = null;
+      pc.close();
+      delete peerConnectionsRef.current[personId];
     }
+    delete remoteStreamsRef.current[personId];
+    delete pendingIceCandidatesRef.current[personId];
+    setRemoteStreams(prev => {
+      const next = { ...prev };
+      delete next[personId];
+      return next;
+    });
+  }, []);
+
+  const cleanupAllPeerConnections = React.useCallback(() => {
+    console.log("[WebRTC Log] Cleaning up all RTCPeerConnections, local media, and screen sharing");
+    Object.entries(peerConnectionsRef.current).forEach(([, pc]: [string, RTCPeerConnection]) => {
+      try {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onsignalingstatechange = null;
+        pc.oniceconnectionstatechange = null;
+        pc.onconnectionstatechange = null;
+        pc.close();
+      } catch (e) {
+        console.warn("[WebRTC Log] Error closing peer connection:", e);
+      }
+    });
+    peerConnectionsRef.current = {};
+
+    if (screenStreamRef.current) {
+      console.log("[WebRTC Log] Stopping screen sharing tracks");
+      screenStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) {}
+      });
+      screenStreamRef.current = null;
+    }
+
+    if (localStreamRef.current) {
+      console.log("[WebRTC Log] Stopping local MediaStream tracks (microphone & camera)");
+      localStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) {}
+      });
+      localStreamRef.current = null;
+    }
+    remoteStreamsRef.current = {};
+    setRemoteStreams({});
+    pendingIceCandidatesRef.current = {};
+    setIsCallScreenSharing(false);
+    setIsCallCameraEnabled(false);
+    setIsCallMuted(true);
+    setIsCallModalOpen(false);
   }, []);
 
   React.useEffect(() => {
     if (!activeCall) {
-      cleanupPeerConnection();
+      cleanupAllPeerConnections();
     }
     return () => {
-      cleanupPeerConnection();
+      cleanupAllPeerConnections();
     };
-  }, [activeCall, cleanupPeerConnection]);
+  }, [activeCall, cleanupAllPeerConnections]);
 
-  const initPeerConnection = React.useCallback((callId: number, chatId: number) => {
-    console.log("Initializing RTCPeerConnection for call", callId, chatId);
-    if (pcRef.current) {
-      cleanupPeerConnection();
+  React.useEffect(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !isCallMuted;
+      });
     }
-    
+  }, [isCallMuted]);
+
+  React.useEffect(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = isCallCameraEnabled;
+      });
+    }
+  }, [isCallCameraEnabled]);
+
+  const getLocalMediaStream = React.useCallback(async (callType?: CallType) => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !isCallMuted; });
+      localStreamRef.current.getVideoTracks().forEach(t => { t.enabled = isCallCameraEnabled; });
+      return localStreamRef.current;
+    }
+    const isVideo = callType === CallType.Video || isCallCameraEnabled;
+    const constraints = {
+      audio: true,
+      video: isVideo ? true : false
+    };
+    console.log(`[WebRTC Log] Requesting getUserMedia:`, constraints);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getAudioTracks().forEach(t => { t.enabled = !isCallMuted; });
+      stream.getVideoTracks().forEach(t => { t.enabled = isCallCameraEnabled; });
+      localStreamRef.current = stream;
+      console.log("[WebRTC Log] Successfully acquired local MediaStream:", stream.getTracks().map(t => `${t.kind}:${t.id}`));
+      return stream;
+    } catch (err) {
+      console.warn("[WebRTC Log] getUserMedia failed with specified constraints, attempting audio-only fallback:", err);
+      try {
+        const audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        audioOnlyStream.getAudioTracks().forEach(t => { t.enabled = !isCallMuted; });
+        localStreamRef.current = audioOnlyStream;
+        console.log("[WebRTC Log] Fallback audio-only MediaStream acquired");
+        return audioOnlyStream;
+      } catch (fallbackErr) {
+        console.error("[WebRTC Log] getUserMedia failed completely:", fallbackErr);
+        return null;
+      }
+    }
+  }, [isCallMuted, isCallCameraEnabled]);
+
+  const getOrCreatePeerConnection = React.useCallback((targetPersonId: number, callId: number, chatId: number) => {
+    if (peerConnectionsRef.current[targetPersonId]) {
+      const existingPc = peerConnectionsRef.current[targetPersonId];
+      if (existingPc.signalingState !== "closed") {
+        return existingPc;
+      }
+    }
+
+    console.log(`[WebRTC Log] Initializing RTCPeerConnection for targetPersonId=${targetPersonId}, callId=${callId}, chatId=${chatId}`);
+
     const pc = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" }
       ],
     });
-    
+
+    pc.onsignalingstatechange = () => {
+      console.log(`[WebRTC Log] [Peer ${targetPersonId}] signalingState:`, pc.signalingState);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC Log] [Peer ${targetPersonId}] iceConnectionState:`, pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[WebRTC Log] [Peer ${targetPersonId}] connectionState:`, pc.connectionState);
+    };
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`[WebRTC Log] [Peer ${targetPersonId}] Local ICE candidate generated:`, event.candidate.candidate);
         const conn = signalRConnectionRef.current;
         if (conn && conn.state === "Connected") {
           const token = localStorage.getItem('token') || '';
-          const currentUserId = userProfileRef.current?.id || 0;
+          const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
           const iceDto: IceCandidateDto = {
             callId,
+            CallId: callId,
             chatId,
+            ChatId: chatId,
             personId: currentUserId,
+            PersonId: currentUserId,
             candidate: event.candidate.candidate,
+            Candidate: event.candidate.candidate,
             sdpMid: event.candidate.sdpMid || undefined,
-            sdpMLineIndex: event.candidate.sdpMLineIndex !== null ? event.candidate.sdpMLineIndex : undefined
+            SdpMid: event.candidate.sdpMid || undefined,
+            sdpMLineIndex: event.candidate.sdpMLineIndex !== null && event.candidate.sdpMLineIndex !== undefined ? event.candidate.sdpMLineIndex : undefined,
+            SdpMLineIndex: event.candidate.sdpMLineIndex !== null && event.candidate.sdpMLineIndex !== undefined ? event.candidate.sdpMLineIndex : undefined
           };
           conn.invoke("IceCandidate", iceDto, token).catch(err => {
-            console.error("Failed to send IceCandidate via SignalR", err);
+            console.error(`[WebRTC Log] [Peer ${targetPersonId}] Failed to send IceCandidate via SignalR:`, err);
           });
         }
+      } else {
+        console.log(`[WebRTC Log] [Peer ${targetPersonId}] End of ICE candidates`);
       }
     };
-    
-    pc.oniceconnectionstatechange = () => {
-      console.log("ICE Connection State changed:", pc.iceConnectionState);
+
+    pc.ontrack = (event) => {
+      console.log(`[WebRTC Log] [Peer ${targetPersonId}] Remote track received:`, event.track.kind, "Streams:", event.streams);
+      let stream = event.streams[0];
+      if (!stream) {
+        stream = new MediaStream([event.track]);
+      } else if (!stream.getTrackById(event.track.id)) {
+        stream.addTrack(event.track);
+      }
+      remoteStreamsRef.current[targetPersonId] = stream;
+      setRemoteStreams(prev => ({
+        ...prev,
+        [targetPersonId]: new MediaStream(stream.getTracks())
+      }));
     };
-    
-    pcRef.current = pc;
+
+    peerConnectionsRef.current[targetPersonId] = pc;
     return pc;
-  }, [cleanupPeerConnection]);
+  }, [userProfile]);
+
+  const flushPendingIceCandidates = React.useCallback(async (personId: number, pc: RTCPeerConnection) => {
+    const queued = pendingIceCandidatesRef.current[personId];
+    if (queued && queued.length > 0) {
+      console.log(`[WebRTC Log] Processing ${queued.length} queued ICE candidate(s) for personId=${personId}...`);
+      const candidatesToProcess = [...queued];
+      pendingIceCandidatesRef.current[personId] = [];
+      for (const cand of candidatesToProcess) {
+        try {
+          console.log(`[WebRTC Log] Adding queued ICE candidate for personId=${personId}:`, cand.candidate);
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.error(`[WebRTC Log] Error adding queued ICE candidate for personId=${personId}:`, e);
+        }
+      }
+    }
+  }, []);
+
+  const createOfferForPeer = React.useCallback(async (targetPersonId: number, callId: number, chatId: number, callType?: CallType) => {
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
+    if (!targetPersonId || targetPersonId === currentUserId) return;
+    console.log(`[WebRTC Log] Initiating Offer flow for targetPersonId=${targetPersonId}, callId=${callId}, chatId=${chatId}`);
+    const conn = signalRConnectionRef.current;
+    if (!conn || conn.state !== "Connected") {
+      console.warn("[WebRTC Log] SignalR connection not ready or not connected for offer flow");
+      return;
+    }
+
+    const token = localStorage.getItem('token') || '';
+
+    try {
+      const pc = getOrCreatePeerConnection(targetPersonId, callId, chatId);
+      const localStream = await getLocalMediaStream(callType);
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          const senders = pc.getSenders();
+          const exists = senders.some(s => s.track?.id === track.id);
+          if (!exists) {
+            console.log(`[WebRTC Log] Adding local track (${track.kind}) for targetPersonId=${targetPersonId}`);
+            pc.addTrack(track, localStream);
+          }
+        });
+      }
+
+      console.log(`[WebRTC Log] Creating Offer SDP for targetPersonId=${targetPersonId}...`);
+      const offer = await pc.createOffer();
+
+      await pc.setLocalDescription(offer);
+      console.log(`[WebRTC Log] [Peer ${targetPersonId}] setLocalDescription succeeded. Signaling state:`, pc.signalingState);
+
+      const offerDto: OfferDto = {
+        callId,
+        CallId: callId,
+        chatId,
+        ChatId: chatId,
+        personId: currentUserId,
+        PersonId: currentUserId,
+        sdp: offer.sdp || '',
+        Sdp: offer.sdp || ''
+      };
+      console.log(`[WebRTC Log] Sending Offer via SignalR to targetPersonId=${targetPersonId}...`);
+      await conn.invoke("Offer", offerDto, token);
+      console.log(`[WebRTC Log] Offer invoked successfully on SignalR for targetPersonId=${targetPersonId}`);
+
+      // Invoke toggle controls
+      const currentMuted = isCallMutedRef.current;
+      const currentCam = isCallCameraEnabledRef.current;
+      const currentShare = isCallScreenSharingRef.current;
+
+      const toggleCallItemsDto: ToggleCallItemsDto = {
+        callId,
+        chatId,
+        personId: currentUserId,
+        isMuted: currentMuted,
+        isCameraEnabled: currentCam,
+        isSharing: currentShare,
+        CallId: callId,
+        ChatId: chatId,
+        PersonId: currentUserId,
+        IsMuted: currentMuted,
+        IsCameraEnabled: currentCam,
+        IsSharing: currentShare
+      };
+      await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch(e => console.warn("Failed sending ToggleCallItems on offer creation:", e));
+      await conn.invoke("ToggleMicrophone", { callId, isMuted: currentMuted }, token).catch(() => {});
+      await conn.invoke("ToggleCamera", { callId, isCameraEnabled: currentCam }, token).catch(() => {});
+      if (currentShare) {
+        await conn.invoke("ScreenShare", { callId, isSharing: true }, token).catch(() => {});
+      }
+    } catch (err) {
+      console.error(`[WebRTC Log] Error creating offer for targetPersonId=${targetPersonId}:`, err);
+    }
+  }, [getOrCreatePeerConnection, getLocalMediaStream, userProfile]);
+
+  const startWebRTCCaller = React.useCallback(async (callId: number, chatId: number, callType?: CallType, targetPersonId?: number) => {
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
+
+    if (targetPersonId && targetPersonId !== currentUserId) {
+      await createOfferForPeer(targetPersonId, callId, chatId, callType);
+      return;
+    }
+
+    const activeParticipants = activeCallRef.current?.participants || [];
+    let remotePersonIds = activeParticipants
+      .map(p => p.personId)
+      .filter(pid => pid && pid !== currentUserId);
+
+    if (remotePersonIds.length === 0) {
+      const callChat = chatsRef.current?.find((c: any) => c.id === chatId);
+      if (callChat && callChat.participants) {
+        remotePersonIds = callChat.participants
+          .map((p: any) => p.personId)
+          .filter((pid: number) => pid && pid !== currentUserId);
+      }
+    }
+
+    console.log(`[WebRTC Log] startWebRTCCaller for remote participant IDs:`, remotePersonIds);
+    for (const pid of remotePersonIds) {
+      await createOfferForPeer(pid, callId, chatId, callType);
+    }
+  }, [createOfferForPeer, userProfile]);
 
   const handleOfferEvent = React.useCallback(async (dto: OfferDto) => {
     if (!dto) return;
-    const currentUserId = userProfileRef.current?.id;
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
     const senderId = dto.personId ?? dto.PersonId;
+    const callId = dto.callId ?? dto.CallId ?? 0;
+    const chatId = dto.chatId ?? dto.ChatId ?? 0;
+    const sdpStr = dto.sdp || dto.Sdp || "";
+
+    console.log(`[WebRTC Log] Received SignalR Offer from personId=${senderId} for callId=${callId}`);
+
     if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("[WebRTC Log] Ignoring Offer originating from current user");
       return;
     }
     
+    if (!sdpStr || !senderId) {
+      console.warn("[WebRTC Log] Offer received with empty SDP or missing senderId");
+      return;
+    }
+
     try {
-      const sdpStr = dto.sdp || dto.Sdp || "";
-      if (!sdpStr) return;
-      
-      // Initialize connection if not already created
-      if (!pcRef.current) {
-        initPeerConnection(dto.callId ?? dto.CallId ?? 0, dto.chatId ?? dto.ChatId ?? 0);
+      const pc = getOrCreatePeerConnection(senderId, callId, chatId);
+
+      const callType = activeCallRef.current?.type;
+      const localStream = await getLocalMediaStream(callType);
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          const senders = pc.getSenders();
+          const exists = senders.some(s => s.track?.id === track.id);
+          if (!exists) {
+            console.log(`[WebRTC Log] Receiver adding local track (${track.kind}) for senderId=${senderId}`);
+            pc.addTrack(track, localStream);
+          }
+        });
       }
-      
-      const pc = pcRef.current;
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription({
-          type: 'offer',
-          sdp: sdpStr
-        }));
-        
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        const conn = signalRConnectionRef.current;
-        if (conn && conn.state === "Connected") {
-          const token = localStorage.getItem('token') || '';
-          const answerDto: AnswerDto = {
-            callId: dto.callId ?? dto.CallId ?? 0,
-            chatId: dto.chatId ?? dto.ChatId ?? 0,
-            personId: currentUserId || 0,
-            sdp: answer.sdp || ""
-          };
-          await conn.invoke("Answer", answerDto, token);
-        }
+
+      console.log(`[WebRTC Log] Receiver setting remote description (Offer SDP) for senderId=${senderId}...`);
+      await pc.setRemoteDescription(new RTCSessionDescription({
+        type: 'offer',
+        sdp: sdpStr
+      }));
+      console.log(`[WebRTC Log] [Peer ${senderId}] setRemoteDescription (Offer) succeeded. Signaling state:`, pc.signalingState);
+
+      await flushPendingIceCandidates(senderId, pc);
+
+      console.log(`[WebRTC Log] Receiver creating answer SDP for senderId=${senderId}...`);
+      const answer = await pc.createAnswer();
+
+      await pc.setLocalDescription(answer);
+      console.log(`[WebRTC Log] [Peer ${senderId}] setLocalDescription (Answer) succeeded. Signaling state:`, pc.signalingState);
+
+      const conn = signalRConnectionRef.current;
+      if (conn && conn.state === "Connected") {
+        const token = localStorage.getItem('token') || '';
+        const answerDto: AnswerDto = {
+          callId,
+          CallId: callId,
+          chatId,
+          ChatId: chatId,
+          personId: currentUserId,
+          PersonId: currentUserId,
+          sdp: answer.sdp || ""
+        };
+        console.log(`[WebRTC Log] Receiver sending Answer via SignalR to senderId=${senderId}...`);
+        await conn.invoke("Answer", answerDto, token);
+        console.log(`[WebRTC Log] Answer invoked successfully on SignalR for senderId=${senderId}`);
+
+        const toggleDto: ToggleCallItemsDto = {
+          callId,
+          chatId,
+          personId: currentUserId,
+          isMuted: isCallMuted,
+          isCameraEnabled: isCallCameraEnabled,
+          isSharing: isCallScreenSharing,
+          CallId: callId,
+          ChatId: chatId,
+          PersonId: currentUserId,
+          IsMuted: isCallMuted,
+          IsCameraEnabled: isCallCameraEnabled,
+          IsSharing: isCallScreenSharing
+        };
+        await conn.invoke("ToggleCallItems", toggleDto, token).catch(e => console.warn("Failed sending ToggleCallItems on answer:", e));
+      } else {
+        console.warn("[WebRTC Log] SignalR connection not ready to send Answer");
       }
     } catch (err) {
-      console.error("Failed to handle offer event", err);
+      console.error(`[WebRTC Log] Failed to handle Offer event from senderId=${senderId}:`, err);
     }
-  }, [initPeerConnection]);
+  }, [getOrCreatePeerConnection, getLocalMediaStream, flushPendingIceCandidates, userProfile]);
 
   const handleAnswerEvent = React.useCallback(async (dto: AnswerDto) => {
     if (!dto) return;
-    const currentUserId = userProfileRef.current?.id;
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
     const senderId = dto.personId ?? dto.PersonId;
+    const sdpStr = dto.sdp || dto.Sdp || "";
+
+    console.log(`[WebRTC Log] Received SignalR Answer from personId=${senderId}`);
+
     if (senderId && currentUserId && senderId === currentUserId) {
+      console.log("[WebRTC Log] Ignoring Answer originating from current user");
       return;
     }
-    
+
+    if (!sdpStr || !senderId) {
+      console.warn("[WebRTC Log] Answer received with empty SDP or missing senderId");
+      return;
+    }
+
     try {
-      const sdpStr = dto.sdp || dto.Sdp || "";
-      if (!sdpStr) return;
-      
-      const pc = pcRef.current;
+      const pc = peerConnectionsRef.current[senderId];
       if (pc) {
+        console.log(`[WebRTC Log] Caller setting remote description (Answer SDP) for senderId=${senderId}...`);
         await pc.setRemoteDescription(new RTCSessionDescription({
           type: 'answer',
           sdp: sdpStr
         }));
+        console.log(`[WebRTC Log] [Peer ${senderId}] setRemoteDescription (Answer) succeeded. Signaling state:`, pc.signalingState);
+
+        await flushPendingIceCandidates(senderId, pc);
+      } else {
+        console.warn(`[WebRTC Log] Received Answer from personId=${senderId} but no active RTCPeerConnection found`);
       }
     } catch (err) {
-      console.error("Failed to handle answer event", err);
+      console.error(`[WebRTC Log] Failed to handle Answer event from personId=${senderId}:`, err);
     }
-  }, []);
+  }, [flushPendingIceCandidates, userProfile]);
 
   const handleIceCandidateEvent = React.useCallback(async (dto: IceCandidateDto) => {
     if (!dto) return;
-    const currentUserId = userProfileRef.current?.id;
+    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
     const senderId = dto.personId ?? dto.PersonId;
+    const candidateStr = dto.candidate || dto.Candidate || "";
+
     if (senderId && currentUserId && senderId === currentUserId) {
       return;
     }
-    
+
+    if (!candidateStr || !senderId) return;
+
+    const candidateInit: RTCIceCandidateInit = {
+      candidate: candidateStr,
+      sdpMid: dto.sdpMid ?? dto.SdpMid ?? undefined,
+      sdpMLineIndex: dto.sdpMLineIndex ?? dto.SdpMLineIndex ?? undefined
+    };
+
+    console.log(`[WebRTC Log] Remote ICE candidate received from personId=${senderId}:`, candidateStr);
+
     try {
-      const candidateStr = dto.candidate || dto.Candidate || "";
-      if (!candidateStr) return;
-      
-      const pc = pcRef.current;
-      if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate({
-          candidate: candidateStr,
-          sdpMid: dto.sdpMid || dto.SdpMid || undefined,
-          sdpMLineIndex: dto.sdpMLineIndex ?? dto.SdpMLineIndex ?? undefined
-        }));
+      const pc = peerConnectionsRef.current[senderId];
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        console.log(`[WebRTC Log] Adding remote ICE candidate directly to peerConnection for personId=${senderId}`);
+        await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+      } else {
+        console.log(`[WebRTC Log] Remote description not set yet for personId=${senderId}. Queueing ICE candidate...`);
+        if (!pendingIceCandidatesRef.current[senderId]) {
+          pendingIceCandidatesRef.current[senderId] = [];
+        }
+        pendingIceCandidatesRef.current[senderId].push(candidateInit);
       }
     } catch (err) {
-      console.error("Failed to handle IceCandidate event", err);
+      console.error(`[WebRTC Log] Failed to handle IceCandidate event from personId=${senderId}:`, err);
     }
-  }, []);
+  }, [userProfile]);
 
   const handleToggleCallItemsEvent = React.useCallback((dto: ToggleCallItemsDto) => {
     if (!dto) return;
-    const currentUserId = userProfileRef.current?.id;
-    const senderId = dto.personId ?? dto.PersonId;
-    if (senderId && currentUserId && senderId === currentUserId) {
+    const currentUserId = userProfileRef.current?.id || userProfile?.id;
+    const senderId = dto.personId ?? dto.PersonId ?? (dto as any).participant?.personId ?? (dto as any).participant?.PersonId;
+    if (senderId != null && currentUserId != null && Number(senderId) === Number(currentUserId)) {
       return;
     }
     
@@ -3959,7 +4463,7 @@ export default function App() {
       return {
         ...prev,
         participants: prev.participants.map(p => {
-          if (p.personId === senderId) {
+          if (Number(p.personId) === Number(senderId)) {
             return {
               ...p,
               isMuted,
@@ -3971,97 +4475,7 @@ export default function App() {
         })
       };
     });
-  }, []);
-
-  const invokeCallSignalingSequence = React.useCallback(async (callId: number, chatId: number) => {
-    if (!callId || !chatId) return;
-    const conn = signalRConnectionRef.current;
-    if (!conn || conn.state !== "Connected") {
-      console.warn("SignalR connection not ready or not connected for call signaling sequence");
-      return;
-    }
-
-    const token = localStorage.getItem('token') || '';
-    const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
-
-    try {
-      let pc = pcRef.current;
-      if (!pc) {
-        pc = initPeerConnection(callId, chatId);
-        try {
-          pc.createDataChannel("signaling");
-        } catch (e) {}
-      }
-
-      let sdpStr = pc.localDescription?.sdp || "";
-      if (!sdpStr) {
-        try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          sdpStr = offer.sdp || "";
-        } catch (e) {
-          console.warn("Could not create WebRTC offer SDP:", e);
-        }
-      }
-
-      // 1. Invoke Offer
-      const offerDto: OfferDto = {
-        callId,
-        CallId: callId,
-        chatId,
-        ChatId: chatId,
-        personId: currentUserId,
-        PersonId: currentUserId,
-        sdp: sdpStr,
-        Sdp: sdpStr
-      };
-      await conn.invoke("Offer", offerDto, token).catch((err: any) => {
-        console.warn("Failed to invoke Offer via SignalR:", err);
-      });
-
-      // 2. Invoke IceCandidate
-      const candidateStr = "candidate:1 1 UDP 2013266431 127.0.0.1 34567 typ host";
-      const iceCandidateDto: IceCandidateDto = {
-        callId,
-        CallId: callId,
-        chatId,
-        ChatId: chatId,
-        personId: currentUserId,
-        PersonId: currentUserId,
-        candidate: candidateStr,
-        Candidate: candidateStr,
-        sdpMid: "0",
-        SdpMid: "0",
-        sdpMLineIndex: 0,
-        SdpMLineIndex: 0
-      };
-      await conn.invoke("IceCandidate", iceCandidateDto, token).catch((err: any) => {
-        console.warn("Failed to invoke IceCandidate via SignalR:", err);
-      });
-
-      // 3. Invoke ToggleCallItems
-      const toggleCallItemsDto: ToggleCallItemsDto = {
-        callId,
-        CallId: callId,
-        chatId,
-        ChatId: chatId,
-        personId: currentUserId,
-        PersonId: currentUserId,
-        isMuted: isCallMuted,
-        IsMuted: isCallMuted,
-        isCameraEnabled: isCallCameraEnabled,
-        IsCameraEnabled: isCallCameraEnabled,
-        isSharing: isCallScreenSharing,
-        IsSharing: isCallScreenSharing
-      };
-      await conn.invoke("ToggleCallItems", toggleCallItemsDto, token).catch((err: any) => {
-        console.warn("Failed to invoke ToggleCallItems via SignalR:", err);
-      });
-    } catch (err) {
-      console.error("Error during invokeCallSignalingSequence:", err);
-    }
-  }, [initPeerConnection, isCallMuted, isCallCameraEnabled, isCallScreenSharing, userProfile]);
-
+  }, [userProfile]);
 
   const handleCallStatusUpdate = React.useCallback((eventName: "IncomingCall" | "CallAccepted" | "CallRejected" | "CallEnded" | "CallTimedOut" | "ParticipantLeft" | "ParticipantJoined" | "ParticipantJoinedCall" | "ParticipantAddedToCall", payload: any) => {
     if (!payload) return;
@@ -4079,23 +4493,61 @@ export default function App() {
       setIsCallCameraEnabled(callDto.type === CallType.Video);
       setIsCallScreenSharing(false);
       toast.info(`Incoming ${callDto.type === CallType.Video ? 'video' : 'voice'} call...`);
-      if (callDto && callDto.id) {
-        invokeCallSignalingSequence(callDto.id, callDto.chatId);
-      }
     } else if (eventName === "CallAccepted") {
       setActiveCall(callDto);
       setIsIncomingCall(false);
       toast.success("Call answered");
-      if (callDto && callDto.id) {
-        invokeCallSignalingSequence(callDto.id, callDto.chatId);
+      if (callDto && callDto.id && callDto.callerPersonId === currentUserId) {
+        startWebRTCCaller(callDto.id, callDto.chatId, callDto.type);
       }
     } else if (eventName === "ParticipantJoined" || eventName === "ParticipantJoinedCall" || (eventName as string) === "ParticipantAddedToCall") {
       if (callDto && callDto.id) {
         setActiveCall(callDto);
         toast.info("A participant joined the call");
-        invokeCallSignalingSequence(callDto.id, callDto.chatId);
+        const joinedPersonId = payload?.personId || payload?.PersonId || payload?.participant?.personId || payload?.participant?.PersonId;
+        
+        // 1. Invoke Offer and ICE Candidate generation/exchange for joined participant
+        startWebRTCCaller(callDto.id, callDto.chatId, callDto.type, joinedPersonId);
+
+        // 2. Invoke toggle controls (ToggleCallItems, ToggleMicrophone, ToggleCamera, ScreenShare)
+        try {
+          const conn = signalRConnectionRef.current;
+          if (conn && conn.state === "Connected") {
+            const token = localStorage.getItem('token') || '';
+            const currentMuted = isCallMutedRef.current;
+            const currentCam = isCallCameraEnabledRef.current;
+            const currentShare = isCallScreenSharingRef.current;
+
+            const toggleDto: ToggleCallItemsDto = {
+              callId: callDto.id,
+              chatId: callDto.chatId,
+              personId: currentUserId,
+              isMuted: currentMuted,
+              isCameraEnabled: currentCam,
+              isSharing: currentShare,
+              CallId: callDto.id,
+              ChatId: callDto.chatId,
+              PersonId: currentUserId,
+              IsMuted: currentMuted,
+              IsCameraEnabled: currentCam,
+              IsSharing: currentShare
+            };
+            conn.invoke("ToggleCallItems", toggleDto, token).catch(() => {});
+            conn.invoke("ToggleMicrophone", { callId: callDto.id, isMuted: currentMuted }, token).catch(() => {});
+            conn.invoke("ToggleCamera", { callId: callDto.id, isCameraEnabled: currentCam }, token).catch(() => {});
+            if (currentShare) {
+              conn.invoke("ScreenShare", { callId: callDto.id, isSharing: true }, token).catch(() => {});
+            }
+          }
+        } catch (err) {
+          console.warn("[WebRTC Log] Failed to send toggle controls on participant join:", err);
+        }
       }
     } else if (eventName === "CallRejected" || eventName === "ParticipantLeft") {
+      const leftPersonId = payload?.personId || payload?.PersonId || (isLegacy ? legacyData?.personId : undefined);
+      if (leftPersonId) {
+        cleanupPeerConnectionForPerson(leftPersonId);
+      }
       if (isLegacy && legacyData) {
         const data = legacyData;
         setActiveCall(prev => {
@@ -4103,6 +4555,7 @@ export default function App() {
           if (data.callStatus === CallStatus.Ended || data.callStatus === CallStatus.Rejected) {
             setIsCallModalOpen(false);
             setIsCallCameraEnabled(false);
+            cleanupAllPeerConnections();
             toast.info("Call ended/rejected");
             return null;
           }
@@ -4125,6 +4578,7 @@ export default function App() {
           if (callDto.status === CallStatus.Ended || callDto.status === CallStatus.Rejected || !isUserActive) {
             setIsCallModalOpen(false);
             setIsCallCameraEnabled(false);
+            cleanupAllPeerConnections();
             toast.info("Call ended/rejected");
             return null;
           }
@@ -4133,6 +4587,7 @@ export default function App() {
         });
       }
     } else if (eventName === "CallEnded") {
+      cleanupAllPeerConnections();
       if (isLegacy && legacyData) {
         const data = legacyData;
         setActiveCall(prev => {
@@ -4615,11 +5070,60 @@ export default function App() {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, unreadCount: 0 } : c));
   };
 
+  const loadMyChatsRef = React.useRef<((force?: boolean) => Promise<void>) | null>(null);
   const chatsRef = React.useRef<ChatDto[]>([]);
+  const allUsersRef = React.useRef<GetPersonDto[]>([]);
   const callLogsRef = React.useRef<CallLogDto[]>([]);
+  const pendingVoiceActionRef = React.useRef<{
+    type: 'voice_message_recipient' | 'voice_call_recipient' | 'video_call_recipient';
+  } | null>(null);
+
   React.useEffect(() => {
     callLogsRef.current = callLogs;
   }, [callLogs]);
+
+  React.useEffect(() => {
+    allUsersRef.current = allUsers;
+  }, [allUsers]);
+
+  const findChatOrUserByName = React.useCallback(async (nameQuery: string): Promise<{ chatId: number; name: string } | null> => {
+    if (!nameQuery || !nameQuery.trim()) return null;
+    let cleanQ = nameQuery.toLowerCase().trim();
+    cleanQ = cleanQ.replace(/^(to|with|for|a|call|message|text|the)\s+/gi, '').trim();
+    if (!cleanQ) return null;
+
+    // 1. Search existing group or 1-on-1 chats
+    for (const c of (chatsRef.current || [])) {
+      const displayName = getChatDisplayName(c).toLowerCase();
+      if (displayName.includes(cleanQ) || cleanQ.includes(displayName) || (c.isGroup && c.name && c.name.toLowerCase().includes(cleanQ))) {
+        return { chatId: c.id, name: getChatDisplayName(c) };
+      }
+    }
+
+    // 2. Search users in allUsers
+    for (const u of (allUsersRef.current || [])) {
+      const firstName = (u.getPersonDetailsDto?.firstName || '').toLowerCase();
+      const lastName = (u.getPersonDetailsDto?.lastName || '').toLowerCase();
+      const fullName = `${firstName} ${lastName}`.trim();
+      if (fullName.includes(cleanQ) || cleanQ.includes(fullName) || (firstName.length > 1 && cleanQ.includes(firstName))) {
+        const existingChat = (chatsRef.current || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id));
+        if (existingChat) {
+          return { chatId: existingChat.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` };
+        }
+        try {
+          const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${u.id}`, { method: 'POST' });
+          if (loadMyChatsRef.current) {
+            await loadMyChatsRef.current(true);
+          }
+          const cId = response?.id || (chatsRef.current || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id))?.id;
+          if (cId) {
+            return { chatId: cId, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` };
+          }
+        } catch (err) {}
+      }
+    }
+    return null;
+  }, [getChatDisplayName]);
 
   React.useEffect(() => {
     chatsRef.current = chats;
@@ -4695,7 +5199,7 @@ export default function App() {
         setIsCallModalOpen(true);
         toast.success(`Outgoing ${type === CallType.Video ? 'video' : 'voice'} call started...`);
         if (callData && callData.id) {
-          invokeCallSignalingSequence(callData.id, callData.chatId);
+          startWebRTCCaller(callData.id, callData.chatId, type);
         }
       } else {
         toast.error("Failed to start call");
@@ -4885,15 +5389,41 @@ export default function App() {
       setIsCallMuted(false);
       setIsCallScreenSharing(false);
 
-      // 3. Perform SignalR/WebRTC signaling sequence (Offer, IceCandidate, ToggleCallItems)
-      await invokeCallSignalingSequence(callId, chatId);
+      // 3. Perform SignalR/WebRTC signaling sequence
+      const callType = targetLog?.type ?? (targetLog as any)?.callType ?? CallType.Voice;
+      await startWebRTCCaller(callId, chatId, callType);
+
+      try {
+        const token = localStorage.getItem('token') || '';
+        const conn = signalRConnectionRef.current;
+        if (conn && conn.state === "Connected") {
+          const currentUserId = userProfileRef.current?.id || userProfile?.id || 0;
+          const toggleDto: ToggleCallItemsDto = {
+            callId,
+            chatId,
+            personId: currentUserId,
+            isMuted: false,
+            isCameraEnabled: callType === CallType.Video,
+            isSharing: false,
+            CallId: callId,
+            ChatId: chatId,
+            PersonId: currentUserId,
+            IsMuted: false,
+            IsCameraEnabled: callType === CallType.Video,
+            IsSharing: false
+          };
+          await conn.invoke("ToggleCallItems", toggleDto, token).catch(() => {});
+        }
+      } catch (e) {
+        console.warn("Failed sending ToggleCallItems on accept:", e);
+      }
 
       toast.success("Joined call");
     } catch (err) {
       console.error("Failed to accept call", err);
       toast.error("Failed to accept call");
     }
-  }, [initPeerConnection]);
+  }, [startWebRTCCaller]);
 
   const handleToggleCallMicrophone = React.useCallback(async () => {
     if (!activeCall) return;
@@ -4957,36 +5487,136 @@ export default function App() {
     }
   }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing]);
 
+  const stopScreenSharingInternal = React.useCallback(async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) {}
+      });
+      screenStreamRef.current = null;
+    }
+    setIsCallScreenSharing(false);
+
+    // Restore camera video track on all peer connections if camera is enabled & track available
+    let cameraTrack: MediaStreamTrack | null = null;
+    if (localStreamRef.current && isCallCameraEnabled) {
+      const vTracks = localStreamRef.current.getVideoTracks();
+      if (vTracks.length > 0 && vTracks[0].readyState === 'live') {
+        cameraTrack = vTracks[0];
+      }
+    }
+
+    (Object.values(peerConnectionsRef.current) as RTCPeerConnection[]).forEach(pc => {
+      try {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.transport));
+        if (videoSender) {
+          videoSender.replaceTrack(cameraTrack).catch(err => {
+            console.warn("[WebRTC Log] Failed to restore camera track via replaceTrack:", err);
+          });
+        }
+      } catch (err) {
+        console.warn("[WebRTC Log] Error restoring track on peer connection during stop screen share:", err);
+      }
+    });
+
+    if (activeCallRef.current) {
+      try {
+        const token = localStorage.getItem('token') || '';
+        const conn = signalRConnectionRef.current;
+        if (conn && conn.state === "Connected") {
+          await conn.invoke("ScreenShare", { callId: activeCallRef.current.id, isSharing: false }, token);
+          const toggleCallItemsDto: ToggleCallItemsDto = {
+            callId: activeCallRef.current.id,
+            chatId: activeCallRef.current.chatId,
+            personId: userProfileRef.current?.id || 0,
+            isMuted: isCallMuted,
+            isCameraEnabled: isCallCameraEnabled,
+            isSharing: false,
+            CallId: activeCallRef.current.id,
+            ChatId: activeCallRef.current.chatId,
+            PersonId: userProfileRef.current?.id || 0,
+            IsMuted: isCallMuted,
+            IsCameraEnabled: isCallCameraEnabled,
+            IsSharing: false
+          };
+          await conn.invoke("ToggleCallItems", toggleCallItemsDto, token);
+        }
+      } catch (err) {
+        console.warn("Failed to notify screen share stop on server", err);
+      }
+    }
+  }, [isCallMuted, isCallCameraEnabled]);
+
   const handleToggleCallScreenShare = React.useCallback(async () => {
     if (!activeCall) return;
-    const nextShare = !isCallScreenSharing;
-    setIsCallScreenSharing(nextShare);
+
+    if (isCallScreenSharing) {
+      await stopScreenSharingInternal();
+      return;
+    }
+
     try {
+      console.log("[WebRTC Log] Calling navigator.mediaDevices.getDisplayMedia({ video: true })");
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      screenStreamRef.current = displayStream;
+      const displayTrack = displayStream.getVideoTracks()[0];
+
+      if (!displayTrack) {
+        console.warn("[WebRTC Log] No video track returned by getDisplayMedia");
+        return;
+      }
+
+      // Replace camera track using RTCRtpSender.replaceTrack() across all active peer connections
+      (Object.values(peerConnectionsRef.current) as RTCPeerConnection[]).forEach(pc => {
+        try {
+          const senders = pc.getSenders();
+          const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.transport));
+          if (videoSender) {
+            console.log("[WebRTC Log] Replacing video track with displayTrack using RTCRtpSender.replaceTrack()");
+            videoSender.replaceTrack(displayTrack).catch(err => {
+              console.warn("[WebRTC Log] replaceTrack screen share error:", err);
+            });
+          } else if (localStreamRef.current) {
+            console.log("[WebRTC Log] No video sender found, adding displayTrack to peer connection");
+            pc.addTrack(displayTrack, displayStream);
+          }
+        } catch (err) {
+          console.warn("[WebRTC Log] Error replacing track during screen share start:", err);
+        }
+      });
+
+      displayTrack.onended = () => {
+        console.log("[WebRTC Log] Screen share track onended event triggered (browser native bar)");
+        stopScreenSharingInternal();
+      };
+
+      setIsCallScreenSharing(true);
+
       const token = localStorage.getItem('token') || '';
       const conn = signalRConnectionRef.current;
       if (conn && conn.state === "Connected") {
-        await conn.invoke("ScreenShare", { callId: activeCall.id, isSharing: nextShare }, token);
-        
+        await conn.invoke("ScreenShare", { callId: activeCall.id, isSharing: true }, token);
         const toggleCallItemsDto: ToggleCallItemsDto = {
           callId: activeCall.id,
           chatId: activeCall.chatId,
           personId: userProfileRef.current?.id || 0,
           isMuted: isCallMuted,
           isCameraEnabled: isCallCameraEnabled,
-          isSharing: nextShare,
+          isSharing: true,
           CallId: activeCall.id,
           ChatId: activeCall.chatId,
           PersonId: userProfileRef.current?.id || 0,
           IsMuted: isCallMuted,
           IsCameraEnabled: isCallCameraEnabled,
-          IsSharing: nextShare
+          IsSharing: true
         };
         await conn.invoke("ToggleCallItems", toggleCallItemsDto, token);
       }
     } catch (err) {
-      console.warn("Failed to notify screen share toggle on server", err);
+      console.warn("[WebRTC Log] Screen sharing failed or cancelled by user:", err);
+      setIsCallScreenSharing(false);
     }
-  }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing]);
+  }, [activeCall, isCallMuted, isCallCameraEnabled, isCallScreenSharing, stopScreenSharingInternal]);
 
   const handleToggleCallSpeaker = React.useCallback(() => {
     if (!activeCall) return;
@@ -5138,6 +5768,7 @@ export default function App() {
       setIsChatsLoading(false);
     }
   };
+  loadMyChatsRef.current = loadMyChats;
 
   React.useEffect(() => {
     if (isChatModalOpen && !hasLoadedChats) {
@@ -6173,8 +6804,18 @@ export default function App() {
       handleLogout();
     });
 
+    hs.on("LogOut", (personId: any) => {
+      console.log("LogOut event received from SignalR hub for personId:", personId);
+      const currentPersonId = userProfileRef.current?.id || userProfileRef.current?.getUserDto?.personId;
+      if (personId === undefined || personId === null || String(personId) === String(currentPersonId)) {
+        toast.info("Session ended: Logged out from all devices");
+        handleLogout();
+      }
+    });
+
     return () => {
        hs.off("HighLevelLogOut");
+       hs.off("LogOut");
        hs.off("ActionCreated");
        hs.off("ActionUpdated");
        hs.off("ActionActivationChanged");
@@ -6343,7 +6984,8 @@ export default function App() {
   }, [chatMessages, isChatModalOpen, activeChatId]);
 
   const sendVoiceNote = React.useCallback(async () => {
-    const mergedBlob = new Blob(voiceNotePartsRef.current, { type: 'audio/mp3' });
+    const mime = voiceNotePartsRef.current[0]?.type || getSupportedAudioMimeType();
+    const mergedBlob = new Blob(voiceNotePartsRef.current, { type: mime });
     if (mergedBlob.size === 0) {
       setIsRecording(false);
       setRecordingState('inactive');
@@ -6354,7 +6996,8 @@ export default function App() {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64Audio = reader.result?.toString() || '';
-      const voiceFileName = `voice_note_${Date.now()}.mp3`;
+      const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
+      const voiceFileName = `voice_note_${Date.now()}.${ext}`;
       
       const sendDto: SendMessageDto = {
         chatId: activeChatId!,
@@ -6364,7 +7007,7 @@ export default function App() {
           {
             fileName: voiceFileName,
             filePath: base64Audio,
-            contentType: 'audio/mp3',
+            contentType: mime.split(';')[0],
             fileSize: mergedBlob.size,
             thumbnailPath: ''
           }
@@ -6436,7 +7079,8 @@ export default function App() {
       (window as any).lastTypingSentTime = Date.now();
       apiFetch(`/Message/Typing?chatId=${targetId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
       
-      const recorder = new MediaRecorder(stream);
+      const recMime = getSupportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, { mimeType: recMime });
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
       voiceNotePartsRef.current = [];
@@ -6459,7 +7103,7 @@ export default function App() {
         }
 
         if (audioChunksRef.current.length > 0) {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+          const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
           voiceNotePartsRef.current.push(audioBlob);
           const url = URL.createObjectURL(audioBlob);
           setPlaybackPreviewUrl(url);
@@ -7119,6 +7763,32 @@ export default function App() {
     }
   };
 
+  const handleLogoutEverywhere = async () => {
+    const personId = userProfile?.id || userProfile?.getUserDto?.personId || userProfileRef.current?.id;
+    if (!personId) {
+      toast.error("Unable to identify user profile");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token') || '';
+      await apiFetch<any>(`/User/LogOutPersonId?personId=${personId}`, {
+        method: 'POST',
+        body: JSON.stringify({ token, personId })
+      }).catch(async () => {
+        return await apiFetch<any>(`/User/LogOutPersonId?token=${encodeURIComponent(token)}&personId=${personId}`, {
+          method: 'GET'
+        }).catch(() => {});
+      });
+
+      toast.success("Successfully logged out from all app sessions");
+      handleLogout();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to logout everywhere');
+      handleLogout();
+    }
+  };
+
   const refreshContactCategories = () => {
     apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
       .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); })
@@ -7701,7 +8371,30 @@ export default function App() {
     try {
       if (d.type === 'door') {
         const doorDto = (doors || []).find(x => x.id.toString() === rawId.toString());
-        if (action === 'lock' && isCurrentlyOpen) {
+        if (action === 'lock') {
+          if (isCurrentlyOpen) {
+            await apiFetch('/Door/UpdateDoor', {
+              method: 'PUT',
+              body: JSON.stringify({
+                id: Number(rawId),
+                roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
+                sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
+                isHidden: getProp(doorDto, 'isHidden') ?? false,
+                doorName: getProp(doorDto, 'doorName') || d.name,
+                doorType: resolveDoorType(getProp(doorDto, 'doorType')),
+                isLocked: true,
+                isOpen: false,
+                openedBy: 0,
+                lockedBy: 0,
+                unlockedBy: 0
+              })
+            });
+          } else {
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+          }
+        } else if (action === 'unlock') {
+          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open') {
           await apiFetch('/Door/UpdateDoor', {
             method: 'PUT',
             body: JSON.stringify({
@@ -7711,23 +8404,30 @@ export default function App() {
               isHidden: getProp(doorDto, 'isHidden') ?? false,
               doorName: getProp(doorDto, 'doorName') || d.name,
               doorType: resolveDoorType(getProp(doorDto, 'doorType')),
-              isLocked: true,
+              isLocked: false,
+              isOpen: true,
+              openedBy: 0,
+              lockedBy: 0,
+              unlockedBy: 0
+            })
+          });
+        } else if (action === 'close') {
+          await apiFetch('/Door/UpdateDoor', {
+            method: 'PUT',
+            body: JSON.stringify({
+              id: Number(rawId),
+              roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
+              sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
+              isHidden: getProp(doorDto, 'isHidden') ?? false,
+              doorName: getProp(doorDto, 'doorName') || d.name,
+              doorType: resolveDoorType(getProp(doorDto, 'doorType')),
+              isLocked: false,
               isOpen: false,
               openedBy: 0,
               lockedBy: 0,
               unlockedBy: 0
             })
           });
-        } else {
-          if (action === 'lock') {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'unlock') {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'open') {
-            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-          } else if (action === 'close') {
-            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-          }
         }
         setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
@@ -7735,10 +8435,39 @@ export default function App() {
           isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       } else if (d.type === 'window') {
-        if (action === 'lock' || action === 'unlock') {
+        const windowDto = (windows || []).find(x => x.id.toString() === rawId.toString());
+        if (action === 'lock') {
           await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open' || action === 'close') {
+        } else if (action === 'unlock') {
           await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open') {
+          await apiFetch('/Window/UpdateWindow', {
+            method: 'PUT',
+            body: JSON.stringify({
+              id: Number(rawId),
+              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
+              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
+              isHidden: getProp(windowDto, 'isHidden') ?? false,
+              windowName: getProp(windowDto, 'windowName') || d.name,
+              windowType: getProp(windowDto, 'windowType') || 1,
+              isLocked: false,
+              isOpen: true
+            })
+          });
+        } else if (action === 'close') {
+          await apiFetch('/Window/UpdateWindow', {
+            method: 'PUT',
+            body: JSON.stringify({
+              id: Number(rawId),
+              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
+              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
+              isHidden: getProp(windowDto, 'isHidden') ?? false,
+              windowName: getProp(windowDto, 'windowName') || d.name,
+              windowType: getProp(windowDto, 'windowType') || 1,
+              isLocked: false,
+              isOpen: false
+            })
+          });
         }
         setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
@@ -7746,10 +8475,10 @@ export default function App() {
           isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       }
-      toast.success(`${d.type} toggled successfully`);
+      toast.success(`${d.type} ${action}ed successfully`);
     } catch (err: any) {
-      console.error(`Failed to toggle ${d.type} remotely`, err);
-      toast.error(`Remote toggle failed: ${err.message}`);
+      console.error(`Failed to ${action} ${d.type} remotely`, err);
+      toast.error(`Remote action failed: ${err.message}`);
       return; 
     }
 
@@ -8753,7 +9482,7 @@ export default function App() {
                         </div>
                         <div className="flex-1 min-w-0 text-left">
                           <p className="text-sm truncate font-medium"><span className="font-semibold text-slate-900 dark:text-zinc-100">{firstName}</span>: <span className="text-slate-700 dark:text-zinc-300">{log.logDetails}</span></p>
-                          <p className="text-xs text-slate-500 dark:text-zinc-400">{new Date(log.timeOfAction).toLocaleTimeString()}</p>
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">{formatRelativeTime(log.timeOfAction)}</p>
                         </div>
                       </div>
                     );
@@ -9050,7 +9779,7 @@ export default function App() {
                         </p>
                         <p className="mt-1.5 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1">
                           <Clock className="h-3 w-3 inline text-primary/75" />
-                          {new Date(log.timeOfAction).toLocaleString()}
+                          {formatRelativeTime(log.timeOfAction)}
                         </p>
                       </div>
                     </div>
@@ -9154,7 +9883,7 @@ export default function App() {
                     <div className="space-y-1.5 bg-muted/10 p-4 rounded-xl border text-left">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 block text-left">Timestamp of Event</span>
                       <div className="text-xs font-medium space-y-1.5 text-left">
-                        <p className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-primary" /> <span className="text-foreground font-semibold">Local:</span> {new Date(selectedLog.timeOfAction).toLocaleString()}</p>
+                        <p className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-primary" /> <span className="text-foreground font-semibold">Time:</span> {formatRelativeTime(selectedLog.timeOfAction)} <span className="text-slate-400 font-normal text-[11px]">({new Date(selectedLog.timeOfAction).toLocaleString()})</span></p>
                         <p className="flex items-center gap-2 text-slate-500 dark:text-zinc-400"><CalendarDays className="h-3.5 w-3.5" /> <span className="font-semibold text-[11px]">UTC:</span> <span className="font-mono text-[11px]">{selectedLog.timeOfAction}</span></p>
                       </div>
                     </div>
@@ -9892,7 +10621,15 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-8">
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-8">
+                  <Button 
+                    variant="outline"
+                    className="bg-transparent border-2 border-red-500 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 rounded-full px-6 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto font-bold"
+                    onClick={handleLogoutEverywhere}
+                  >
+                    <LogOut className="mr-2 h-4 w-4 text-red-500 dark:text-red-400" />
+                    Logout From All Devices
+                  </Button>
                   <Button 
                     className="bg-transparent border-2 border-green-400 dark:border-green-600 text-slate-900 dark:text-zinc-100 hover:bg-green-50 dark:hover:bg-green-950/40 rounded-full px-8 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto"
                     onClick={handleUpdateProfile}
@@ -11534,30 +12271,91 @@ export default function App() {
 
 
   const speakVoiceResponse = (text: string) => {
+    setFridayResponse(text);
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
+      
+      utterance.onstart = () => {
+        setIsFridaySpeaking(true);
+      };
+      utterance.onend = () => {
+        setIsFridaySpeaking(false);
+      };
+      utterance.onerror = () => {
+        setIsFridaySpeaking(false);
+      };
+
       const selectFeminineVoice = () => {
         const voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) return null;
+
+        const maleKeywords = [
+          'male', 'david', 'mark', 'george', 'guy', 'alex', 'fred', 'daniel', 
+          'paul', 'brian', 'james', 'thomas', 'richard', 'steve', 'aaron', 
+          'microsoft david', 'microsoft mark', 'google us english male',
+          'microsoft ravi', 'microsoft heami'
+        ];
+
         const feminineKeywords = [
           'female', 'samantha', 'zira', 'victoria', 'karen', 'fiona', 
-          'google us english', 'microsoft zira', 'microsoft eva', 'siri', 
-          'jenny', 'aria', 'sonia', 'serena', 'stephanie', 'veena'
+          'microsoft zira', 'microsoft eva', 'microsoft hazel', 'microsoft susan',
+          'siri', 'jenny', 'aria', 'sonia', 'serena', 'stephanie', 'veena',
+          'allison', 'ava', 'catherine', 'helena', 'monica', 'zora', 'amira', 'nora',
+          'susan', 'hazel', 'google uk english female', 'google us english female', 'google us english'
         ];
+
+        // 1. Search for English voices matching female keywords and excluding male keywords
         let chosen = voices.find(v => 
-          v.lang.startsWith('en') && feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
+          v.lang.startsWith('en') &&
+          feminineKeywords.some(kw => v.name.toLowerCase().includes(kw)) &&
+          !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
         );
+
+        // 2. Search any language voice matching female keywords and excluding male keywords
         if (!chosen) {
-          chosen = voices.find(v => v.lang.startsWith('en'));
+          chosen = voices.find(v => 
+            feminineKeywords.some(kw => v.name.toLowerCase().includes(kw)) &&
+            !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
+          );
         }
-        return chosen;
+
+        // 3. Fallback: English non-male voice
+        if (!chosen) {
+          chosen = voices.find(v => 
+            v.lang.startsWith('en') && 
+            !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
+          );
+        }
+
+        // 4. Any non-male voice
+        if (!chosen) {
+          chosen = voices.find(v => !maleKeywords.some(mk => v.name.toLowerCase().includes(mk)));
+        }
+
+        return chosen || null;
       };
 
       const voice = selectFeminineVoice();
       if (voice) utterance.voice = voice;
-      utterance.pitch = 1.2;
+      utterance.pitch = 1.3;
       utterance.rate = 1.0;
+      
+      setIsFridaySpeaking(true);
       window.speechSynthesis.speak(utterance);
+
+      const wordCount = text.split(' ').length;
+      const estimatedMs = Math.max(1800, wordCount * 400);
+      setTimeout(() => {
+        if (!window.speechSynthesis.speaking) {
+          setIsFridaySpeaking(false);
+        }
+      }, estimatedMs);
+    } else {
+      setIsFridaySpeaking(true);
+      setTimeout(() => {
+        setIsFridaySpeaking(false);
+      }, 2000);
     }
   };
 
@@ -11567,13 +12365,426 @@ export default function App() {
     lower = lower.replace(/\b(um|uh|hmm|mhm|shh|like|you know|so yeah|background|noise)\b/gi, " ").replace(/\s+/g, " ").trim();
     if (!lower) return;
 
-    // A. Permissions Guard: Friday cannot open add or edit functions EXCEPT chat modals
+    // 0. Pending action check (e.g., Awaiting contact/recipient name)
+    if (pendingVoiceActionRef.current) {
+      const actionType = pendingVoiceActionRef.current.type;
+      pendingVoiceActionRef.current = null;
+
+      const matched = await findChatOrUserByName(lower);
+      if (matched) {
+        if (actionType === 'voice_message_recipient') {
+          setIsChatModalOpen(true);
+          setActiveChatId(matched.chatId);
+          await startChatVoiceRecording(matched.chatId);
+          setIsMicMinimized(true);
+          const resp = `Starting voice message for ${matched.name}.`;
+          speakVoiceResponse(resp);
+          toast.success(resp);
+          return;
+        } else if (actionType === 'voice_call_recipient') {
+          await handleStartCall(matched.chatId, CallType.Voice);
+          setIsMicMinimized(true);
+          const resp = `Starting voice call with ${matched.name}.`;
+          speakVoiceResponse(resp);
+          return;
+        } else if (actionType === 'video_call_recipient') {
+          await handleStartCall(matched.chatId, CallType.Video);
+          setIsMicMinimized(true);
+          const resp = `Starting video call with ${matched.name}.`;
+          speakVoiceResponse(resp);
+          return;
+        }
+      } else {
+        const resp = `I couldn't find a contact matching ${lower}.`;
+        speakVoiceResponse(resp);
+        toast.error(resp);
+        return;
+      }
+    }
+
+    // 0.1 Friday Quit / Close / End Assistant Command
+    if (
+      lower === "friday quit" || lower === "quit friday" || lower === "quit" ||
+      lower.includes("quit friday") || lower.includes("friday quit") ||
+      lower.includes("close friday") || lower.includes("exit friday") || lower.includes("dismiss friday") ||
+      lower.includes("friday end") || lower.includes("end friday") || lower.includes("friday close") ||
+      lower.includes("close assistant") || lower.includes("end assistant") || lower.includes("quit assistant") ||
+      lower.includes("exit assistant")
+    ) {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsMicOverlayActive(false);
+      setIsHeaderMicMuted(true);
+      toast.info("Friday assistant closed");
+      return;
+    }
+
+    // 0.2 Maximize Assistant Command
+    if (
+      lower.includes("maximize assistant") || lower.includes("maximise assistant") || lower === "maximize" || lower === "maximise" ||
+      lower.includes("expand assistant") || lower.includes("open friday") || lower.includes("expand friday") ||
+      lower.includes("maximize friday") || lower.includes("maximise friday") || lower.includes("restore assistant")
+    ) {
+      setIsMicMinimized(false);
+      speakVoiceResponse("Maximizing Friday assistant.");
+      toast.success("Friday maximized");
+      return;
+    }
+
+    // 0.3 Minimize Assistant Command
+    if (
+      lower.includes("minimize assistant") || lower.includes("minimise assistant") || lower === "minimize" || lower === "minimise" ||
+      lower.includes("collapse assistant") || lower.includes("minimize friday") || lower.includes("minimise friday") ||
+      lower.includes("collapse friday")
+    ) {
+      setIsMicMinimized(true);
+      speakVoiceResponse("Minimizing Friday assistant.");
+      toast.info("Friday minimized");
+      return;
+    }
+
+    // 0.4 Active Call Commands: End Call, Microphone, Camera, Loudspeaker
+    if (
+      lower.includes("end call") || lower.includes("hang up") || lower.includes("leave call") ||
+      lower.includes("disconnect call") || lower.includes("end the call") || lower.includes("terminate call")
+    ) {
+      if (activeCall) {
+        handleEndCall(activeCall.id);
+        speakVoiceResponse("Ending call.");
+        toast.info("Call ended");
+      } else {
+        speakVoiceResponse("There is no active call right now.");
+      }
+      return;
+    }
+
+    if (
+      lower.includes("mute microphone") || lower.includes("unmute microphone") ||
+      lower.includes("mute mic") || lower.includes("unmute mic") ||
+      lower.includes("toggle microphone") || lower.includes("toggle mic") ||
+      lower.includes("disable microphone") || lower.includes("enable microphone") ||
+      lower.includes("turn off mic") || lower.includes("turn on mic")
+    ) {
+      if (activeCall) {
+        const isUnmute = lower.includes("unmute") || lower.includes("enable") || lower.includes("turn on");
+        const isMute = (lower.includes("mute") && !lower.includes("unmute")) || lower.includes("disable") || lower.includes("turn off");
+        if (isUnmute) {
+          if (isCallMuted) handleToggleCallMicrophone();
+          speakVoiceResponse("Microphone unmuted.");
+          toast.success("Microphone unmuted");
+        } else if (isMute) {
+          if (!isCallMuted) handleToggleCallMicrophone();
+          speakVoiceResponse("Microphone muted.");
+          toast.info("Microphone muted");
+        } else {
+          handleToggleCallMicrophone();
+          speakVoiceResponse(!isCallMuted ? "Microphone muted." : "Microphone unmuted.");
+        }
+      } else {
+        speakVoiceResponse("There is no active call right now.");
+      }
+      return;
+    }
+
+    if (
+      lower.includes("disable camera") || lower.includes("enable camera") ||
+      lower.includes("turn off camera") || lower.includes("turn on camera") ||
+      lower.includes("toggle camera") || lower.includes("close camera") ||
+      lower.includes("stop camera") || lower.includes("start camera") ||
+      lower.includes("camera off") || lower.includes("camera on")
+    ) {
+      if (activeCall) {
+        const isCamEnable = lower.includes("enable") || lower.includes("turn on") || lower.includes("camera on") || lower.includes("open") || lower.includes("start");
+        const isCamDisable = lower.includes("disable") || lower.includes("turn off") || lower.includes("camera off") || lower.includes("close") || lower.includes("stop");
+        if (isCamEnable) {
+          if (!isCallCameraEnabled) handleToggleCallCamera();
+          speakVoiceResponse("Camera enabled.");
+          toast.success("Camera enabled");
+        } else if (isCamDisable) {
+          if (isCallCameraEnabled) handleToggleCallCamera();
+          speakVoiceResponse("Camera disabled.");
+          toast.info("Camera disabled");
+        } else {
+          handleToggleCallCamera();
+          speakVoiceResponse(!isCallCameraEnabled ? "Camera enabled." : "Camera disabled.");
+        }
+      } else {
+        speakVoiceResponse("There is no active call right now.");
+      }
+      return;
+    }
+
+    if (
+      lower.includes("louder") || lower.includes("loudspeaker") || lower.includes("make the loudspeaker louder") ||
+      lower.includes("make speaker louder") || lower.includes("increase speaker") ||
+      (lower.includes("speaker") && (lower.includes("on") || lower.includes("off") || lower.includes("toggle") || lower.includes("enable") || lower.includes("disable") || lower.includes("turn")))
+    ) {
+      if (activeCall) {
+        if (lower.includes("turn off") || lower.includes("off") || lower.includes("disable")) {
+          setIsCallSpeakerEnabled(false);
+          speakVoiceResponse("Loudspeaker turned off.");
+          toast.info("Loudspeaker disabled");
+        } else {
+          setIsCallSpeakerEnabled(true);
+          speakVoiceResponse("Loudspeaker set to maximum volume.");
+          toast.success("Loudspeaker set to maximum volume");
+        }
+      } else {
+        speakVoiceResponse("There is no active call right now.");
+      }
+      return;
+    }
+
+    // A. Stop Task / End Task Voice Command
+    if (
+      lower.includes("stop the task") || lower.includes("end the task") || lower.includes("stop task") || lower.includes("end task") ||
+      lower.includes("cancel task") || lower.includes("stop ongoing task") || lower.includes("end ongoing task") ||
+      lower === "stop task" || lower === "end task" || lower === "cancel task" || lower.includes("stop friday") || lower.includes("dismiss friday")
+    ) {
+      pendingVoiceActionRef.current = null;
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (mediaRecorderRef.current) {
+        try {
+          (mediaRecorderRef.current as any).isCancelled = true;
+          if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
+            mediaRecorderRef.current.stop();
+          }
+        } catch (e) {}
+      }
+      setIsRecording(false);
+      setRecordingState('inactive');
+      setRecordingTime(0);
+      setActiveStream(null);
+      setIsMicMinimized(true);
+      const resp = "Task stopped.";
+      speakVoiceResponse(resp);
+      toast.info("Task stopped");
+      return;
+    }
+
+    // B. Logout Voice Command ("sign me out", "log me out", etc.)
+    if (
+      lower === "sign me out" || lower === "log me out" || lower === "logout" || lower === "sign out" || lower === "log out" ||
+      lower.includes("sign me out") || lower.includes("log me out") || lower.includes("sign out") || lower.includes("log out")
+    ) {
+      speakVoiceResponse("Signing you out.");
+      toast.success("Logging out...");
+      handleLogout();
+      return;
+    }
+
+    // C. Screensaver Commands ("go to screensaver", "end screensaver", etc.)
+    if (
+      lower.includes("go to screensaver") || lower.includes("open screensaver") || lower.includes("start screensaver") ||
+      lower.includes("show screensaver") || lower.includes("launch screensaver")
+    ) {
+      setIsScreensaverOpen(true);
+      setIsMicMinimized(true);
+      speakVoiceResponse("Opening screensaver.");
+      toast.success("Screensaver opened");
+      return;
+    }
+
+    if (
+      lower.includes("end screensaver") || lower.includes("dismiss screensaver") || lower.includes("close screensaver") ||
+      lower.includes("exit screensaver") || lower.includes("stop screensaver")
+    ) {
+      setIsScreensaverOpen(false);
+      setIsMicMinimized(true);
+      speakVoiceResponse("Exiting screensaver.");
+      toast.success("Screensaver closed");
+      return;
+    }
+
+    // D. Voice Note Controls: Pause, Resume, Play (Preview), Send
+    if (
+      lower === "pause" || lower === "pause recording" || lower === "pause voice message" || lower === "pause voice note" ||
+      lower.includes("pause recording") || lower.includes("pause voice message") || lower.includes("pause voice note")
+    ) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        (mediaRecorderRef.current as any).isPauseStop = true;
+        mediaRecorderRef.current.stop();
+        setRecordingState('paused');
+        speakVoiceResponse("Voice message recording paused.");
+        toast.info("Recording paused");
+        return;
+      }
+    }
+
+    if (
+      lower === "resume" || lower === "resume recording" || lower === "resume voice message" || lower === "resume voice note" ||
+      lower.includes("resume recording") || lower.includes("resume voice message") || lower.includes("resume voice note") || lower.includes("continue recording")
+    ) {
+      if (recordingState === 'paused') {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          setRecordingState('recording');
+          setActiveStream(stream);
+          if (playbackAudioRef.current) {
+            playbackAudioRef.current.pause();
+            setPlaybackPreviewPlaying(false);
+          }
+          const recMime = getSupportedAudioMimeType();
+          const recorder = new MediaRecorder(stream, { mimeType: recMime });
+          mediaRecorderRef.current = recorder;
+          audioChunksRef.current = [];
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              audioChunksRef.current.push(e.data);
+            }
+          };
+          recorder.onstop = () => {
+            stream.getTracks().forEach(track => track.stop());
+            setActiveStream(null);
+            if (audioChunksRef.current.length > 0) {
+              const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
+              voiceNotePartsRef.current.push(segmentBlob);
+            }
+          };
+          recorder.start(200);
+          speakVoiceResponse("Voice message recording resumed.");
+          toast.info("Recording resumed");
+        } catch (err) {}
+        return;
+      }
+    }
+
+    if (
+      lower === "play" || lower === "play voice message" || lower === "play voice note" || lower === "play recording" ||
+      lower === "listen to voice note" || lower.includes("play voice note") || lower.includes("play voice message") || lower.includes("play recorded")
+    ) {
+      // Play recorded voice message (works before sending)
+      if (recordingState !== 'inactive' || voiceNotePartsRef.current.length > 0 || playbackPreviewUrl) {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          (mediaRecorderRef.current as any).isPauseStop = true;
+          mediaRecorderRef.current.stop();
+          setRecordingState('paused');
+        }
+
+        setTimeout(() => {
+          const mime = voiceNotePartsRef.current[0]?.type || getSupportedAudioMimeType();
+          const mergedBlob = new Blob(voiceNotePartsRef.current, { type: mime });
+          if (mergedBlob.size > 0) {
+            const url = URL.createObjectURL(mergedBlob);
+            setPlaybackPreviewUrl(url);
+            if (!playbackAudioRef.current) {
+              playbackAudioRef.current = new Audio();
+            }
+            playbackAudioRef.current.onended = () => setPlaybackPreviewPlaying(false);
+            playbackAudioRef.current.src = url;
+            playbackAudioRef.current.play();
+            setPlaybackPreviewPlaying(true);
+            speakVoiceResponse("Playing recorded voice message.");
+          }
+        }, 120);
+        return;
+      }
+    }
+
+    // E. Send Voice Call or Video Call
+    if (
+      lower.includes("video call") || lower.includes("start a video call") || lower.includes("start video call") || lower.includes("make a video call")
+    ) {
+      let extractedName = lower
+        .replace(/.*(?:with|to|for)\s+/i, "")
+        .replace(/(?:start a video call|start video call|video call with|video call|make a video call)/gi, "")
+        .trim();
+
+      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
+      if (matched) {
+        await handleStartCall(matched.chatId, CallType.Video);
+        setIsMicMinimized(true);
+        speakVoiceResponse(`Starting video call with ${matched.name}.`);
+        return;
+      } else if (activeChatId && !extractedName) {
+        await handleStartCall(activeChatId, CallType.Video);
+        setIsMicMinimized(true);
+        speakVoiceResponse("Starting video call.");
+        return;
+      } else {
+        pendingVoiceActionRef.current = { type: 'video_call_recipient' };
+        speakVoiceResponse("Who would you like to video call?");
+        toast.info("Who would you like to video call?");
+        return;
+      }
+    }
+
+    if (
+      lower.includes("voice call") || lower.includes("start a voice call") || lower.includes("start voice call") || lower.includes("make a voice call") ||
+      (lower.includes("call") && !lower.includes("camera") && !lower.includes("callback"))
+    ) {
+      let extractedName = lower
+        .replace(/.*(?:with|to|for)\s+/i, "")
+        .replace(/(?:start a voice call|start voice call|voice call with|voice call|make a voice call|call)/gi, "")
+        .trim();
+
+      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
+      if (matched) {
+        await handleStartCall(matched.chatId, CallType.Voice);
+        setIsMicMinimized(true);
+        speakVoiceResponse(`Starting voice call with ${matched.name}.`);
+        return;
+      } else if (activeChatId && !extractedName) {
+        await handleStartCall(activeChatId, CallType.Voice);
+        setIsMicMinimized(true);
+        speakVoiceResponse("Starting voice call.");
+        return;
+      } else {
+        pendingVoiceActionRef.current = { type: 'voice_call_recipient' };
+        speakVoiceResponse("Who would you like to call?");
+        toast.info("Who would you like to call?");
+        return;
+      }
+    }
+
+    // F. Send Voice Message / Send Voice Record Flow
+    if (
+      lower.includes("send a voice message") || lower.includes("send voice message") || lower.includes("want to send a voice message") ||
+      lower.includes("record a voice message") || lower.includes("record voice message") || lower.includes("record voice note") || lower.includes("start voice note")
+    ) {
+      let extractedName = lower
+        .replace(/.*(?:to|for|with)\s+/i, "")
+        .replace(/(?:i want to send a voice message|send a voice message|send voice message|record a voice message|record voice message|record voice note|start voice note)/gi, "")
+        .trim();
+
+      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
+
+      if (matched) {
+        setIsChatModalOpen(true);
+        setActiveChatId(matched.chatId);
+        await startChatVoiceRecording(matched.chatId);
+        setIsMicMinimized(true);
+        const resp = `Starting voice message for ${matched.name}.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      } else if (activeChatId && !extractedName) {
+        setIsChatModalOpen(true);
+        await startChatVoiceRecording(activeChatId);
+        setIsMicMinimized(true);
+        const resp = "Starting voice message.";
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        return;
+      } else {
+        pendingVoiceActionRef.current = { type: 'voice_message_recipient' };
+        speakVoiceResponse("Who would you like to send a voice message to?");
+        toast.info("Who would you like to send a voice message to?");
+        return;
+      }
+    }
+
+    // G. Permissions Guard: Friday cannot open add or edit functions EXCEPT chat modals and allowed voice commands
     const isChatModalIntent = 
       lower.includes("group") || 
       lower.includes("chat") || 
       lower.includes("message") || 
       lower.includes("text") || 
-      lower.includes("call");
+      lower.includes("call") ||
+      lower.includes("action");
 
     const isAddOrEditIntent = 
       /\b(add|create|new|edit|update|modify|delete|remove)\b/.test(lower);
@@ -11585,7 +12796,7 @@ export default function App() {
       return;
     }
 
-    // B. Chat Modals (Allowed)
+    // H. Chat Modals (Allowed)
     if (lower.includes("group")) {
       setIsGroupMode(true);
       setSelectedParticipants([]);
@@ -11609,7 +12820,7 @@ export default function App() {
       return;
     }
 
-    // C. Lock / Unlock User Room Voice Command
+    // I. Lock / Unlock User Room Voice Command
     if (
       lower.includes("lock room") || lower.includes("lock my room") || lower.includes("lock the room") || lower.includes("lock user room") ||
       lower.includes("unlock room") || lower.includes("unlock my room") || lower.includes("unlock the room") || lower.includes("unlock user room") ||
@@ -11630,22 +12841,29 @@ export default function App() {
       return;
     }
 
-    // D. Play Action Voice Command (e.g. "play Home run", "play secure perimeter", "play evening ambiance")
+    // J. Start/Play Action and Pause/End/Stop Action
     if (
-      lower.startsWith("play ") || 
-      lower.startsWith("run ") || 
-      lower.startsWith("trigger ") || 
-      lower.includes("play action") || 
-      lower.includes("trigger action") || 
-      lower.includes("run action")
+      lower.includes("play action") || lower.includes("start action") || lower.includes("run action") || lower.includes("trigger action") ||
+      lower.includes("pause action") || lower.includes("stop action") || lower.includes("end action") || lower.includes("deactivate action") ||
+      lower.startsWith("play ") || lower.startsWith("run ") || lower.startsWith("trigger ") || lower.startsWith("start ") || lower.startsWith("pause ") || lower.startsWith("stop ") || lower.startsWith("end ")
     ) {
+      const isStartIntent = lower.includes("play") || lower.includes("start") || lower.includes("run") || lower.includes("trigger");
       const targetActionName = lower
         .replace(/^play\s+action\s+/i, "")
-        .replace(/^trigger\s+action\s+/i, "")
+        .replace(/^start\s+action\s+/i, "")
         .replace(/^run\s+action\s+/i, "")
+        .replace(/^trigger\s+action\s+/i, "")
+        .replace(/^pause\s+action\s+/i, "")
+        .replace(/^stop\s+action\s+/i, "")
+        .replace(/^end\s+action\s+/i, "")
+        .replace(/^deactivate\s+action\s+/i, "")
         .replace(/^play\s+/i, "")
+        .replace(/^start\s+/i, "")
         .replace(/^run\s+/i, "")
         .replace(/^trigger\s+/i, "")
+        .replace(/^pause\s+/i, "")
+        .replace(/^stop\s+/i, "")
+        .replace(/^end\s+/i, "")
         .replace(/^the\s+/i, "")
         .trim();
 
@@ -11657,9 +12875,7 @@ export default function App() {
         );
 
         if (matchedAction) {
-          const originalActive = matchedAction.actionActive;
-          const nextActive = !originalActive;
-          setActions(prev => prev.map(a => a.id === matchedAction.id ? { ...a, actionActive: nextActive } : a));
+          setActions(prev => prev.map(a => a.id === matchedAction.id ? { ...a, actionActive: isStartIntent } : a));
           
           try {
             await apiFetch(`/Action/ActivateDeactivateAction?id=${matchedAction.id}`, {
@@ -11667,12 +12883,12 @@ export default function App() {
               body: ''
             });
           } catch (err: any) {
-            console.error("Failed to play action", err);
+            console.error("Failed to toggle action", err);
           }
 
           setActiveView('facility-actions');
           setIsMicMinimized(true);
-          const resp = `Playing action ${matchedAction.actionName}.`;
+          const resp = `${isStartIntent ? 'Playing' : 'Stopping'} action ${matchedAction.actionName}.`;
           speakVoiceResponse(resp);
           toast.success(resp);
           return;
@@ -11680,7 +12896,7 @@ export default function App() {
       }
     }
 
-    // E. Voice Navigation
+    // K. Voice Navigation
     const navMap: { keywords: string[]; view: NavView; label: string }[] = [
       { keywords: ["dashboard", "home screen", "main page", "overview page"], view: 'dashboard', label: 'Dashboard' },
       { keywords: ["my room", "user room", "my rooms"], view: 'user-room', label: "User Rooms" },
@@ -11712,7 +12928,7 @@ export default function App() {
       }
     }
 
-    // D. View Modals (e.g. "show external A")
+    // L. View Modals (e.g. "show external A")
     if (lower.includes("external")) {
       const extClean = lower.replace("show", "").replace("open", "").replace("external", "").replace("the", "").trim();
       const matchedExt = externals.find(e => 
@@ -11731,7 +12947,7 @@ export default function App() {
       }
     }
 
-    // 1. Brightness Adjustment
+    // M. Brightness Adjustment
     if (lower.includes("brightness") || lower.includes("%")) {
       let pctMatch = lower.match(/(\d+)\s*%/);
       if (!pctMatch) {
@@ -11790,7 +13006,7 @@ export default function App() {
       }
     }
 
-    // 2. Door/Window Actions: Lock, Unlock, Open, Close
+    // N. Door/Window Actions: Lock, Unlock, Open, Close
     const doorActions = ['lock', 'unlock', 'open', 'close'];
     let matchedAction: 'lock'|'unlock'|'open'|'close' | null = null;
     for (const act of doorActions) {
@@ -11805,6 +13021,30 @@ export default function App() {
         .replace(matchedAction, "")
         .replace(/the/g, "")
         .trim();
+
+      if (devNameClean.includes("all doors") || devNameClean === "doors" || devNameClean === "all door") {
+        const doorDevs = devices.filter(d => d.type === 'door');
+        for (const dev of doorDevs) {
+          await handleDoorAction(dev.id, matchedAction);
+        }
+        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing all doors.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        setIsMicMinimized(true);
+        return;
+      }
+
+      if (devNameClean.includes("all windows") || devNameClean === "windows" || devNameClean === "all window") {
+        const winDevs = devices.filter(d => d.type === 'window');
+        for (const dev of winDevs) {
+          await handleDoorAction(dev.id, matchedAction);
+        }
+        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing all windows.`;
+        speakVoiceResponse(resp);
+        toast.success(resp);
+        setIsMicMinimized(true);
+        return;
+      }
 
       const matchedDev = devices.find(d => 
         (d.type === 'door' || d.type === 'window') && 
@@ -11825,7 +13065,7 @@ export default function App() {
       }
     }
 
-    // 3. Put on, turn on, put off, turn off, switch on, switch off
+    // O. Put on, turn on, put off, turn off, switch on, switch off
     const turnOnWords = ['turn on', 'put on', 'switch on', 'activate', 'enable', 'open camera'];
     const turnOffWords = ['turn off', 'put off', 'switch off', 'deactivate', 'disable', 'close camera'];
     let isTurnOn = false;
@@ -11890,12 +13130,13 @@ export default function App() {
       }
     }
 
-    // 4. Chat modal opening & voice commands
+    // P. Chat modal opening & messaging
     if (
       lower === "open chat" || lower === "open chats" || lower === "show chats" || lower === "show chat" ||
       lower === "open message" || lower === "open messages" || lower === "show message" || lower === "show messages" ||
       lower === "open chat modal" || lower === "chat modal" || lower === "chats" || lower === "chat" || lower === "messages" ||
-      lower.includes("open chat") || lower.includes("open chats") || lower.includes("show chats") || lower.includes("open messaging")
+      lower.includes("open chat") || lower.includes("open chats") || lower.includes("open messages") || lower.includes("open messaging") ||
+      lower.includes("want to message someone") || lower.includes("message someone") || lower.includes("send a message to someone")
     ) {
       setIsChatModalOpen(true);
       setIsMicMinimized(true);
@@ -11905,15 +13146,15 @@ export default function App() {
       return;
     }
 
-    // 5. Send message or send voice note command
+    // Q. Send message or send voice note
     if (
-      lower === "send" || lower === "send message" || lower === "send text" || lower === "send voice note" ||
-      lower.includes("send message") || lower.includes("send voice note") || lower.includes("send text")
+      lower === "send" || lower === "send message" || lower === "send text" || lower === "send voice note" || lower === "send voice record" ||
+      lower.includes("send message") || lower.includes("send voice note") || lower.includes("send text") || lower.includes("send voice record")
     ) {
       if (recordingState !== 'inactive') {
         await sendVoiceNote();
         setIsMicMinimized(true);
-        const resp = "Sending voice note.";
+        const resp = "Sending voice message.";
         speakVoiceResponse(resp);
         toast.success(resp);
         return;
@@ -11933,69 +13174,8 @@ export default function App() {
       }
     }
 
-    // 6. Start Voice Recording / Voice Note
-    if (
-      lower.includes("start voice recording") || lower.includes("record voice note") ||
-      lower.includes("start voice note") || lower.includes("record voice message") ||
-      lower.includes("voice note to") || lower.includes("voice note for") ||
-      lower.includes("voice recording to") || lower.includes("record voice")
-    ) {
-      let targetChatId: number | null = null;
-      let targetName = "";
-
-      // 1. Search groups in chats
-      for (const c of (chats || [])) {
-        if (c.isGroup && c.name && lower.includes(c.name.toLowerCase())) {
-          targetChatId = c.id;
-          targetName = c.name;
-          break;
-        }
-      }
-
-      // 2. Search users in allUsers if group not found
-      if (!targetChatId) {
-        for (const u of (allUsers || [])) {
-          const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
-          const first = u.getPersonDetailsDto.firstName.toLowerCase();
-          if (lower.includes(fullName) || (first.length > 2 && lower.includes(first))) {
-            targetName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`;
-            const existingChat = (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id));
-            if (existingChat) {
-              targetChatId = existingChat.id;
-            } else {
-              try {
-                const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${u.id}`, { method: 'POST' });
-                await loadMyChats(true);
-                targetChatId = response?.id || (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id))?.id || null;
-              } catch (err) {}
-            }
-            break;
-          }
-        }
-      }
-
-      // 3. Fallback to activeChatId
-      if (!targetChatId && activeChatId) {
-        targetChatId = activeChatId;
-        const currentChat = (chats || []).find(c => c.id === activeChatId);
-        if (currentChat) targetName = getChatDisplayName(currentChat);
-      }
-
-      if (targetChatId) {
-        setIsChatModalOpen(true);
-        setActiveChatId(targetChatId);
-        await startChatVoiceRecording(targetChatId);
-        setIsMicMinimized(true);
-        const resp = targetName ? `Starting voice note for ${targetName}.` : "Starting voice recording.";
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      }
-    }
-
-    // 7. Message a User or Group
+    // R. Message a User or Group
     if (lower.includes("message") || lower.includes("text") || lower.includes("chat with") || lower.includes("send message to") || lower.includes("send text to")) {
-      // 1. Check if group chat is specified
       let matchedGroup: ChatDto | null = null;
       for (const c of (chats || [])) {
         if (c.isGroup && c.name && lower.includes(c.name.toLowerCase())) {
@@ -12043,7 +13223,6 @@ export default function App() {
         return;
       }
 
-      // 2. Check if user is specified
       let matchedUser: any = null;
       for (const u of (allUsers || [])) {
         const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
@@ -12108,7 +13287,31 @@ export default function App() {
       }
     }
 
-    // Unrecognized command -> stay completely silent as requested
+    // Question Answering Fallback via Friday AI
+    try {
+      const askRes = await fetch("/api/assistant/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: lower,
+          context: `User: ${userProfile?.getPersonDetailsDto?.firstName || 'User'}, Devices count: ${devices.length}`
+        })
+      });
+      const askData = await askRes.json();
+      if (askData && askData.answer) {
+        speakVoiceResponse(askData.answer);
+        toast.info(askData.answer);
+        setIsMicMinimized(true);
+        return;
+      }
+    } catch (err) {
+      console.error("Error asking Friday AI:", err);
+    }
+
+    const defaultResp = `I heard: "${lower}". How can I assist you?`;
+    speakVoiceResponse(defaultResp);
+    toast.info(defaultResp);
+    setIsMicMinimized(true);
     return;
   };
 
@@ -12156,7 +13359,7 @@ export default function App() {
       const lowerTranscript = currentTranscript.toLowerCase().trim();
       setTranscription(currentTranscript);
       
-      if (lowerTranscript.includes("hey friday")) {
+      if (lowerTranscript.includes("hey friday") && isLoggedIn) {
          if (!isMicOverlayActive) {
             setIsMicOverlayActive(true);
             setIsHeaderMicMuted(false);
@@ -12220,30 +13423,7 @@ export default function App() {
           onLoginSuccess={handleLoginSuccess} 
           theme={theme}
           toggleTheme={toggleTheme}
-          isMicMuted={!isMicOverlayActive}
-          onToggleMic={() => {
-            if (!isMicOverlayActive) {
-              setIsMicOverlayActive(true);
-              setIsMicMinimized(false);
-              setIsHeaderMicMuted(false);
-            } else {
-              setIsMicOverlayActive(false);
-              setIsHeaderMicMuted(true);
-            }
-          }}
         />
-        {isMicOverlayActive && (
-          <GrainyAudioOverlay transcription={transcription} 
-            theme={theme} 
-            isMinimized={isMicMinimized}
-            onToggleMinimize={setIsMicMinimized}
-            onClose={() => {
-              setIsMicOverlayActive(false);
-              setIsHeaderMicMuted(true);
-            }} 
-            onExecuteCommand={handleVoiceCommand}
-          />
-        )}
       </>
     );
   }
@@ -12323,7 +13503,7 @@ export default function App() {
                     setIsHeaderMicMuted(true);
                   }
                 }}
-                title={isMicOverlayActive ? "Stop Microphone" : "Start Microphone"}
+                title={isMicOverlayActive ? "Stop Friday Assistant" : "Friday AI Assistant"}
               >
                 <div className="flex items-center justify-center w-5 h-5 overflow-hidden rounded-full">
                   <DynamicParticleSphere size={20} audioLevel={isMicOverlayActive ? 140 : 0} isIcon={true} />
@@ -12602,7 +13782,7 @@ export default function App() {
                   <SelectItem value="none">No Room</SelectItem>
                   {newDevice.section && newDevice.section !== 'none' ? (
                     <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                         Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
                       </div>
                       {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
@@ -12611,7 +13791,7 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                         Unassigned Rooms
                       </div>
                       {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -14363,7 +15543,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {editingDevice.section && editingDevice.section !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
@@ -14372,7 +15552,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -15487,7 +16667,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {externalForm.sectionId && externalForm.sectionId !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.sectionId?.toString()).map(room => (
@@ -15496,7 +16676,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -15797,7 +16977,7 @@ export default function App() {
                     <SelectItem value="none">No Room</SelectItem>
                     {externalForm.section && externalForm.section !== 'none' ? (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Selected Section')}
                         </div>
                         {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.section?.toString()).map(room => (
@@ -15806,7 +16986,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 border-b mb-1 select-none">
+                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
                           Unassigned Rooms
                         </div>
                         {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
@@ -18230,7 +19410,7 @@ export default function App() {
                                       <span className="text-slate-300 dark:text-zinc-700">•</span>
                                       <span className="flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-zinc-400">
                                         <CalendarDays className="h-3 w-3 text-slate-400" />
-                                        {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        {formatRelativeTime(log.startedAt)}
                                       </span>
 
                                       <span className="text-slate-300 dark:text-zinc-700">•</span>
@@ -19313,7 +20493,8 @@ export default function App() {
                                        className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
                                        onClick={async () => {
                                           if (!playbackPreviewUrl) {
-                                             const mergedBlob = new Blob(voiceNotePartsRef.current, { type: 'audio/mp3' });
+                                             const mime = voiceNotePartsRef.current[0]?.type || getSupportedAudioMimeType();
+                                             const mergedBlob = new Blob(voiceNotePartsRef.current, { type: mime });
                                              const url = URL.createObjectURL(mergedBlob);
                                              setPlaybackPreviewUrl(url);
                                              if (!playbackAudioRef.current) {
@@ -19356,7 +20537,8 @@ export default function App() {
                                             (window as any).lastTypingSentTime = Date.now();
                                             apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
 
-                                            const recorder = new MediaRecorder(stream);
+                                            const recMime = getSupportedAudioMimeType();
+                                            const recorder = new MediaRecorder(stream, { mimeType: recMime });
                                             mediaRecorderRef.current = recorder;
                                             audioChunksRef.current = [];
 
@@ -19378,7 +20560,7 @@ export default function App() {
                                               }
 
                                               if (audioChunksRef.current.length > 0) {
-                                                const segmentBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+                                                const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
                                                 voiceNotePartsRef.current.push(segmentBlob);
                                                 audioChunksRef.current = [];
                                               }
@@ -19397,7 +20579,7 @@ export default function App() {
                                           }
                                        }}
                                      >
-                                       <DynamicParticleSphere size={20} audioLevel={150} isIcon={true} />
+                                       <Mic className="h-5 w-5 text-red-500 animate-pulse" />
                                      </Button>
                                    </div>
                                 </div>
@@ -19486,7 +20668,8 @@ export default function App() {
                               (window as any).lastTypingSentTime = Date.now();
                               apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
                               
-                              const recorder = new MediaRecorder(stream);
+                              const recMime = getSupportedAudioMimeType();
+                              const recorder = new MediaRecorder(stream, { mimeType: recMime });
                               mediaRecorderRef.current = recorder;
                               audioChunksRef.current = [];
                               voiceNotePartsRef.current = [];
@@ -19509,7 +20692,7 @@ export default function App() {
                                 }
 
                                 if (audioChunksRef.current.length > 0) {
-                                  const segmentBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+                                  const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
                                   voiceNotePartsRef.current.push(segmentBlob);
                                   audioChunksRef.current = [];
                                 }
@@ -19528,7 +20711,7 @@ export default function App() {
                             }
                           }}
                         >
-                          <DynamicParticleSphere size={24} audioLevel={recordingState !== 'inactive' ? 160 : 0} isIcon={true} />
+                          <Mic className="h-6 w-6" />
                         </Button>
                       )}
                     </div>
@@ -19649,7 +20832,7 @@ export default function App() {
 
                                   <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400 pt-1.5 border-t border-slate-100 dark:border-zinc-800">
                                     <span className="font-mono text-slate-400 dark:text-zinc-500">
-                                      {new Date(log.startedAt).toLocaleDateString()} {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {formatRelativeTime(log.startedAt)}
                                     </span>
 
                                     {(log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && userStatus !== 'missed' ? (
@@ -19691,7 +20874,7 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] dark:bg-zinc-950 text-[#667781] dark:text-zinc-400 p-12 text-center">
+              <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto bg-[#f0f2f5] dark:bg-zinc-950 text-[#667781] dark:text-zinc-400 p-6 sm:p-12 text-center min-h-0">
                 <div className="max-w-md w-full space-y-8 animate-in fade-in zoom-in duration-500">
                   <div className="flex justify-center">
                     <div className="h-48 w-48 rounded-full bg-white dark:bg-zinc-950 flex items-center justify-center shadow-xl relative">
@@ -19950,6 +21133,8 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      <GlobalRemoteAudioFeeds remoteStreams={remoteStreams} />
+
       {/* Call Dialog (WhatsApp style overlay) */}
       <Dialog open={isCallModalOpen} onOpenChange={(open) => {
         setIsCallModalOpen(open);
@@ -20139,8 +21324,10 @@ export default function App() {
                         )}>
                           {/* Current User Card */}
                           <div className="relative bg-zinc-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px]">
-                            {isCallCameraEnabled ? (
-                              <LocalVideoFeed />
+                            {isCallScreenSharing ? (
+                              <LocalVideoFeed stream={screenStreamRef.current} />
+                            ) : isCallCameraEnabled ? (
+                              <LocalVideoFeed stream={localStreamRef.current} />
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 font-bold text-lg">
@@ -20154,7 +21341,7 @@ export default function App() {
                               </div>
                             )}
                             <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-wide text-white border border-white/10 flex items-center gap-1">
-                              <span>You</span>
+                              <span>{isCallScreenSharing ? "You (Sharing Screen)" : "You"}</span>
                               {isCallMuted && <MicOff className="h-3 w-3 text-rose-400" />}
                             </div>
                           </div>
@@ -20165,13 +21352,19 @@ export default function App() {
                             const isConnected = pStatus === CallParticipantStatus.Connected;
                             const isDeclined = pStatus === CallParticipantStatus.Declined;
                             const isLeft = pStatus === CallParticipantStatus.Left;
+                            const remoteStream = remoteStreams[p.personId];
+                            const hasVideoTrack = remoteStream && remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live');
 
                             return (
                               <div key={p.personId} className={cn(
                                 "relative bg-zinc-950 border rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px] transition-all",
                                 isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/40 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
                               )}>
-                                {p.isCameraEnabled && isConnected ? (
+                                {remoteStream && <RemoteAudioFeed stream={remoteStream} />}
+
+                                {(remoteStream && hasVideoTrack) ? (
+                                  <RemoteVideoFeed stream={remoteStream} />
+                                ) : p.isCameraEnabled && isConnected ? (
                                   <div className="absolute inset-0 bg-slate-950 flex items-center justify-center overflow-hidden">
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
                                     <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 text-lg font-bold animate-pulse">
@@ -20186,7 +21379,7 @@ export default function App() {
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                                       </div>
-                                      <span className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">Live Feed</span>
+                                      <span className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">Connecting Video...</span>
                                     </div>
                                   </div>
                                 ) : (
@@ -20253,12 +21446,15 @@ export default function App() {
                               const isConnected = pStatus === CallParticipantStatus.Connected;
                               const isDeclined = pStatus === CallParticipantStatus.Declined;
                               const isLeft = pStatus === CallParticipantStatus.Left;
+                              const remoteStream = remoteStreams[p.personId];
 
                               return (
                                 <div key={p.personId} className={cn(
                                   "relative bg-[#1f2c34] border rounded-2xl p-4 flex flex-col items-center gap-2 shadow-lg min-w-[130px] transition-all",
                                   isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/30 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
                                 )}>
+                                  {remoteStream && <RemoteAudioFeed stream={remoteStream} />}
+
                                   <div className="h-16 w-16 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center text-xl font-extrabold text-slate-300 relative shadow-inner">
                                     {p.profileImage ? (
                                       <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
@@ -20323,7 +21519,7 @@ export default function App() {
                       )}
                       title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
                     >
-                      <DynamicParticleSphere size={22} audioLevel={isCallMuted ? 0 : 120} isIcon={true} />
+                      {isCallMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                     </Button>
 
                     {/* Camera Toggle */}
@@ -20407,12 +21603,7 @@ export default function App() {
                 )}
               </div>
             </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-slate-400">
-              <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-              <span className="text-xs font-semibold uppercase tracking-wider mt-2">Loading call data...</span>
-            </div>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
 
@@ -21976,7 +23167,7 @@ export default function App() {
               )}
               title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
             >
-              <DynamicParticleSphere size={18} audioLevel={isCallMuted ? 0 : 120} isIcon={true} />
+              {isCallMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
 
             {/* Quick End Call */}
@@ -22103,6 +23294,8 @@ export default function App() {
             setIsHeaderMicMuted(true);
           }} 
           onExecuteCommand={handleVoiceCommand}
+          lastResponse={fridayResponse}
+          isSpeaking={isFridaySpeaking}
         />
       )}
     </div>

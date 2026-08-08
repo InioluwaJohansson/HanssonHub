@@ -10,23 +10,22 @@ import {
   Eye, 
   EyeOff, 
   User,
+  UserPlus,
   Key,
   Trash2,
   Sun,
-  Moon,
-  Mic,
-  MicOff
+  Moon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { API_BASE_URL } from '../config';
-import { UserLoginResponse, GetUserDto } from '../api/types';
+import { GetUserDto } from '../api/types';
 import { cn } from '../lib/utils';
+import { DynamicParticleSphere } from './DynamicParticleSphere';
 
 import api from '../api/client';
 import { RememberedUsersManager, RememberedUser } from '../utils/rememberedUsers';
-import { DynamicParticleSphere } from './DynamicParticleSphere';
 
 const getFullImageUrl = (url: string | null | undefined): string | undefined => {
   if (!url) return undefined;
@@ -46,8 +45,6 @@ interface LoginScreenProps {
   onLoginSuccess: (userData: GetUserDto, token: string) => void;
   theme?: 'light' | 'dark';
   toggleTheme?: () => void;
-  isMicMuted?: boolean;
-  onToggleMic?: () => void;
 }
 
 const PAGES = [
@@ -56,16 +53,20 @@ const PAGES = [
   { id: 'facility', label: 'Facilities', icon: Settings2, desc: 'Manage multiple facilities and hardware controls.' },
   { id: 'contacts', label: 'Contacts', icon: Contact, desc: 'Emergency channels and resident address directory.' },
   { id: 'chat', label: 'Chats', icon: MessageSquare, desc: 'Collaborative safe space and secure multi-user messaging.' },
+  { id: 'friday', label: 'Friday AI Assistant', icon: null, desc: 'Voice-controlled smart assistant with real-time feedback.', isSphere: true },
 ];
 
-export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = true, onToggleMic }: LoginScreenProps) {
+export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rotation, setRotation] = useState(0);
   const [rememberedUsers, setRememberedUsers] = useState<RememberedUser[]>([]);
   const [isChoosingAccount, setIsChoosingAccount] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Single active item carousel index & transition state (5s duration per item)
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [isItemVisible, setIsItemVisible] = useState(true);
 
   useEffect(() => {
     const list = RememberedUsersManager.getUsers();
@@ -75,13 +76,23 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
     }
   }, []);
 
-  // Rotate every 10 seconds smoothly
+  // 5s Per Item Cycle: 1s entrance, 3s hold, 1s exit in opposite direction
   useEffect(() => {
-    const timer = setInterval(() => {
-      setRotation(prev => prev + 72);
-    }, 10000);
-    return () => clearInterval(timer);
-  }, []);
+    setIsItemVisible(true);
+
+    const exitTimer = setTimeout(() => {
+      setIsItemVisible(false);
+    }, 4000);
+
+    const nextTimer = setTimeout(() => {
+      setCurrentPageIndex(prev => (prev + 1) % PAGES.length);
+    }, 5000);
+
+    return () => {
+      clearTimeout(exitTimer);
+      clearTimeout(nextTimer);
+    };
+  }, [currentPageIndex]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,23 +148,6 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
             </div>
           </button>
         )}
-
-        {/* Microphone Button */}
-        {onToggleMic && (
-          <button
-            type="button"
-            onClick={onToggleMic}
-            className={cn(
-              "relative rounded-full p-1 transition-all flex items-center justify-center border border-slate-200 dark:border-zinc-700 shadow-2xs cursor-pointer overflow-hidden",
-              !isMicMuted ? "bg-rose-500/10 border-rose-300" : "bg-white/90 dark:bg-zinc-900/90 hover:bg-white"
-            )}
-            title={!isMicMuted ? "Stop Friday AI" : "Start Friday AI"}
-          >
-            <div className="flex items-center justify-center w-6 h-6 overflow-hidden rounded-full">
-              <DynamicParticleSphere size={22} audioLevel={!isMicMuted ? 120 : 0} isIcon={true} />
-            </div>
-          </button>
-        )}
       </div>
 
       {isChoosingAccount && (
@@ -177,7 +171,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
             </p>
           </div>
 
-          {/* Horizontal Scroll Div of Cards, scroll bar is invisible, centered at all times */}
+          {/* Horizontal Scroll Div of Cards */}
           <div 
             className="w-full max-w-4xl flex flex-row items-center gap-6 overflow-x-auto py-6 px-4 no-scrollbar z-10 justify-center"
             style={{
@@ -199,7 +193,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
                 }}
                 className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-6 w-48 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
               >
-                {/* Delete icon to delete that particular stored user metadata */}
+                {/* Delete icon */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -244,93 +238,90 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
             ))}
           </div>
 
-          {/* Use another account button below the div */}
+          {/* Use another account button below the div with suitable icon */}
           <button
             type="button"
             onClick={() => {
               setUsername('');
               setIsChoosingAccount(false);
             }}
-            className="mt-10 px-8 h-12 border border-slate-300 dark:border-zinc-700 hover:border-black dark:hover:border-zinc-400 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-extrabold rounded-xl text-xs tracking-widest uppercase transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer select-none z-10 flex items-center justify-center gap-2"
+            className="mt-10 px-8 h-12 border border-slate-300 dark:border-zinc-700 hover:border-black dark:hover:border-zinc-400 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-extrabold rounded-xl text-xs tracking-widest uppercase transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer select-none z-10 flex items-center justify-center gap-2.5"
           >
+            <UserPlus className="h-4 w-4 text-slate-900 dark:text-zinc-100" />
             Use another account
           </button>
         </div>
       )}
 
-      {/* LEFT SECTION (65% width) - 3D Rotating Icons carousel */}
-      <div className="hidden md:flex flex-[0.75] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r border-slate-200/65 dark:border-zinc-800/80">
+      {/* LEFT SECTION - Single Item Display Carousel with 5s transitions */}
+      <div className="hidden md:flex flex-[0.75] flex-col items-center justify-center p-12 relative overflow-hidden bg-transparent border-r-0 select-none">
         
-        {/* Orbit track helper ellipse */}
-        <div 
-          className="absolute border border-dashed border-slate-300 dark:border-zinc-700 rounded-full pointer-events-none" 
-          style={{
-            width: '420px',
-            height: '130px',
-            transform: 'translateX(15px) rotate(-5deg) translateY(-20px)',
-            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.015) 0%, transparent 70%)'
-          }}
-        />
-
-        {/* Dynamic Circular Orbit Carousel container */}
-        <div className="relative w-[480px] h-[360px] flex items-center justify-center animate-fade-in" style={{ perspective: '1000px', transform: 'translateX(15px)' }}>
-          {PAGES.map((item, idx) => {
-            const Icon = item.icon;
-            // Calculate current angle based on static offset minus shifting rotation
-            const angle = 72 * idx - rotation;
-            const theta = (angle * Math.PI) / 180;
-            
-            // Orbit Math coordinates (wider radius for increased size)
-            const x = Math.sin(theta) * 190; 
-            const z = Math.cos(theta); 
-            // Add a subtle tilt for 3D depth illusion
-            const y = -Math.cos(theta) * 25; 
-
-            // Derived styles based on depth factor z (-1 to 1)
-            const scale = 0.8 + (z + 1) * 0.2; // larger range for larger moving text and icons
-            const opacity = 0.45 + (z + 1) * 0.275; // higher base opacity
-            const zIndex = Math.round((z + 1) * 10);
+        {/* Container for single item display */}
+        <div className="relative w-full max-w-md flex flex-col items-center justify-center min-h-[420px]">
+          {(() => {
+            const currentItem = PAGES[currentPageIndex];
+            const IconComponent = currentItem.icon;
 
             return (
-              <div 
-                key={item.id}
-                className="absolute flex flex-col items-center justify-center transition-all duration-[10000ms] ease-in-out select-none"
-                style={{
-                  transform: `translate3d(${x}px, ${y}px, ${z * 70}px) scale(${scale})`,
-                  opacity,
-                  zIndex,
-                  width: '220px'
-                }}
-              >
-                {/* Glowing Hexagonal Orb */}
+              <div className="flex flex-col items-center justify-center w-full relative">
+                
+                {/* 1. Div holding the icon - slides from LEFT */}
                 <div 
-                  className={`h-24 w-24 rounded-2xl flex items-center justify-center shadow-lg relative transition-all duration-300 ${
-                    zIndex >= 15 
-                      ? 'bg-white dark:bg-zinc-800 border-2 border-slate-900 dark:border-zinc-100 text-slate-900 dark:text-zinc-100' 
-                      : 'bg-white/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300'
-                  }`}
+                  className={cn(
+                    "relative h-48 w-48 rounded-[2.25rem] flex items-center justify-center overflow-hidden transition-all duration-1000 ease-in-out bg-white dark:bg-zinc-900",
+                    isItemVisible 
+                      ? "translate-x-0 border-2 border-slate-900 dark:border-zinc-100 opacity-100 shadow-2xl shadow-slate-900/10 dark:shadow-zinc-100/10" 
+                      : "-translate-x-36 border-2 border-transparent opacity-0 shadow-none"
+                  )}
                   style={{
-                    boxShadow: zIndex >= 15 ? '0 10px 30px rgba(0,0,0,0.12)' : 'none'
+                    boxShadow: isItemVisible ? '0 25px 50px -12px rgba(0,0,0,0.18), 0 0 25px rgba(0,0,0,0.08)' : 'none'
                   }}
                 >
-                  <Icon className={`h-12 w-12 transition-transform duration-300 ${zIndex >= 15 ? 'scale-105' : ''}`} />
+                  {/* 2. Icon - slides from RIGHT into the div */}
+                  <div 
+                    className={cn(
+                      "flex items-center justify-center transition-all duration-1000 ease-in-out",
+                      isItemVisible ? "translate-x-0 opacity-100" : "translate-x-36 opacity-0"
+                    )}
+                  >
+                    {currentItem.isSphere ? (
+                      <DynamicParticleSphere 
+                        size={150} 
+                        audioLevel={65} 
+                        isIcon={true} 
+                        isGreyscale={true} 
+                        className="scale-110"
+                      />
+                    ) : IconComponent ? (
+                      <IconComponent className="h-24 w-24 text-slate-900 dark:text-zinc-100" />
+                    ) : null}
+                  </div>
                 </div>
-                
-                {/* Visual Connector Line */}
-                <div className="h-5 w-[1px] bg-slate-300 dark:bg-zinc-700" />
 
-                {/* Tag details with increased font sizes */}
-                <div className="text-center px-1">
-                  <div className={`text-lg font-extrabold tracking-tight transition-colors duration-300 ${zIndex >= 15 ? 'text-slate-900 dark:text-zinc-100 font-black' : 'text-slate-700 dark:text-zinc-400'}`}>
-                    {item.label}
+                {/* Visual subtle connector gap */}
+                <div className="h-7 w-[1px] bg-transparent" />
+
+                {/* 3. Name of the item & Text beneath it - transitions to full brightness within 1s beneath the div */}
+                <div 
+                  className={cn(
+                    "text-center px-4 space-y-2.5 transition-all duration-1000 ease-in-out max-w-sm",
+                    isItemVisible ? "opacity-100 filter-none translate-y-0" : "opacity-0 brightness-0 translate-y-3"
+                  )}
+                >
+                  {/* Name of the item */}
+                  <div className="text-2xl font-black text-slate-900 dark:text-zinc-100 tracking-tight">
+                    {currentItem.label}
                   </div>
-                  <div className="text-xs text-slate-700 dark:text-zinc-400 mt-1 max-w-[170px] mx-auto leading-normal line-clamp-2">
-                    {item.desc}
+                  
+                  {/* Text beneath it (description) */}
+                  <div className="text-sm font-medium text-slate-600 dark:text-zinc-400 leading-relaxed">
+                    {currentItem.desc}
                   </div>
                 </div>
+
               </div>
             );
-          })}
+          })()}
         </div>
 
       </div>
@@ -432,7 +423,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
             <button
               type="button"
               onClick={() => setIsChoosingAccount(true)}
-              className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-black flex items-center gap-1 bg-transparent border-none outline-none cursor-pointer self-start transition-colors"
+              className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-black dark:hover:text-white flex items-center gap-1 bg-transparent border-none outline-none cursor-pointer self-start transition-colors"
             >
               ← Back to accounts
             </button>
@@ -441,11 +432,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme, isMicMuted = t
         </div>
       </div>
 
-      {/* Centered Page Sub-text (System active,. continous secure rotation) spanning the bottom center of the page */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-[11px] text-slate-400 tracking-[0.2em] font-mono select-none text-center whitespace-nowrap z-0">
-        SYSTEM ACTIVE • CONTINUOUS SECURE ROTATION
-      </div>
-
     </div>
   );
 }
+
