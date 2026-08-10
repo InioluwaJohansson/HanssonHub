@@ -2460,6 +2460,25 @@ export default function App() {
   const [transcription, setTranscription] = React.useState<string>("");
   const wasCallMutedBeforeHeyFridayRef = React.useRef<boolean>(false);
   const speechRecognitionRef = React.useRef<any>(null);
+  const isFridaySpeakingRef = React.useRef<boolean>(false);
+  const lastFridaySpeakingEndedRef = React.useRef<number>(0);
+  const recentSpokenAssistantPhrasesRef = React.useRef<string[]>([]);
+  const cachedVoicesRef = React.useRef<SpeechSynthesisVoice[]>([]);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      const updateVoices = () => {
+        try {
+          const v = window.speechSynthesis.getVoices();
+          if (v && v.length > 0) {
+            cachedVoicesRef.current = v;
+          }
+        } catch (e) {}
+      };
+      updateVoices();
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+  }, []);
 
 
   
@@ -12272,29 +12291,86 @@ export default function App() {
 
   const speakVoiceResponse = (text: string) => {
     setFridayResponse(text);
+    isFridaySpeakingRef.current = true;
+    setIsFridaySpeaking(true);
+
+    if (text && text.trim()) {
+      recentSpokenAssistantPhrasesRef.current = [
+        text.trim(),
+        ...recentSpokenAssistantPhrasesRef.current.slice(0, 15)
+      ];
+    }
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.abort();
+      } catch (e) {}
+    }
+
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+
       const utterance = new SpeechSynthesisUtterance(text);
       
-      utterance.onstart = () => {
-        setIsFridaySpeaking(true);
-      };
-      utterance.onend = () => {
+      const handleSpeechEnded = () => {
+        isFridaySpeakingRef.current = false;
         setIsFridaySpeaking(false);
-      };
-      utterance.onerror = () => {
-        setIsFridaySpeaking(false);
+        lastFridaySpeakingEndedRef.current = Date.now();
+
+        setTimeout(() => {
+          if (!isFridaySpeakingRef.current && speechRecognitionRef.current) {
+            try {
+              speechRecognitionRef.current.start();
+            } catch (e) {}
+          }
+        }, 1200);
       };
 
+      utterance.onstart = () => {
+        isFridaySpeakingRef.current = true;
+        setIsFridaySpeaking(true);
+      };
+      utterance.onend = handleSpeechEnded;
+      utterance.onerror = handleSpeechEnded;
+
       const selectFeminineVoice = () => {
-        const voices = window.speechSynthesis.getVoices();
+        let voices = cachedVoicesRef.current;
+        if (!voices || voices.length === 0) {
+          voices = window.speechSynthesis.getVoices();
+          if (voices && voices.length > 0) {
+            cachedVoicesRef.current = voices;
+          }
+        }
         if (!voices || voices.length === 0) return null;
 
         const maleKeywords = [
           'male', 'david', 'mark', 'george', 'guy', 'alex', 'fred', 'daniel', 
           'paul', 'brian', 'james', 'thomas', 'richard', 'steve', 'aaron', 
-          'microsoft david', 'microsoft mark', 'google us english male',
-          'microsoft ravi', 'microsoft heami'
+          'ravi', 'heami', 'arthur', 'gordon', 'nikos', 'oskar', 'yuri', 'diego', 
+          'jorge', 'rishi', 'oliver', 'harry', 'jack', 'noah', 'liam', 'ethan', 
+          'william', 'benjamin', 'lucas', 'henry', 'alexander', 'mason', 'michael', 
+          'logan', 'jacob', 'jackson', 'levi', 'sebastian', 'mateo', 'owen', 
+          'theodore', 'aiden', 'samuel', 'joseph', 'john', 'wyatt', 'matthew', 
+          'luke', 'asher', 'carter', 'julian', 'grayson', 'leo', 'jayden', 'gabriel', 
+          'isaac', 'lincoln', 'anthony', 'hudson', 'dylan', 'ezra', 'charles', 
+          'christopher', 'jaxon', 'maverick', 'josiah', 'isaiah', 'andrew', 'elias', 
+          'joshua', 'nathan', 'caleb', 'ryan', 'adrian', 'miles', 'eli', 'nolan', 
+          'christian', 'cameron', 'ezekiel', 'colton', 'luca', 'landon', 'hunter', 
+          'enzo', 'kingston', 'felix', 'harrison', 'austin', 'kai', 'weston', 
+          'jordan', 'ian', 'judah', 'everett', 'thiago', 'abel', 'roman', 'silas', 
+          'bennett', 'dominic', 'adam', 'xavier', 'carlos', 'juan', 'pedro', 
+          'pablo', 'luis', 'jose', 'manuel', 'antonio', 'fernando', 'gonzalo', 
+          'rafael', 'sergio', 'andres', 'miguel', 'alejandro', 'javier', 'gael', 
+          'emiliano', 'santiago', 'matias', 'emanuel', 'joaquin', 'federico', 
+          'nicolas', 'alonso', 'agustin', 'bruno', 'ignacio', 'tomás', 'benjamín', 
+          'felipe', 'bautista', 'santino', 'lautaro', 'maximiliano', 'facundo', 
+          'valentín', 'esteban', 'dante', 'luciano', 'ramiro', 'jeremias', 
+          'valentino', 'lisandro', 'guillermo', 'emilio', 'maximo', 'rodrigo', 
+          'marcos', 'gastón', 'salvador', 'claudio', 'iván', 'ezequiel', 'alexis', 
+          'renato', 'mathias', 'alan', 'simon', 'fabian', 'bastian', 'milo', 
+          'damian', 'joel', 'man', 'boy'
         ];
 
         const feminineKeywords = [
@@ -12302,35 +12378,57 @@ export default function App() {
           'microsoft zira', 'microsoft eva', 'microsoft hazel', 'microsoft susan',
           'siri', 'jenny', 'aria', 'sonia', 'serena', 'stephanie', 'veena',
           'allison', 'ava', 'catherine', 'helena', 'monica', 'zora', 'amira', 'nora',
-          'susan', 'hazel', 'google uk english female', 'google us english female', 'google us english'
+          'susan', 'hazel', 'google uk english female', 'google us english female', 
+          'google us english', 'woman', 'girl', 'lady', 'alice', 'amanda', 'amy', 
+          'angela', 'anita', 'ann', 'anna', 'anne', 'audrey', 'barbara', 'beth', 
+          'carol', 'caroline', 'celeste', 'charlotte', 'chloe', 'clara', 'daisy', 
+          'diana', 'dora', 'edith', 'eleanor', 'elizabeth', 'ella', 'emily', 'emma', 
+          'eva', 'evelyn', 'florence', 'grace', 'hannah', 'helen', 'holly', 'ida', 
+          'irene', 'iris', 'isabel', 'isabella', 'ivy', 'jane', 'janet', 'jean', 
+          'jennifer', 'jessica', 'joan', 'joyce', 'judith', 'julia', 'julie', 'kate', 
+          'katherine', 'kathleen', 'laura', 'lauren', 'layla', 'leslie', 'lillian', 
+          'lily', 'linda', 'lisa', 'lora', 'louise', 'lucy', 'mabel', 'madeline', 
+          'margaret', 'maria', 'mariah', 'marian', 'marilyn', 'marion', 'martha', 
+          'mary', 'maya', 'megan', 'melissa', 'mia', 'mildred', 'miriam', 'molly', 
+          'nancy', 'naomi', 'natalie', 'nelly', 'olivia', 'paula', 'penelope', 
+          'rachel', 'rebecca', 'rose', 'ruby', 'ruth', 'sally', 'sarah', 'sophia', 
+          'sophie', 'stella', 'sylvia', 'teresa', 'tracy', 'valerie', 'vanessa', 
+          'vera', 'violet', 'virginia', 'wanda', 'wendy', 'yvonne', 'zoe'
         ];
 
-        // 1. Search for English voices matching female keywords and excluding male keywords
-        let chosen = voices.find(v => 
+        const isVoiceMale = (v: SpeechSynthesisVoice) => {
+          const lowerName = v.name.toLowerCase();
+          const lowerUri = (v.voiceURI || '').toLowerCase();
+          
+          if (feminineKeywords.some(kw => lowerName.includes(kw) || lowerUri.includes(kw))) {
+            return false;
+          }
+          
+          return maleKeywords.some(mk => lowerName.includes(mk) || lowerUri.includes(mk));
+        };
+
+        const nonMaleVoices = voices.filter(v => !isVoiceMale(v));
+        if (nonMaleVoices.length === 0) {
+          return voices.find(v => feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))) || null;
+        }
+
+        let chosen = nonMaleVoices.find(v => 
           v.lang.startsWith('en') &&
-          feminineKeywords.some(kw => v.name.toLowerCase().includes(kw)) &&
-          !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
+          feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
         );
 
-        // 2. Search any language voice matching female keywords and excluding male keywords
         if (!chosen) {
-          chosen = voices.find(v => 
-            feminineKeywords.some(kw => v.name.toLowerCase().includes(kw)) &&
-            !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
+          chosen = nonMaleVoices.find(v => 
+            feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
           );
         }
 
-        // 3. Fallback: English non-male voice
         if (!chosen) {
-          chosen = voices.find(v => 
-            v.lang.startsWith('en') && 
-            !maleKeywords.some(mk => v.name.toLowerCase().includes(mk))
-          );
+          chosen = nonMaleVoices.find(v => v.lang.startsWith('en'));
         }
 
-        // 4. Any non-male voice
         if (!chosen) {
-          chosen = voices.find(v => !maleKeywords.some(mk => v.name.toLowerCase().includes(mk)));
+          chosen = nonMaleVoices[0];
         }
 
         return chosen || null;
@@ -12338,32 +12436,56 @@ export default function App() {
 
       const voice = selectFeminineVoice();
       if (voice) utterance.voice = voice;
-      utterance.pitch = 1.3;
+      utterance.pitch = 1.35;
       utterance.rate = 1.0;
       
-      setIsFridaySpeaking(true);
-      window.speechSynthesis.speak(utterance);
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        handleSpeechEnded();
+      }
 
       const wordCount = text.split(' ').length;
-      const estimatedMs = Math.max(1800, wordCount * 400);
+      const estimatedMs = Math.max(2500, wordCount * 450 + 1000);
       setTimeout(() => {
-        if (!window.speechSynthesis.speaking) {
-          setIsFridaySpeaking(false);
+        if (!window.speechSynthesis || !window.speechSynthesis.speaking) {
+          if (isFridaySpeakingRef.current) {
+            handleSpeechEnded();
+          }
         }
       }, estimatedMs);
     } else {
-      setIsFridaySpeaking(true);
       setTimeout(() => {
+        isFridaySpeakingRef.current = false;
         setIsFridaySpeaking(false);
+        lastFridaySpeakingEndedRef.current = Date.now();
       }, 2000);
     }
   };
 
   const handleVoiceCommand = async (transcript: string) => {
-    // Clean out background chatter fillers and noise to extract clear command
+    const now = Date.now();
+    if (
+      isFridaySpeakingRef.current || 
+      (now - lastFridaySpeakingEndedRef.current < 2000) || 
+      (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking)
+    ) {
+      return;
+    }
+
     let lower = transcript.toLowerCase().trim().replace(/^hey friday\s*/, "");
     lower = lower.replace(/\b(um|uh|hmm|mhm|shh|like|you know|so yeah|background|noise)\b/gi, " ").replace(/\s+/g, " ").trim();
     if (!lower) return;
+
+    const cleanLowerNoPunctuation = lower.replace(/[^\w\s]/g, '').trim();
+    const isAssistantEcho = recentSpokenAssistantPhrasesRef.current.some(recent => {
+      const cleanRecent = recent.toLowerCase().replace(/[^\w\s]/g, '').trim();
+      return cleanRecent && cleanLowerNoPunctuation && (cleanRecent.includes(cleanLowerNoPunctuation) || cleanLowerNoPunctuation.includes(cleanRecent));
+    });
+    if (isAssistantEcho) {
+      console.log("Suppressed voice command due to assistant echo:", transcript);
+      return;
+    }
 
     // 0. Pending action check (e.g., Awaiting contact/recipient name)
     if (pendingVoiceActionRef.current) {
@@ -13327,6 +13449,16 @@ export default function App() {
     speechRecognitionRef.current = recognition;
 
     recognition.onresult = (event: any) => {
+      // Guard against AI assistant feeding back its own voice output
+      const now = Date.now();
+      const isAssistantActive = isFridaySpeakingRef.current || 
+        (now - lastFridaySpeakingEndedRef.current < 2500) || 
+        (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking);
+
+      if (isAssistantActive) {
+        return;
+      }
+
       let currentTranscript = '';
       let isFinalResult = false;
       let minConfidence = 1.0;
@@ -13357,6 +13489,46 @@ export default function App() {
       }
 
       const lowerTranscript = currentTranscript.toLowerCase().trim();
+
+      // Echo prevention check against known assistant phrases and recent spoken responses
+      const assistantPhrases = [
+        'how can i assist you',
+        'i heard',
+        'starting voice message',
+        'starting voice call',
+        'starting video call',
+        'maximizing friday assistant',
+        'minimizing friday assistant',
+        'microphone muted',
+        'microphone unmuted',
+        'camera enabled',
+        'camera disabled',
+        'there is no active call right now',
+        'opening screensaver',
+        'exiting screensaver',
+        'signing you out',
+        'who would you like to',
+        'turned on',
+        'turned off',
+        'friday assistant closed',
+        'sending voice message',
+        'playing recorded voice message',
+        'couldn\'t find a contact'
+      ];
+
+      const cleanCandidate = lowerTranscript.replace(/^hey friday\s*/, '').replace(/[^\w\s]/g, '').trim();
+      const isAssistantEcho = assistantPhrases.some(p => cleanCandidate.includes(p) || p.includes(cleanCandidate)) ||
+        recentSpokenAssistantPhrasesRef.current.some(recent => {
+          const cleanRecent = recent.toLowerCase().replace(/[^\w\s]/g, '').trim();
+          if (!cleanRecent || !cleanCandidate) return false;
+          return cleanRecent.includes(cleanCandidate) || cleanCandidate.includes(cleanRecent) ||
+            (cleanCandidate.length > 5 && cleanRecent.startsWith(cleanCandidate.substring(0, 15)));
+        });
+
+      if (isAssistantEcho) {
+        return;
+      }
+
       setTranscription(currentTranscript);
       
       if (lowerTranscript.includes("hey friday") && isLoggedIn) {
@@ -13398,8 +13570,9 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      // Restart to keep listening continuously if needed, but browsers might block aggressive restarting.
-      // We will try restarting if the app is still active.
+      if (isFridaySpeakingRef.current || (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking)) {
+        return;
+      }
       try {
         recognition.start();
       } catch (e) {}
