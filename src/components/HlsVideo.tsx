@@ -76,6 +76,7 @@ export const HlsVideo = React.forwardRef<HTMLVideoElement, HlsVideoProps>(
             }
           }
         }}
+        src={src || undefined}
         {...props}
       />
     );

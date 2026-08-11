@@ -257,8 +257,8 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
           title={isCollapsed ? "Profile" : undefined}
         >
           <div className="h-8 w-8 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center justify-center overflow-hidden shrink-0 font-bold text-xs tracking-wider uppercase shadow-2xs">
-            {userProfile?.getPersonDetailsDto?.imageUrl ? (
-              <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Profile" className="h-full w-full object-cover" />
+            {userProfile?.getPersonDetailsDto?.imageUrl?.trim() ? (
+              <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl) || undefined} alt="Profile" className="h-full w-full object-cover" />
             ) : (
               userInitials
             )}

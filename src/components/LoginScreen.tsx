@@ -173,7 +173,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
 
           {/* Horizontal Scroll Div of Cards */}
           <div 
-            className="w-full max-w-4xl flex flex-row items-center gap-6 overflow-x-auto py-6 px-4 no-scrollbar z-10 justify-center"
+            className="w-full max-w-5xl flex flex-row items-center gap-7 overflow-x-auto py-6 px-4 no-scrollbar z-10 justify-center"
             style={{
               scrollbarWidth: 'none',
               msOverflowStyle: 'none'
@@ -191,7 +191,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                   setUsername(user.username);
                   setIsChoosingAccount(false);
                 }}
-                className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-6 w-48 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
+                className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-7 w-56 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
               >
                 {/* Delete icon */}
                 <button
@@ -212,22 +212,22 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                 </button>
 
                 {/* Big Image with circular black border around it */}
-                <div className="h-28 w-28 rounded-full border-4 border-slate-900 dark:border-zinc-100 flex items-center justify-center overflow-hidden bg-slate-100 dark:bg-zinc-800 shadow-inner group-hover:scale-105 transition-transform duration-300">
-                  {user.imageUrl ? (
+                <div className="h-32 w-32 rounded-full border-4 border-slate-900 dark:border-zinc-100 flex items-center justify-center overflow-hidden bg-slate-100 dark:bg-zinc-800 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                  {user.imageUrl?.trim() ? (
                     <img
-                      src={getFullImageUrl(user.imageUrl)}
+                      src={getFullImageUrl(user.imageUrl) || undefined}
                       alt={user.name}
                       className="h-full w-full object-cover rounded-full"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <User className="h-12 w-12 text-slate-400 dark:text-zinc-500" />
+                    <User className="h-14 w-14 text-slate-400 dark:text-zinc-500" />
                   )}
                 </div>
 
                 {/* Name & username stacked below the image */}
                 <div className="mt-5 text-center w-full">
-                  <span className="block text-sm font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
+                  <span className="block text-base font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
                     {user.name}
                   </span>
                   <span className="block text-xs text-slate-500 dark:text-zinc-400 font-semibold tracking-wider mt-1 truncate">
@@ -236,20 +236,29 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                 </div>
               </div>
             ))}
-          </div>
 
-          {/* Use another account button below the div with suitable icon */}
-          <button
-            type="button"
-            onClick={() => {
-              setUsername('');
-              setIsChoosingAccount(false);
-            }}
-            className="mt-10 px-8 h-12 border border-slate-300 dark:border-zinc-700 hover:border-black dark:hover:border-zinc-400 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-extrabold rounded-xl text-xs tracking-widest uppercase transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer select-none z-10 flex items-center justify-center gap-2.5"
-          >
-            <UserPlus className="h-4 w-4 text-slate-900 dark:text-zinc-100" />
-            Use another account
-          </button>
+            {/* Use another account card at the end of the user cards list */}
+            <div
+              onClick={() => {
+                setUsername('');
+                setIsChoosingAccount(false);
+              }}
+              className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-slate-900 dark:hover:border-zinc-100 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-7 w-56 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
+            >
+              <div className="h-32 w-32 rounded-full border-4 border-dashed border-slate-400 dark:border-zinc-600 group-hover:border-slate-900 dark:group-hover:border-zinc-100 flex items-center justify-center bg-slate-100/80 dark:bg-zinc-800/60 shadow-inner group-hover:scale-105 transition-all duration-300">
+                <UserPlus className="h-12 w-12 text-slate-600 dark:text-zinc-300 group-hover:text-slate-900 dark:group-hover:text-zinc-100 transition-colors" />
+              </div>
+
+              <div className="mt-5 text-center w-full">
+                <span className="block text-base font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
+                  Use Another Account
+                </span>
+                <span className="block text-xs text-slate-500 dark:text-zinc-400 font-semibold tracking-wider mt-1 truncate">
+                  Log in with new user
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

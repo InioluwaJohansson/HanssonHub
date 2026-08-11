@@ -1118,7 +1118,7 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
 
   if (totalCount === 1) {
     const att = media[0];
-    const fullUrl = getFullImageUrl(att.filePath) || "";
+    const fullUrl = getFullImageUrl(att.filePath) || undefined;
     const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
     if (isVideo) {
       return (
@@ -1137,7 +1137,7 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
             src={fullUrl} 
             alt={att.fileName || "Image"} 
             className="w-full h-auto max-h-[300px] object-cover rounded-md hover:opacity-95 transition-opacity cursor-pointer shadow-sm bg-black/5"
-            onClick={() => onMediaClick(fullUrl, false)}
+            onClick={() => onMediaClick(fullUrl || "", false)}
             referrerPolicy="no-referrer"
           />
         </div>
@@ -1150,10 +1150,10 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
     return (
       <div className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden max-w-[320px] w-full aspect-[4/3] bg-transparent border border-black/5 p-0.5">
         {media.map((att, idx) => {
-          const fullUrl = getFullImageUrl(att.filePath) || "";
+          const fullUrl = getFullImageUrl(att.filePath) || undefined;
           const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
           return (
-            <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+            <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl || "", isVideo)}>
               {isVideo ? (
                 <div className="relative w-full h-full">
                   <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
@@ -1178,10 +1178,10 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
         {/* Top row: 2 files */}
         <div className="grid grid-cols-2 gap-1 flex-1">
           {media.slice(0, 2).map((att, idx) => {
-            const fullUrl = getFullImageUrl(att.filePath) || "";
+            const fullUrl = getFullImageUrl(att.filePath) || undefined;
             const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
             return (
-              <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+              <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl || "", isVideo)}>
                 {isVideo ? (
                   <div className="relative w-full h-full">
                     <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
@@ -1199,10 +1199,10 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
         {/* Bottom row: 1 file */}
         {(() => {
           const att = media[2];
-          const fullUrl = getFullImageUrl(att.filePath) || "";
+          const fullUrl = getFullImageUrl(att.filePath) || undefined;
           const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
           return (
-            <div className="relative w-full h-[48%] overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+            <div className="relative w-full h-[48%] overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl || "", isVideo)}>
               {isVideo ? (
                 <div className="relative w-full h-full">
                   <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
@@ -1227,11 +1227,11 @@ const WhatsAppMediaGrid = ({ media, onMediaClick }: { media: any[]; onMediaClick
   return (
     <div className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden max-w-[320px] w-full aspect-square bg-transparent border border-black/5 p-0.5">
       {displayMedia.map((att, idx) => {
-        const fullUrl = getFullImageUrl(att.filePath) || "";
+        const fullUrl = getFullImageUrl(att.filePath) || undefined;
         const isVideo = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.toLowerCase().endsWith('.mp4') || att.filePath?.toLowerCase().endsWith('.webm');
         const isLastItem = idx === 3;
         return (
-          <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl, isVideo)}>
+          <div key={idx} className="relative w-full h-full overflow-hidden cursor-pointer" onClick={() => onMediaClick(fullUrl || "", isVideo)}>
             {isVideo ? (
               <div className="relative w-full h-full">
                 <video src={fullUrl} className="w-full h-full object-cover bg-black/5" />
@@ -1474,7 +1474,7 @@ const CustomAudioPlayer = ({
     >
       <audio 
         ref={audioRef} 
-        src={src} 
+        src={src || undefined} 
         onTimeUpdate={handleTimeUpdate} 
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleAudioEnded}
@@ -12301,10 +12301,14 @@ export default function App() {
       ];
     }
 
+    // Duck / mute microphone input while assistant is actively speaking to prevent audio feedback
     if (speechRecognitionRef.current) {
       try {
         speechRecognitionRef.current.abort();
       } catch (e) {}
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
     }
 
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -12319,18 +12323,27 @@ export default function App() {
         setIsFridaySpeaking(false);
         lastFridaySpeakingEndedRef.current = Date.now();
 
+        // Restore microphone input after cooldown buffer
         setTimeout(() => {
-          if (!isFridaySpeakingRef.current && speechRecognitionRef.current) {
-            try {
-              speechRecognitionRef.current.start();
-            } catch (e) {}
+          if (!isFridaySpeakingRef.current) {
+            if (localStreamRef.current && !isCallMuted) {
+              localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = true; });
+            }
+            if (speechRecognitionRef.current) {
+              try {
+                speechRecognitionRef.current.start();
+              } catch (e) {}
+            }
           }
-        }, 1200);
+        }, 1500);
       };
 
       utterance.onstart = () => {
         isFridaySpeakingRef.current = true;
         setIsFridaySpeaking(true);
+        if (localStreamRef.current) {
+          localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
+        }
       };
       utterance.onend = handleSpeechEnded;
       utterance.onerror = handleSpeechEnded;
@@ -12344,6 +12357,14 @@ export default function App() {
           }
         }
         if (!voices || voices.length === 0) return null;
+
+        // Prioritize Victoria voice as requested
+        const victoriaVoice = voices.find(v => {
+          const name = v.name.toLowerCase();
+          const uri = (v.voiceURI || '').toLowerCase();
+          return name.includes('victoria') || uri.includes('victoria');
+        });
+        if (victoriaVoice) return victoriaVoice;
 
         const maleKeywords = [
           'male', 'david', 'mark', 'george', 'guy', 'alex', 'fred', 'daniel', 
@@ -20160,7 +20181,7 @@ export default function App() {
                                                             return (
                                                               <div key={idx} className="mb-1">
                                                                 <CustomAudioPlayer 
-                                                                  src={fullUrl || ""} 
+                                                                  src={fullUrl || undefined}
                                                                   fileName={att.fileName || "Audio Message"} 
                                                                   initialText={msg.content}
                                                                   isSending={(msg as any).status === 'sending'}

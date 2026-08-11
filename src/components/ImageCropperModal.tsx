@@ -90,7 +90,7 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
               <img
                 ref={imgRef}
                 alt="Crop me"
-                src={imageSrc}
+                src={imageSrc || undefined}
                 onLoad={onImageLoad}
                 style={{ maxHeight: '380px', maxWidth: '100%', objectFit: 'contain' }}
                 className="block mx-auto"
