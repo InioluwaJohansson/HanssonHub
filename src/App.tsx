@@ -160,6 +160,7 @@ import {
   UserCog,
   Users,
   ChevronLeft,
+  ArrowLeft,
   ArrowLeftCircle,
   ChevronRight,
   Clock,
@@ -8177,9 +8178,6 @@ export default function App() {
 
     const verifyAuth = async () => {
       // The user mentioned 1308 as an example, and length 6 in previous code.
-      // We'll trigger it when it looks like a complete code (e.g. 4 or 6 chars)
-      // or we can just let handleAuthSubmit handle it if there's a button.
-      // But according to the current pattern, it tries to auto-verify.
       if ((authCode.length === 4 || authCode.length === 6) && /^\d+$/.test(authCode)) {
         try {
           const response: any = await apiFetch(`/User/VerifyAuthCode?authCode=${authCode}`, {
@@ -8198,8 +8196,12 @@ export default function App() {
             }, 800);
           } else {
             setAuthError(true);
-            setAuthCode(''); // Clear the inputted code on verification failure
-            toast.error(response.message || "Invalid Authorization Code");
+            setAuthCode(''); // Clear the inputted code on verification failure so user can start again
+            toast.error(typeof response === 'string' ? response : (response?.message || "Invalid Authorization Code"));
+            setTimeout(() => {
+              const firstInput = document.getElementById('auth-code-input-0');
+              if (firstInput) firstInput.focus();
+            }, 50);
           }
         } catch (err: any) {
           console.error("Auth verification failed", err);
@@ -8208,13 +8210,22 @@ export default function App() {
           // Fallback for development/testing if API fails but we have mock code
           if (authCode === '1308' || authCode === '123456') {
              toast.info("Using development fallback for auth code");
-             onAuthSuccess?.();
-             setIsAuthModalOpen(false);
-             setAuthCode('');
-             setAuthError(false);
-             setOnAuthSuccess(null);
+             setAuthSuccess(true);
+             setTimeout(() => {
+               onAuthSuccess?.();
+               setIsAuthModalOpen(false);
+               setAuthCode('');
+               setAuthError(false);
+               setAuthSuccess(false);
+               setOnAuthSuccess(null);
+             }, 800);
           } else {
-             setAuthCode(''); // Clear the inputted code on error when fallback is not matched
+             setAuthCode(''); // Clear the inputted code on error when fallback is not matched so user can start again
+             toast.error(err.message || "Invalid Authorization Code");
+             setTimeout(() => {
+               const firstInput = document.getElementById('auth-code-input-0');
+               if (firstInput) firstInput.focus();
+             }, 50);
           }
         }
       }
@@ -15402,7 +15413,7 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent className={cn("sm:max-w-[520px] border-2 transition-colors duration-300 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/20" : authError ? "border-red-500 bg-white dark:bg-zinc-950" : "border-yellow-400 dark:border-yellow-600 shadow-lg shadow-yellow-100/50 dark:shadow-none bg-white dark:bg-zinc-950")}>
+        <DialogContent showCloseButton={false} className={cn("sm:max-w-[520px] border-2 transition-colors duration-300 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/20" : authError ? "border-red-500 bg-white dark:bg-zinc-950" : "border-yellow-400 dark:border-yellow-600 shadow-lg shadow-yellow-100/50 dark:shadow-none bg-white dark:bg-zinc-950")}>
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
             {/* Left Column (Current Contents) */}
             <div className="sm:col-span-7 space-y-4">
@@ -15464,7 +15475,7 @@ export default function App() {
             </div>
 
             {/* Right Column (Keypad) */}
-            <div className="sm:col-span-5 flex flex-col items-center justify-center p-3 border-t sm:border-t-0 sm:border-l border-muted bg-muted/20 rounded-xl">
+            <div className="sm:col-span-5 flex flex-col items-center justify-center p-3 border-t sm:border-t-0 sm:border-l-2 border-muted bg-muted/20 dark:bg-transparent rounded-none">
               <div className="grid grid-cols-3 gap-2 w-full max-w-[180px]">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                   <Button
@@ -15514,7 +15525,7 @@ export default function App() {
                     setAuthError(false);
                   }}
                 >
-                  ⌫
+                  <ArrowLeft className="h-5 w-5" />
                 </Button>
               </div>
             </div>
@@ -16915,27 +16926,29 @@ export default function App() {
 
           <DialogFooter>
             <Button 
-              onClick={async () => {
+              onClick={() => {
                 if (!externalForm.externalName) return;
-                try {
-                  const payload = {
-                    roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
-                    sectionId: resolveSectionId(externalForm.sectionId, sections),
-                    isHidden: true,
-                    externalName: externalForm.externalName,
-                    actionIds: (externalForm.actionIds || []).map(Number)
-                  };
-                  await apiFetch('/External/CreateExternal', {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                  });
-                  toast.success('External device added successfully!');
-                  setIsAddExternalOpen(false);
-                  addLogEntry('Window Control', `Added Boundary Device: ${externalForm.externalName}`);
-                  setExternalForm({});
-                } catch (err: any) {
-                  toast.error(`Error adding external device: ${err.message}`);
-                }
+                requestAuth(async () => {
+                  try {
+                    const payload = {
+                      roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
+                      sectionId: resolveSectionId(externalForm.sectionId, sections),
+                      isHidden: true,
+                      externalName: externalForm.externalName,
+                      actionIds: (externalForm.actionIds || []).map(Number)
+                    };
+                    await apiFetch('/External/CreateExternal', {
+                      method: 'POST',
+                      body: JSON.stringify(payload)
+                    });
+                    toast.success('External device added successfully!');
+                    setIsAddExternalOpen(false);
+                    addLogEntry('Window Control', `Added Boundary Device: ${externalForm.externalName}`);
+                    setExternalForm({});
+                  } catch (err: any) {
+                    toast.error(`Error adding external device: ${err.message}`);
+                  }
+                });
               }}
             className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <PlusCircle className="mr-2 h-5 w-5" /> Add External
@@ -18538,7 +18551,7 @@ export default function App() {
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
               />
             </div>
             <div className="grid gap-2">
@@ -18561,7 +18574,7 @@ export default function App() {
               <Input autoComplete="off" id="actionTime" type="time"
                 value={formatTimeSpanForInput(actionForm.time)}
                 onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
               />
             </div>
 
@@ -18650,7 +18663,7 @@ export default function App() {
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
               />
             </div>
             <div className="grid gap-2">
@@ -18673,7 +18686,7 @@ export default function App() {
               <Input autoComplete="off" id="edit-actionTime" type="time"
                 value={formatTimeSpanForInput(actionForm.time)}
                 onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-2xl h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
+                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
               />
             </div>
 
@@ -18900,7 +18913,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 flex items-center justify-center">
+          <DialogFooter className="p-3.5 flex items-center justify-center border-t border-slate-100 dark:border-zinc-800">
             <Button 
               className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
               onClick={() => {
@@ -19099,7 +19112,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 flex items-center justify-center">
+          <DialogFooter className="p-3.5 flex items-center justify-center border-t border-slate-100 dark:border-zinc-800">
             <Button 
               className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
               onClick={() => {
