@@ -67,6 +67,7 @@ import {
   GetActionStepDto,
   GetActionDto,
   FacilityType,
+  FacilityTypeApp,
   ChatDto,
   ChatParticipantDto,
   MessageDto,
@@ -201,6 +202,7 @@ import {
   Download,
   Fingerprint,
   CalendarDays,
+  ExternalLink,
   X,
   Filter,
   CheckCheck,
@@ -3714,6 +3716,7 @@ export default function App() {
   const [authCode, setAuthCode] = React.useState('');
   const [authError, setAuthError] = React.useState(false);
   const [authSuccess, setAuthSuccess] = React.useState(false);
+  const [isVerifyingAuth, setIsVerifyingAuth] = React.useState(false);
   const [onAuthSuccess, setOnAuthSuccess] = React.useState<(() => void) | null>(null);
 
   // Camera Modal
@@ -8179,6 +8182,7 @@ export default function App() {
     const verifyAuth = async () => {
       // The user mentioned 1308 as an example, and length 6 in previous code.
       if ((authCode.length === 4 || authCode.length === 6) && /^\d+$/.test(authCode)) {
+        setIsVerifyingAuth(true);
         try {
           const response: any = await apiFetch(`/User/VerifyAuthCode?authCode=${authCode}`, {
             method: 'POST'
@@ -8227,6 +8231,8 @@ export default function App() {
                if (firstInput) firstInput.focus();
              }, 50);
           }
+        } finally {
+          setIsVerifyingAuth(false);
         }
       }
     };
@@ -8676,6 +8682,368 @@ export default function App() {
         setSelectedExternal(extDto);
         setIsViewExternalOpen(true);
       }
+    }
+  };
+
+  const getFacilityTypeBadgeColor = (type?: string) => {
+    if (!type) return "bg-primary/10 text-primary border-primary/20";
+    const t = type.toLowerCase();
+    switch (t) {
+      case 'light': return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
+      case 'door': return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20";
+      case 'appliance': return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20";
+      case 'camera': return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20";
+      case 'window': return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20";
+      case 'external': return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
+      case 'hardware': return "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20";
+      case 'action': return "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20";
+      case 'room': return "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20";
+      case 'section': return "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20";
+      case 'person': return "bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20";
+      case 'contact': return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
+      case 'contactcategory': return "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20";
+      default: return "bg-primary/10 text-primary border-primary/20";
+    }
+  };
+
+  const formatFacilityTypeName = (type?: string) => {
+    if (!type) return '';
+    const t = type.toLowerCase();
+    switch (t) {
+      case 'contactcategory': return 'Contact Category';
+      case 'person': return 'User';
+      default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
+  };
+
+  const getFacilityTypeIcon = (type?: string) => {
+    if (!type) return <Tag className="h-3 w-3" />;
+    const t = type.toLowerCase();
+    switch (t) {
+      case 'light': return <Lightbulb className="h-3 w-3" />;
+      case 'door': return <Lock className="h-3 w-3" />;
+      case 'appliance': return <Power className="h-3 w-3" />;
+      case 'camera': return <Camera className="h-3 w-3" />;
+      case 'window': return <WindowIcon className="h-3 w-3" />;
+      case 'external': return <Radio className="h-3 w-3" />;
+      case 'hardware': return <Cpu className="h-3 w-3" />;
+      case 'action': return <Zap className="h-3 w-3" />;
+      case 'room': return <HomeIcon className="h-3 w-3" />;
+      case 'section': return <Layers className="h-3 w-3" />;
+      case 'person': return <UserIcon className="h-3 w-3" />;
+      case 'contact': return <Contact className="h-3 w-3" />;
+      case 'contactcategory': return <Tag className="h-3 w-3" />;
+      default: return <Tag className="h-3 w-3" />;
+    }
+  };
+
+  const getFacilityItemName = (facilityType?: string, facilityId?: number) => {
+    if (!facilityType || facilityId === undefined || facilityId === null) return null;
+    const typeStr = facilityType.toString().trim().toLowerCase();
+    const idNum = Number(facilityId);
+
+    switch (typeStr) {
+      case 'appliance': {
+        const app = (appliances || []).find(a => Number(a.id) === idNum);
+        return app ? (app.applianceName || (app as any).name) : null;
+      }
+      case 'camera': {
+        const cam = (cameras || []).find(c => Number(c.id) === idNum);
+        return cam ? (cam.cameraName || (cam as any).name) : null;
+      }
+      case 'door': {
+        const d = (doors || []).find(item => Number(item.id) === idNum);
+        return d ? (d.doorName || (d as any).name) : null;
+      }
+      case 'external': {
+        const ext = (externals || []).find(e => Number(e.id) === idNum);
+        return ext ? (ext.externalName || (ext as any).name) : null;
+      }
+      case 'light': {
+        const l = (lights || []).find(item => Number(item.id) === idNum);
+        return l ? (l.lightName || (l as any).name) : null;
+      }
+      case 'window': {
+        const w = (windows || []).find(item => Number(item.id) === idNum);
+        return w ? (w.windowName || (w as any).name) : null;
+      }
+      case 'hardware': {
+        const hw = (hardwares || []).find(h => Number(h.id) === idNum);
+        return hw ? (hw.hardwareName || (hw as any).name) : null;
+      }
+      case 'action': {
+        const act = (actions || []).find(a => Number(a.id) === idNum);
+        return act ? (act.actionName || (act as any).name) : null;
+      }
+      case 'room': {
+        const r = (rooms || []).find(room => Number(room.id) === idNum || Number(room.dbId) === idNum);
+        return r ? (r.name || (r as any).roomName) : null;
+      }
+      case 'section': {
+        const s = (sections || []).find(sec => Number(sec.id) === idNum || Number(sec.dbId) === idNum);
+        return s ? (s.name || (s as any).sectionName) : null;
+      }
+      case 'person': {
+        const p = (allUsers || []).find(u => Number(u.id) === idNum || Number(u.personId) === idNum);
+        if (p?.getPersonDetailsDto) {
+          return `${p.getPersonDetailsDto.firstName || ''} ${p.getPersonDetailsDto.lastName || ''}`.trim() || null;
+        }
+        return null;
+      }
+      case 'contact': {
+        const c = (contacts || []).find(cont => Number(cont.id) === idNum);
+        if (c) {
+          return `${c.firstName || ''} ${c.lastName || ''}`.trim() || null;
+        }
+        return null;
+      }
+      case 'contactcategory': {
+        const cat = (contactCategories || []).find(ctg => Number(ctg.id) === idNum);
+        return cat ? (cat.categoryName || (cat as any).name) : null;
+      }
+      default:
+        return null;
+    }
+  };
+
+  const handleNavigateToLogItem = (log: GetLogDto) => {
+    const fType = log.facilityType || (log as any).FacilityType;
+    const fIdRaw = log.facilityId ?? (log as any).FacilityId;
+    if (!fType) return;
+
+    const fTypeStr = fType.toString().trim();
+    const fId = typeof fIdRaw === 'number' ? fIdRaw : parseInt(fIdRaw || '0', 10);
+    const lowerType = fTypeStr.toLowerCase();
+
+    setIsViewLogOpen(false);
+
+    if (lowerType === 'appliance') {
+      setActiveView('facility-appliances');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'appliance' && (dev.id === fId.toString() || dev.id === `appliance-${fId}` || dev.id.endsWith(`-${fId}`) || dev.dbId === fId))
+          || (() => {
+              const app = (appliances || []).find(a => a.id === fId || a.id.toString() === fId.toString());
+              if (!app) return null;
+              return {
+                id: `appliance-${app.id}`,
+                dbId: app.id,
+                name: app.applianceName || `Appliance #${app.id}`,
+                type: 'appliance',
+                status: app.isActive ? 'on' : 'off',
+                room: (rooms || []).find(r => r.id === app.roomId)?.name || 'Facility Overview',
+                icon: 'Power',
+                sectionId: app.sectionId?.toString(),
+                roomId: app.roomId?.toString()
+              } as Device;
+            })();
+        if (found) {
+          setSelectedAppliance(found);
+          setTimeout(() => {
+            setIsApplianceModalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'camera') {
+      setActiveView('facility-cameras');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'camera' && (dev.id === fId.toString() || dev.id === `camera-${fId}` || dev.id.endsWith(`-${fId}`) || dev.dbId === fId))
+          || (() => {
+              const cam = (cameras || []).find(c => c.id === fId || c.id.toString() === fId.toString());
+              if (!cam) return null;
+              return {
+                id: `camera-${cam.id}`,
+                dbId: cam.id,
+                name: cam.cameraName || `Camera #${cam.id}`,
+                type: 'camera',
+                status: cam.isActive ? 'on' : 'off',
+                room: (rooms || []).find(r => r.id === cam.roomId)?.name || 'Facility Overview',
+                icon: 'Video',
+                sectionId: cam.sectionId?.toString(),
+                roomId: cam.roomId?.toString()
+              } as Device;
+            })();
+        if (found) {
+          setSelectedCamera(found);
+          setTimeout(() => {
+            setIsCameraModalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'door') {
+      setActiveView('facility-doors');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'door' && (dev.id === fId.toString() || dev.id === `door-${fId}` || dev.id.endsWith(`-${fId}`) || dev.dbId === fId))
+          || (() => {
+              const dr = (doors || []).find(d => d.id === fId || d.id.toString() === fId.toString());
+              if (!dr) return null;
+              return {
+                id: `door-${dr.id}`,
+                dbId: dr.id,
+                name: dr.doorName || `Door #${dr.id}`,
+                type: 'door',
+                status: dr.isOpen ? 'on' : 'off',
+                isLocked: dr.isLocked,
+                room: (rooms || []).find(r => r.id === dr.roomId)?.name || 'Facility Overview',
+                icon: 'Lock',
+                sectionId: dr.sectionId?.toString(),
+                roomId: dr.roomId?.toString()
+              } as Device;
+            })();
+        if (found) {
+          setSelectedDoor(found);
+          setTimeout(() => {
+            setIsDoorModalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'external') {
+      setActiveView('facility-externals');
+      if (fId) {
+        const ext = (externals || []).find(e => e.id === fId || e.id.toString() === fId.toString());
+        if (ext) {
+          setSelectedExternal(ext);
+          setTimeout(() => {
+            setIsViewExternalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'light') {
+      setActiveView('facility-lights');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'light' && (dev.id === fId.toString() || dev.id === `light-${fId}` || dev.id.endsWith(`-${fId}`) || dev.dbId === fId))
+          || (() => {
+              const lt = (lights || []).find(l => l.id === fId || l.id.toString() === fId.toString());
+              if (!lt) return null;
+              return {
+                id: `light-${lt.id}`,
+                dbId: lt.id,
+                name: lt.lightName || `Light #${lt.id}`,
+                type: 'light',
+                status: lt.isActive ? 'on' : 'off',
+                value: lt.brightnessLevel || 100,
+                room: (rooms || []).find(r => r.id === lt.roomId)?.name || 'Facility Overview',
+                icon: 'Lightbulb',
+                sectionId: lt.sectionId?.toString(),
+                roomId: lt.roomId?.toString()
+              } as Device;
+            })();
+        if (found) {
+          setSelectedLight(found);
+          setTimeout(() => {
+            setIsLightModalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'window') {
+      setActiveView('facility-windows');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'window' && (dev.id === fId.toString() || dev.id === `window-${fId}` || dev.id.endsWith(`-${fId}`) || dev.dbId === fId))
+          || (() => {
+              const win = (windows || []).find(w => w.id === fId || w.id.toString() === fId.toString());
+              if (!win) return null;
+              return {
+                id: `window-${win.id}`,
+                dbId: win.id,
+                name: win.windowName || `Window #${win.id}`,
+                type: 'window',
+                status: win.isOpen ? 'on' : 'off',
+                isLocked: win.isLocked,
+                room: (rooms || []).find(r => r.id === win.roomId)?.name || 'Facility Overview',
+                icon: 'AppWindow',
+                sectionId: win.sectionId?.toString(),
+                roomId: win.roomId?.toString()
+              } as Device;
+            })();
+        if (found) {
+          setSelectedWindow(found);
+          setTimeout(() => {
+            setIsViewWindowOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'hardware') {
+      setActiveView('facility-hardware');
+      if (fId) {
+        const hw = (hardwares || []).find(h => h.id === fId || h.id.toString() === fId.toString());
+        if (hw) {
+          setSelectedHardware(hw);
+          setTimeout(() => {
+            setIsHardwareDetailOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'action') {
+      setActiveView('facility-actions');
+      if (fId) {
+        const act = (actions || []).find(a => a.id === fId || a.id.toString() === fId.toString());
+        if (act) {
+          setSelectedAction(act);
+          setTimeout(() => {
+            setIsViewActionOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'room') {
+      setActiveView('facility-rooms');
+      if (fId) {
+        const rm = (rooms || []).find(r => r.id === fId || r.id.toString() === fId.toString() || r.dbId === fId);
+        if (rm) {
+          setViewingRoom(rm);
+          setTimeout(() => {
+            setIsViewRoomOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'section') {
+      setActiveView('facility-overview');
+      if (fId) {
+        const sec = (sections || []).find(s => s.id === fId || s.id.toString() === fId.toString() || s.dbId === fId);
+        if (sec) {
+          setViewingSection(sec);
+          setTimeout(() => {
+            setIsViewSectionOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'person') {
+      setActiveView('all-users');
+      if (fId) {
+        const p = (allUsers || []).find(usr => usr.id === fId || usr.id.toString() === fId.toString() || usr.personId === fId || usr.getPersonDto?.id === fId);
+        if (p) {
+          setViewingPerson(p);
+          setTimeout(() => {
+            setIsViewPersonDetailsOpen(true);
+          }, 150);
+        } else if (log.getPersonDto && (log.getPersonDto.id === fId || log.personId === fId)) {
+          setViewingPerson(log.getPersonDto);
+          setTimeout(() => {
+            setIsViewPersonDetailsOpen(true);
+          }, 150);
+        }
+      } else if (log.getPersonDto) {
+        setViewingPerson(log.getPersonDto);
+        setTimeout(() => {
+          setIsViewPersonDetailsOpen(true);
+        }, 150);
+      }
+    } else if (lowerType === 'contact') {
+      setActiveView('contacts');
+      if (fId) {
+        const cnt = (contacts || []).find(c => c.id === fId || c.id.toString() === fId.toString());
+        if (cnt) {
+          setViewingContact(cnt);
+          setTimeout(() => {
+            setIsViewContactOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'contactcategory') {
+      setActiveView('contacts');
+      if (fId) {
+        setContactSortCategory(fId.toString());
+      }
+    } else {
+      setActiveView('facility-overview');
     }
   };
 
@@ -9813,7 +10181,19 @@ export default function App() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0">
+                    <div className="flex items-center justify-between sm:justify-end gap-2 flex-wrap flex-shrink-0">
+                      {(log.facilityType || (log as any).FacilityType) && (
+                        <Badge 
+                          variant="secondary" 
+                          className={cn(
+                            "text-xs px-2.5 py-0.5 rounded-full border font-medium flex items-center gap-1.5 shadow-none",
+                            getFacilityTypeBadgeColor(log.facilityType || (log as any).FacilityType)
+                          )}
+                        >
+                          {getFacilityTypeIcon(log.facilityType || (log as any).FacilityType)}
+                          <span>{formatFacilityTypeName(log.facilityType || (log as any).FacilityType)}</span>
+                        </Badge>
+                      )}
                       <Badge variant="outline" className={cn("text-xs px-2.5 py-0.5 rounded-full border", getActionTypeBadgeColor(log.actionType))}>
                         {log.actionType}
                       </Badge>
@@ -9901,13 +10281,41 @@ export default function App() {
                   </div>
 
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1 bg-muted/10 p-3 rounded-xl border text-left">
                         <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 block text-left">Action Class</span>
                         <Badge variant="outline" className={cn("text-xs font-bold w-fit", getActionTypeBadgeColor(selectedLog.actionType))}>
                           {selectedLog.actionType}
                         </Badge>
                       </div>
+                      {(selectedLog.facilityType || (selectedLog as any).FacilityType) && (
+                        <div className="space-y-1 bg-muted/10 p-3 rounded-xl border text-left">
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 block text-left">FACILITY</span>
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleNavigateToLogItem(selectedLog)}
+                              title={`Navigate to ${formatFacilityTypeName(selectedLog.facilityType || (selectedLog as any).FacilityType)}`}
+                              className={cn(
+                                "group inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer shadow-xs hover:shadow-sm hover:scale-[1.03] active:scale-[0.97] text-left",
+                                getFacilityTypeBadgeColor(selectedLog.facilityType || (selectedLog as any).FacilityType)
+                              )}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                {getFacilityTypeIcon(selectedLog.facilityType || (selectedLog as any).FacilityType)}
+                                <span>{formatFacilityTypeName(selectedLog.facilityType || (selectedLog as any).FacilityType)}</span>
+                              </div>
+                              <motion.div
+                                animate={{ x: [0, 3, 0] }}
+                                transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+                                className="flex items-center justify-center text-current opacity-80 group-hover:opacity-100"
+                              >
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              </motion.div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 bg-muted/10 p-4 rounded-xl border text-left">
@@ -13727,13 +14135,21 @@ export default function App() {
             </div>
 
             {/* Logout Button */}
-            <button 
-              className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors rounded-xl border-0 outline-none flex items-center justify-center cursor-pointer font-sans"
+            <motion.button 
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors rounded-xl border-0 outline-none flex items-center justify-center cursor-pointer font-sans group relative"
               onClick={handleLogout}
               title="Logout"
             >
-              <LogOut className="h-5 w-5" />
-            </button>
+              <motion.div
+                animate={{ x: [0, 2.5, 0] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                className="flex items-center justify-center"
+              >
+                <LogOut className="h-5 w-5 group-hover:translate-x-0.5 group-hover:-rotate-6 transition-transform duration-200" />
+              </motion.div>
+            </motion.button>
           </div>
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto relative">
@@ -15436,6 +15852,7 @@ export default function App() {
                       type="password"
                       autoComplete="off"
                       maxLength={1}
+                      disabled={isVerifyingAuth || authSuccess}
                       className={cn(
                         "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100",
                         authSuccess 
@@ -15470,7 +15887,18 @@ export default function App() {
                     />
                   ))}
                 </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400">This is a sensitive operation.</p>
+                {isVerifyingAuth ? (
+                  <div className="flex flex-col items-center justify-center py-2 space-y-1.5 animate-in fade-in duration-200">
+                    <div className="flex space-x-1.5 items-center">
+                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce" />
+                    </div>
+                    <p className="text-xs font-semibold text-primary animate-pulse">Verifying authorization...</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">This is a sensitive operation.</p>
+                )}
               </div>
             </div>
 
@@ -15481,6 +15909,7 @@ export default function App() {
                   <Button
                     key={num}
                     variant="outline"
+                    disabled={isVerifyingAuth || authSuccess}
                     className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground focus:ring-2 focus:ring-primary transition-all p-0 flex items-center justify-center"
                     onClick={() => {
                       if (authCode.length < 6) {
@@ -15495,6 +15924,7 @@ export default function App() {
                 {/* Clear */}
                 <Button
                   variant="outline"
+                  disabled={isVerifyingAuth || authSuccess}
                   className="h-11 w-11 text-[11px] font-semibold rounded-full text-red-500 hover:bg-red-50 p-0 flex items-center justify-center"
                   onClick={() => {
                     setAuthCode('');
@@ -15506,6 +15936,7 @@ export default function App() {
                 {/* 0 */}
                 <Button
                   variant="outline"
+                  disabled={isVerifyingAuth || authSuccess}
                   className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground transition-all p-0 flex items-center justify-center"
                   onClick={() => {
                     if (authCode.length < 6) {
@@ -15519,6 +15950,7 @@ export default function App() {
                 {/* Delete/Backspace */}
                 <Button
                   variant="outline"
+                  disabled={isVerifyingAuth || authSuccess}
                   className="h-11 w-11 text-sm font-semibold rounded-full hover:bg-muted p-0 flex items-center justify-center"
                   onClick={() => {
                     setAuthCode(prev => prev.slice(0, -1));
@@ -19276,7 +19708,7 @@ export default function App() {
 
             <div className="flex-1 bg-white dark:bg-zinc-950 overflow-y-auto no-scrollbar">
               <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
-                <div className="divide-y divide-slate-100 dark:divide-zinc-800/60 w-full">
+                <div className="w-full">
                   {isChatsLoading || (!hasLoadedChats && chats.length === 0) ? (
                     <div className="p-6">
                       <ThreeDotsLoading label="Loading conversations..." />
@@ -19324,8 +19756,8 @@ export default function App() {
                           </div>
                         </div>
                         <div className={cn(
-                          "flex-1 min-w-0 flex flex-col justify-center border-b border-slate-100 dark:border-zinc-800/60 group-last:border-none h-full",
-                          activeChatId === chat.id && "border-b-0"
+                          "flex-1 min-w-0 flex flex-col justify-center h-full group-last:border-none",
+                          activeChatId === chat.id ? "border-b-0 border-transparent" : "border-b border-slate-100 dark:border-zinc-800/60"
                         )}>
                           <div className="flex justify-between items-center mb-0.5">
                             <span className="font-semibold text-[16px] text-[#111b21] dark:text-zinc-100 truncate">{getChatDisplayName(chat)}</span>

@@ -128,6 +128,22 @@ export interface Section {
   sectionName?: string;
 }
 
+export enum FacilityTypeApp {
+  Appliance = 'Appliance',
+  Camera = 'Camera',
+  Door = 'Door',
+  External = 'External',
+  Light = 'Light',
+  Window = 'Window',
+  Hardware = 'Hardware',
+  Action = 'Action',
+  Room = 'Room',
+  Section = 'Section',
+  Person = 'Person',
+  Contact = 'Contact',
+  ContactCategory = 'ContactCategory'
+}
+
 export interface GetLogDto {
   id: number;
   getPersonDto: GetPersonDto;
@@ -135,6 +151,8 @@ export interface GetLogDto {
   actionType: string;
   timeOfAction: string; // DateTime ISO string
   logDetails: string;
+  facilityType?: string;
+  facilityId?: number;
 }
 
 export interface LogResponseModel extends BaseResponse {

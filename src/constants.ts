@@ -315,33 +315,54 @@ export const getMockLogs = (count: number): GetLogDto[] => {
     const user = users[(i - 1) % users.length];
     const actType = actionTypes[(i - 1) % actionTypes.length];
     let details = '';
+    let facilityType = 'Room';
+    let facilityId = 1;
+
     switch (actType) {
       case 'Light Control':
         details = `Turned ${i % 2 === 0 ? 'on' : 'off'} the light in the ${i % 3 === 0 ? 'Kitchen' : 'Living Room'}. Power consumption is nominal.`;
+        facilityType = 'Light';
+        facilityId = (i % 4) + 1;
         break;
       case 'Door Security':
         details = `Attempted to ${i % 2 === 0 ? 'unlock' : 'lock'} the ${i % 3 === 0 ? 'Garage' : 'Front'} Door. Authentication succeeded.`;
+        facilityType = 'Door';
+        facilityId = (i % 3) + 1;
         break;
       case 'Scene Activation':
         details = `Activated the custom scene '${i % 2 === 0 ? 'Movie Night' : 'Morning Routine'}' setting all relevant devices automatically.`;
+        facilityType = 'Action';
+        facilityId = (i % 2) + 1;
         break;
       case 'Appliance State':
         details = `Set the Smart TV state to ${i % 2 === 0 ? 'Active' : 'Standby'}. Current draw monitored at 120W.`;
+        facilityType = 'Appliance';
+        facilityId = (i % 3) + 1;
         break;
       case 'Window Control':
         details = `Triggered the window actuator. Status changed to ${i % 2 === 0 ? 'closed' : 'open (ventilation)'}.`;
+        facilityType = 'Window';
+        facilityId = (i % 2) + 1;
         break;
       case 'Profile Sync':
         details = `Synchronized identity profile settings with security service layer. All permissions verified.`;
+        facilityType = 'Person';
+        facilityId = user.id;
         break;
       case 'Camera Access':
         details = `Opened live stream feed for Front Door Camera. Duration: 45s. Resolution auto-scaled to 1080p.`;
+        facilityType = 'Camera';
+        facilityId = (i % 3) + 1;
         break;
       case 'System Diagnostic':
         details = `Diagnostic code report: Hub status green. Internal latency: ${12 + (i % 5)}ms. No packet loss.`;
+        facilityType = 'Hardware';
+        facilityId = (i % 2) + 1;
         break;
       case 'Air Conditioning':
         details = `Adjusted thermostat target temperature to ${20 + (i % 5)}°C. Compressor mode is running.`;
+        facilityType = 'Appliance';
+        facilityId = 1;
         break;
     }
     
@@ -351,7 +372,9 @@ export const getMockLogs = (count: number): GetLogDto[] => {
       personId: user.id,
       actionType: actType,
       timeOfAction: new Date(startMs - i * 600000).toISOString(), // 10 minutes intervals
-      logDetails: details
+      logDetails: details,
+      facilityType: facilityType,
+      facilityId: facilityId
     });
   }
   return logsList;

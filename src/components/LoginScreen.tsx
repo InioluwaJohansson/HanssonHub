@@ -151,7 +151,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
       </div>
 
       {isChoosingAccount && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/90 dark:bg-zinc-950/90 backdrop-blur-xl p-8 select-none overflow-hidden animate-fade-in">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/95 dark:bg-zinc-950/95 backdrop-blur-xl p-8 select-none overflow-hidden animate-fade-in">
           {/* Grainy CSS Overlay */}
           <div 
             className="absolute inset-0 pointer-events-none opacity-[0.06] bg-[repeat] mix-blend-overlay"
@@ -191,7 +191,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                   setUsername(user.username);
                   setIsChoosingAccount(false);
                 }}
-                className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-7 w-56 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
+                className="relative flex flex-col items-center bg-white dark:bg-zinc-900/90 backdrop-blur-md border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-800/90 rounded-2xl p-7 w-56 shrink-0 shadow-sm hover:shadow-md hover:-translate-y-1.5 transition-all duration-300 group cursor-pointer"
               >
                 {/* Delete icon */}
                 <button
@@ -211,8 +211,8 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                   <Trash2 className="h-4 w-4" />
                 </button>
 
-                {/* Big Image with circular black border around it */}
-                <div className="h-32 w-32 rounded-full border-4 border-slate-900 dark:border-zinc-100 flex items-center justify-center overflow-hidden bg-slate-100 dark:bg-zinc-800 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                {/* Big Image with 1px light border around it */}
+                <div className="h-32 w-32 rounded-full border border-slate-200 dark:border-zinc-700 flex items-center justify-center overflow-hidden bg-slate-50 dark:bg-zinc-800 shadow-xs group-hover:scale-105 transition-transform duration-300">
                   {user.imageUrl?.trim() ? (
                     <img
                       src={getFullImageUrl(user.imageUrl) || undefined}
@@ -227,10 +227,10 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
 
                 {/* Name & username stacked below the image */}
                 <div className="mt-5 text-center w-full">
-                  <span className="block text-base font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
+                  <span className="block text-base font-bold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-primary dark:group-hover:text-primary transition-colors">
                     {user.name}
                   </span>
-                  <span className="block text-xs text-slate-500 dark:text-zinc-400 font-semibold tracking-wider mt-1 truncate">
+                  <span className="block text-xs text-slate-500 dark:text-zinc-400 font-medium tracking-wider mt-1 truncate">
                     @{user.username}
                   </span>
                 </div>
@@ -243,17 +243,17 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                 setUsername('');
                 setIsChoosingAccount(false);
               }}
-              className="relative flex flex-col items-center bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-slate-900 dark:hover:border-zinc-100 hover:bg-white/95 dark:hover:bg-zinc-800 rounded-2xl p-7 w-56 shrink-0 shadow-lg hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group cursor-pointer"
+              className="relative flex flex-col items-center bg-white dark:bg-zinc-900/90 backdrop-blur-md border border-dashed border-slate-300 dark:border-zinc-700 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-slate-50/80 dark:hover:bg-zinc-800/90 rounded-2xl p-7 w-56 shrink-0 shadow-sm hover:shadow-md hover:-translate-y-1.5 transition-all duration-300 group cursor-pointer"
             >
-              <div className="h-32 w-32 rounded-full border-4 border-dashed border-slate-400 dark:border-zinc-600 group-hover:border-slate-900 dark:group-hover:border-zinc-100 flex items-center justify-center bg-slate-100/80 dark:bg-zinc-800/60 shadow-inner group-hover:scale-105 transition-all duration-300">
-                <UserPlus className="h-12 w-12 text-slate-600 dark:text-zinc-300 group-hover:text-slate-900 dark:group-hover:text-zinc-100 transition-colors" />
+              <div className="h-32 w-32 rounded-full border border-dashed border-slate-300 dark:border-zinc-700 group-hover:border-slate-400 dark:group-hover:border-zinc-500 flex items-center justify-center bg-slate-50 dark:bg-zinc-800/50 shadow-xs group-hover:scale-105 transition-all duration-300">
+                <UserPlus className="h-12 w-12 text-slate-500 dark:text-zinc-400 group-hover:text-slate-800 dark:group-hover:text-zinc-200 transition-colors" />
               </div>
 
               <div className="mt-5 text-center w-full">
-                <span className="block text-base font-extrabold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-black dark:group-hover:text-white transition-colors">
+                <span className="block text-base font-bold text-slate-900 dark:text-zinc-100 tracking-wide truncate group-hover:text-primary dark:group-hover:text-primary transition-colors">
                   Use Another Account
                 </span>
-                <span className="block text-xs text-slate-500 dark:text-zinc-400 font-semibold tracking-wider mt-1 truncate">
+                <span className="block text-xs text-slate-500 dark:text-zinc-400 font-medium tracking-wider mt-1 truncate">
                   Log in with new user
                 </span>
               </div>
