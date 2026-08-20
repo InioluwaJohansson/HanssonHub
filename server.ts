@@ -176,6 +176,22 @@ async function startServer() {
     }
   });
 
+  // PWA Service Worker and Manifest routes with proper headers
+  app.get("/sw.js", (req, res) => {
+    const swPath = path.join(process.cwd(), process.env.NODE_ENV === "production" ? "dist" : "public", "sw.js");
+    res.setHeader("Content-Type", "application/javascript");
+    res.setHeader("Service-Worker-Allowed", "/");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.sendFile(swPath);
+  });
+
+  app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
+    const manifestPath = path.join(process.cwd(), process.env.NODE_ENV === "production" ? "dist" : "public", "manifest.json");
+    res.setHeader("Content-Type", "application/manifest+json");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.sendFile(manifestPath);
+  });
+
   // Vite middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

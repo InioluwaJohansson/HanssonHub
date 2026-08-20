@@ -1306,13 +1306,13 @@ const getSupportedAudioMimeType = (): string => {
 
 const CustomAudioPlayer = ({ 
   src, 
-  fileName,
+  fileName = "Audio Message",
   isSending = false,
   progress = 0,
   initialText = ""
 }: { 
-  src: string; 
-  fileName: string;
+  src?: string | null; 
+  fileName?: string;
   isSending?: boolean;
   progress?: number;
   initialText?: string;
@@ -1328,7 +1328,7 @@ const CustomAudioPlayer = ({
   const [isOpen, setIsOpen] = React.useState(false);
   const [isCardHovered, setIsCardHovered] = React.useState(false);
   const [isTranscribing, setIsTranscribing] = React.useState(false);
-  const [transcriptionText, setTranscriptionText] = React.useState<string | null>(null);
+  const [transcriptionText, setTranscriptionText] = React.useState<string | null>(initialText?.trim() || null);
 
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1361,6 +1361,10 @@ const CustomAudioPlayer = ({
 
   const handlePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!src) {
+      toast.error("Audio is not available yet");
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -1420,7 +1424,7 @@ const CustomAudioPlayer = ({
   };
 
   const performTranscription = async () => {
-    if ((transcriptionText && transcriptionText !== "Unable to transcribe message") || isTranscribing) return;
+    if (!src || (transcriptionText && transcriptionText !== "Unable to transcribe message") || isTranscribing) return;
 
     setIsTranscribing(true);
     try {
@@ -1457,17 +1461,18 @@ const CustomAudioPlayer = ({
 
   const barsCount = 35;
   const heights = React.useMemo(() => {
+    const safeStr = (typeof src === 'string' && src) ? src : (fileName || 'audio-track');
     const result: number[] = [];
     let hash = 0;
-    for (let i = 0; i < src.length; i++) {
-      hash = src.charCodeAt(i) + ((hash << 5) - hash);
+    for (let i = 0; i < safeStr.length; i++) {
+      hash = safeStr.charCodeAt(i) + ((hash << 5) - hash);
     }
     for (let i = 0; i < barsCount; i++) {
       const val = Math.abs(Math.sin(hash + i) * 70) + 25;
       result.push(Math.round(val));
     }
     return result;
-  }, [src]);
+  }, [src, fileName]);
 
   return (
     <div 
@@ -7729,12 +7734,23 @@ export default function App() {
     setRoomLocked(nextState);
     
     const doorsInRoom = devices.filter(d => d.room === roomId && d.type === 'door');
+    const windowsInRoom = devices.filter(d => d.room === roomId && d.type === 'window');
+
     for (const door of doorsInRoom) {
       try {
         const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
         await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
       } catch (e) {
          console.error("Failed to toggle door in room lock", e);
+      }
+    }
+
+    for (const win of windowsInRoom) {
+      try {
+        const rawId = win.id.includes('-') ? win.id.split('-')[1] : win.id;
+        await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+      } catch (e) {
+         console.error("Failed to toggle window in room lock", e);
       }
     }
     
@@ -8312,11 +8328,10 @@ export default function App() {
       try {
         if (d.type === 'door') {
           await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          if (d.status === 'locked') {
-            setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: false } : item));
-          } else {
-            setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: true } : item));
-          }
+          setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
+        } else if (d.type === 'window') {
+          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+          setWindows(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
         } else if (d.type === 'light') {
           const lightDto = (prevLights || []).find(l => l.id.toString() === rawId.toString());
           const calculatedBrightness = (nextActive && (d.value === 0 || d.value === undefined || (lightDto && (lightDto.brightnessLevel === 0 || lightDto.brightnessLevel === undefined)))) ? 100 : (d.value ?? lightDto?.brightnessLevel ?? 100);
@@ -8406,64 +8421,10 @@ export default function App() {
 
     try {
       if (d.type === 'door') {
-        const doorDto = (doors || []).find(x => x.id.toString() === rawId.toString());
-        if (action === 'lock') {
-          if (isCurrentlyOpen) {
-            await apiFetch('/Door/UpdateDoor', {
-              method: 'PUT',
-              body: JSON.stringify({
-                id: Number(rawId),
-                roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
-                sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
-                isHidden: getProp(doorDto, 'isHidden') ?? false,
-                doorName: getProp(doorDto, 'doorName') || d.name,
-                doorType: resolveDoorType(getProp(doorDto, 'doorType')),
-                isLocked: true,
-                isOpen: false,
-                openedBy: 0,
-                lockedBy: 0,
-                unlockedBy: 0
-              })
-            });
-          } else {
-            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          }
-        } else if (action === 'unlock') {
+        if (action === 'lock' || action === 'unlock') {
+          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+        } else if (action === 'open' || action === 'close') {
           await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open') {
-          await apiFetch('/Door/UpdateDoor', {
-            method: 'PUT',
-            body: JSON.stringify({
-              id: Number(rawId),
-              roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
-              sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
-              isHidden: getProp(doorDto, 'isHidden') ?? false,
-              doorName: getProp(doorDto, 'doorName') || d.name,
-              doorType: resolveDoorType(getProp(doorDto, 'doorType')),
-              isLocked: false,
-              isOpen: true,
-              openedBy: 0,
-              lockedBy: 0,
-              unlockedBy: 0
-            })
-          });
-        } else if (action === 'close') {
-          await apiFetch('/Door/UpdateDoor', {
-            method: 'PUT',
-            body: JSON.stringify({
-              id: Number(rawId),
-              roomId: doorDto ? resolveRoomId(doorDto.roomId, rooms) : null,
-              sectionId: doorDto ? resolveSectionId(doorDto.sectionId, sections) : null,
-              isHidden: getProp(doorDto, 'isHidden') ?? false,
-              doorName: getProp(doorDto, 'doorName') || d.name,
-              doorType: resolveDoorType(getProp(doorDto, 'doorType')),
-              isLocked: false,
-              isOpen: false,
-              openedBy: 0,
-              lockedBy: 0,
-              unlockedBy: 0
-            })
-          });
         }
         setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
@@ -8471,39 +8432,10 @@ export default function App() {
           isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       } else if (d.type === 'window') {
-        const windowDto = (windows || []).find(x => x.id.toString() === rawId.toString());
-        if (action === 'lock') {
+        if (action === 'lock' || action === 'unlock') {
           await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'unlock') {
+        } else if (action === 'open' || action === 'close') {
           await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open') {
-          await apiFetch('/Window/UpdateWindow', {
-            method: 'PUT',
-            body: JSON.stringify({
-              id: Number(rawId),
-              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
-              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
-              isHidden: getProp(windowDto, 'isHidden') ?? false,
-              windowName: getProp(windowDto, 'windowName') || d.name,
-              windowType: getProp(windowDto, 'windowType') || 1,
-              isLocked: false,
-              isOpen: true
-            })
-          });
-        } else if (action === 'close') {
-          await apiFetch('/Window/UpdateWindow', {
-            method: 'PUT',
-            body: JSON.stringify({
-              id: Number(rawId),
-              roomId: windowDto ? resolveRoomId(windowDto.roomId, rooms) : null,
-              sectionId: windowDto ? resolveSectionId(windowDto.sectionId, sections) : null,
-              isHidden: getProp(windowDto, 'isHidden') ?? false,
-              windowName: getProp(windowDto, 'windowName') || d.name,
-              windowType: getProp(windowDto, 'windowType') || 1,
-              isLocked: false,
-              isOpen: false
-            })
-          });
         }
         setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
           ...item, 
@@ -8602,6 +8534,8 @@ export default function App() {
           await apiFetch(`/Appliance/DeleteAppliance?applianceId=${rawId}`, { method: 'PUT' });
         } else if (type === 'window') {
           await apiFetch(`/Window/DeleteWindow?windowId=${rawId}`, { method: 'PUT' });
+        } else if (type === 'door') {
+          await apiFetch(`/Door/DeleteDoor?doorId=${rawId}`, { method: 'PUT' });
         } else if (type === 'light') {
           await apiFetch(`/Light/DeleteLight?lightId=${rawId}`, { method: 'PUT' });
         }
@@ -8619,6 +8553,8 @@ export default function App() {
           setAppliances(prev => prev.filter(a => a.id.toString() !== rawId));
         } else if (type === 'window') {
           setWindows(prev => prev.filter(w => w.id.toString() !== rawId));
+        } else if (type === 'door') {
+          setDoors(prev => prev.filter(d => d.id.toString() !== rawId));
         } else if (type === 'light') {
           setLights(prev => prev.filter(l => l.id.toString() !== rawId));
         }
