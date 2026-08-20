@@ -9538,8 +9538,171 @@ export default function App() {
               url: d.liveStreamUrl,
               liveStreamUrl: d.liveStreamUrl
             }));
-      const totalFacilityCount = (appliances?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0);
+      const totalFacilityCount = (appliances?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0) + (hardwares?.length || 0) + (rooms?.length || 0) + (sections?.length || 0) + (actions?.length || 0);
       
+      const facilityItemsList = [
+        { id: 'appliances', label: 'Appliances', icon: Power, count: appliances?.length || 0, targetView: 'facility-appliances', visible: true },
+        { id: 'cameras', label: 'Cameras', icon: Camera, count: cameras?.length || 0, targetView: 'facility-cameras', visible: true },
+        { id: 'doors', label: 'Doors', icon: Lock, count: doors?.length || 0, targetView: 'facility-doors', visible: true },
+        { id: 'externals', label: 'Externals', icon: Radio, count: externals?.length || 0, targetView: 'facility-externals', visible: true },
+        { id: 'hardware', label: 'Hardware', icon: Cpu, count: hardwares?.length || 0, targetView: 'facility-hardware', visible: isOwner },
+        { id: 'lights', label: 'Lights', icon: Lightbulb, count: lights?.length || 0, targetView: 'facility-lights', visible: true },
+        { id: 'windows', label: 'Windows', icon: WindowIcon, count: windows?.length || 0, targetView: 'facility-windows', visible: true },
+        { id: 'rooms', label: 'Rooms', icon: Sofa, count: rooms?.length || 0, targetView: 'facility-rooms', visible: true },
+        { id: 'sections', label: 'Sections', icon: LayoutGrid, count: sections?.length || 0, targetView: 'facility-sections', visible: true },
+        { id: 'actions', label: 'Actions', icon: Zap, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
+      ];
+
+      const navigationCards = [
+        {
+          id: 'nav-my-room',
+          label: 'MyRoom',
+          icon: HomeIcon,
+          count: `${userRooms?.length || 0} ${userRooms?.length === 1 ? 'Room' : 'Rooms'}`,
+          onClick: () => {
+            setSelectedUserRoomId(null);
+            setActiveView('user-room');
+          },
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-sky-500 bg-sky-500/10 border-sky-500/20',
+        },
+        {
+          id: 'nav-chats',
+          label: 'Chats',
+          icon: MessageSquare,
+          count: `${chats?.length || 0} ${chats?.length === 1 ? 'Chat' : 'Chats'}`,
+          onClick: () => setIsChatModalOpen(true),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20',
+        },
+        {
+          id: 'nav-contacts',
+          label: 'Contacts',
+          icon: Contact,
+          count: `${dashboardData?.totalContacts ?? (contacts?.length || 0)} ${((dashboardData?.totalContacts ?? (contacts?.length || 0)) === 1) ? 'Contact' : 'Contacts'}`,
+          onClick: () => setActiveView('contacts'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
+        },
+        {
+          id: 'nav-friday',
+          label: 'Friday',
+          icon: Sparkles,
+          count: 'Voice AI',
+          onClick: () => {
+            setIsMicOverlayActive(true);
+            setIsMicMinimized(false);
+            setIsHeaderMicMuted(false);
+          },
+          visible: true,
+          isFriday: true,
+          colorClass: 'text-purple-500 bg-purple-500/10 border-purple-500/20',
+        },
+        {
+          id: 'nav-actions',
+          label: 'Actions',
+          icon: Zap,
+          count: `${actions?.length || 0} ${actions?.length === 1 ? 'Action' : 'Actions'}`,
+          onClick: () => setActiveView('facility-actions'),
+          visible: canSeeActions,
+          isFriday: false,
+          colorClass: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+        },
+        {
+          id: 'nav-appliances',
+          label: 'Appliances',
+          icon: Power,
+          count: `${appliances?.length || 0} ${appliances?.length === 1 ? 'Device' : 'Devices'}`,
+          onClick: () => setActiveView('facility-appliances'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-orange-500 bg-orange-500/10 border-orange-500/20',
+        },
+        {
+          id: 'nav-cameras',
+          label: 'Cameras',
+          icon: Camera,
+          count: `${cameras?.length || 0} ${cameras?.length === 1 ? 'Feed' : 'Feeds'}`,
+          onClick: () => setActiveView('facility-cameras'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+        },
+        {
+          id: 'nav-doors',
+          label: 'Doors',
+          icon: Lock,
+          count: `${doors?.length || 0} ${doors?.length === 1 ? 'Door' : 'Doors'}`,
+          onClick: () => setActiveView('facility-doors'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-rose-500 bg-rose-500/10 border-rose-500/20',
+        },
+        {
+          id: 'nav-externals',
+          label: 'Externals',
+          icon: Radio,
+          count: `${externals?.length || 0} ${externals?.length === 1 ? 'Sensor' : 'Sensors'}`,
+          onClick: () => setActiveView('facility-externals'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-teal-500 bg-teal-500/10 border-teal-500/20',
+        },
+        {
+          id: 'nav-hardware',
+          label: 'Hardware',
+          icon: Cpu,
+          count: `${hardwares?.length || 0} ${hardwares?.length === 1 ? 'Hub' : 'Hubs'}`,
+          onClick: () => setActiveView('facility-hardware'),
+          visible: isOwner,
+          isFriday: false,
+          colorClass: 'text-violet-500 bg-violet-500/10 border-violet-500/20',
+        },
+        {
+          id: 'nav-lights',
+          label: 'Lights',
+          icon: Lightbulb,
+          count: `${lights?.length || 0} ${lights?.length === 1 ? 'Light' : 'Lights'}`,
+          onClick: () => setActiveView('facility-lights'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20',
+        },
+        {
+          id: 'nav-windows',
+          label: 'Windows',
+          icon: WindowIcon,
+          count: `${windows?.length || 0} ${windows?.length === 1 ? 'Window' : 'Windows'}`,
+          onClick: () => setActiveView('facility-windows'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-cyan-500 bg-cyan-500/10 border-cyan-500/20',
+        },
+        {
+          id: 'nav-rooms',
+          label: 'Rooms',
+          icon: Sofa,
+          count: `${rooms?.length || 0} ${rooms?.length === 1 ? 'Room' : 'Rooms'}`,
+          onClick: () => setActiveView('facility-rooms'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-pink-500 bg-pink-500/10 border-pink-500/20',
+        },
+        {
+          id: 'nav-sections',
+          label: 'Sections',
+          icon: LayoutGrid,
+          count: `${sections?.length || 0} ${sections?.length === 1 ? 'Section' : 'Sections'}`,
+          onClick: () => setActiveView('facility-sections'),
+          visible: true,
+          isFriday: false,
+          colorClass: 'text-fuchsia-500 bg-fuchsia-500/10 border-fuchsia-500/20',
+        },
+      ];
+
       return (
         <motion.div
           key="dashboard"
@@ -9552,170 +9715,95 @@ export default function App() {
             <p className="text-slate-500 dark:text-zinc-400">Everything is looking good. You have {activeDevices} active devices.</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          {/* Top Metric Cards: Expanded Facilities Card + Logs Card */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
             <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
+              id="dashboard-facilities-card"
+              className="lg:col-span-2 p-5 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/40 transition-all rounded-2xl flex flex-col justify-between gap-4 cursor-pointer group"
               onClick={() => setActiveView('facility-overview')}
             >
-              <div className="flex flex-col items-start gap-2">
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                  <Layers className="h-6 w-6" />
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-zinc-800/80 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20 shrink-0">
+                    <Layers className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Facilities</p>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">Integrated physical systems & spaces</p>
+                  </div>
                 </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Facilities</p>
-              </div>
-              <div className="text-right flex flex-col items-end justify-center">
-                <p className="text-4xl font-bold text-slate-900 dark:text-zinc-100 leading-none mb-1">{totalFacilityCount}</p>
-                <div className="text-xs text-slate-500 dark:text-zinc-400 max-w-[120px] text-right">
-                  Appliances, Cameras, Doors, Lights, Windows, Externals
-                </div>
-              </div>
-            </Card>
-            <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
-              onClick={() => setActiveView('contacts')}
-            >
-              <div className="flex flex-col items-start gap-2">
-                <div className="h-12 w-12 rounded-full bg-slate-500/10 flex items-center justify-center text-blue-500">
-                  <Contact className="h-6 w-6" />
-                </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Contacts</p>
-              </div>
-              <div className="text-right flex flex-col items-end justify-center h-full">
-                <p className="text-4xl font-bold text-slate-900 dark:text-zinc-100 leading-none">{dashboardData?.totalContacts ?? contacts.length}</p>
-              </div>
-            </Card>
-            <Card 
-              className="p-6 flex flex-row items-center justify-between gap-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-primary/50 transition-colors cursor-pointer"
-              onClick={() => setActiveView('logs')}
-            >
-              <div className="flex flex-col items-start gap-2">
-                <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
-                  <ClipboardList className="h-6 w-6" />
-                </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Logs</p>
-              </div>
-              <div className="text-right flex flex-col items-end justify-center">
-                <div className="text-xs text-slate-500 dark:text-zinc-400 max-w-[120px] text-right">
-                  Create, Update, Delete, Locked, Unlocked, Open, Closed
+                <div className="text-right flex items-center gap-2">
+                  <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-zinc-100 leading-none">{totalFacilityCount}</span>
+                  <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                 </div>
               </div>
-            </Card>
-          </div>
-            
-          {/* Facilities Rotating Carousel */}
-          <div className="flex flex-col lg:flex-row gap-6 items-stretch w-full mb-8">
-            {/* Left Section: 2/3 Width Carousel */}
-            <div className="lg:w-2/3 bg-white/40 dark:bg-zinc-900/40 backdrop-blur border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[320px] shadow-sm select-none">
-              {/* Orbit track helper ellipse */}
-              <div 
-                className="absolute border border-dashed border-slate-200 dark:border-zinc-800 rounded-full pointer-events-none" 
-                style={{
-                  width: '380px',
-                  height: '110px',
-                  transform: 'translateY(-10px) rotate(-3deg)',
-                  background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.01) 0%, transparent 75%)'
-                }}
-              />
 
-              {/* Dynamic Circular Orbit Carousel container */}
-              <div className="relative w-full max-w-[450px] h-[240px] flex items-center justify-center" style={{ perspective: '1000px' }}>
-                {DASHBOARD_FACILITIES.map((item, idx) => {
-                  const Icon = item.icon;
-                  // Calculate current angle based on static offset minus shifting rotation
-                  const angle = 36 * idx - dashboardRotation;
-                  const theta = (angle * Math.PI) / 180;
-                  
-                  // Orbit Math coordinates with balanced horizontal and depth perspective
-                  const x = Math.sin(theta) * 170; 
-                  const z = Math.cos(theta); 
-                  const y = -Math.cos(theta) * 15; 
-
-                  // Derived styles based on depth factor z (-1 to 1)
-                  const scale = 0.8 + (z + 1) * 0.2; 
-                  const opacity = 0.45 + (z + 1) * 0.275; 
-                  const zIndex = Math.round((z + 1) * 10);
-                  const activeIdx = (Math.round(dashboardRotation / 36) % 10 + 10) % 10;
-                  const isActive = idx === activeIdx;
-
+              {/* Breakdown of each facility item with its own item count & icon */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1">
+                {facilityItemsList.filter(item => item.visible).map(item => {
+                  const ItemIcon = item.icon;
                   return (
                     <div 
                       key={item.id}
-                      onClick={() => {
-                        // Clicking an item changes the selection to that item index
-                        const prevActive = activeIdx;
-                        let diff = idx - prevActive;
-                        // Keep within shortest rotation distance
-                        if (diff > 5) diff -= 10;
-                        if (diff < -5) diff += 10;
-                        setDashboardRotation(prev => prev + diff * 36);
-                      }}
-                      className="absolute flex flex-col items-center justify-center transition-all duration-[600ms] ease-out select-none cursor-pointer"
-                      style={{
-                        transform: `translate3d(${x}px, ${y}px, ${z * 70}px) scale(${scale})`,
-                        opacity,
-                        zIndex,
-                        width: '120px'
-                      }}
+                      id={`dashboard-facility-item-${item.id}`}
+                      className="flex items-center gap-2 p-2 rounded-xl bg-slate-50/80 dark:bg-zinc-900/60 border border-slate-200/60 dark:border-zinc-800/60 transition-all group/item"
                     >
-                      <div className={`h-16 w-16 mb-4 rounded-xl border flex items-center justify-center transition-all ${isActive ? 'border-primary/50 shadow-md bg-white dark:bg-zinc-900' : 'border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 shadow-sm'}`}>
-                        <Icon className={`transition-colors ${isActive ? 'text-primary' : 'text-slate-400 dark:text-zinc-500'}`} style={{ width: isActive ? '32px' : '28px', height: isActive ? '32px' : '28px' }} />
+                      <div className="h-7 w-7 rounded-lg bg-white dark:bg-zinc-800 flex items-center justify-center text-slate-700 dark:text-zinc-300 shrink-0 shadow-2xs">
+                        <ItemIcon className="h-3.5 w-3.5" />
                       </div>
-                      <span className={`text-[13px] uppercase tracking-widest transition-all text-center px-2 ${isActive ? 'font-black text-slate-800 dark:text-zinc-100' : 'font-semibold text-slate-500 dark:text-zinc-400'}`}>
-                        {item.label}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-semibold text-slate-700 dark:text-zinc-300 truncate">
+                            {item.label}
+                          </span>
+                          <span className="text-xs font-bold text-slate-900 dark:text-zinc-100 bg-white/80 dark:bg-zinc-800/80 px-1.5 py-0.5 rounded-md shrink-0">
+                            {item.count}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </Card>
 
-            {/* Right Section: 1/3 Width Description & Navigation Card */}
-            <Card className="lg:w-1/3 p-8 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm rounded-3xl flex flex-col justify-between group overflow-hidden relative min-h-[320px]">
-              <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
-              
-              <div className="space-y-6 z-10">
+            <Card 
+              id="dashboard-logs-card"
+              className="lg:col-span-1 p-5 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm hover:border-emerald-500/40 transition-all rounded-2xl flex flex-col justify-between cursor-pointer group"
+              onClick={() => {
+                const role = userProfile?.getUserDto?.roleName;
+                if (role === 'Owner' || role === 'Wife') {
+                  setActiveView('logs');
+                } else {
+                  toast.error("You do not have permission to view logs.");
+                }
+              }}
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-zinc-800/80 pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
-                    {React.createElement(DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].icon, { className: 'h-6 w-6' })}
+                  <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20 shrink-0">
+                    <ClipboardList className="h-5 w-5" />
                   </div>
                   <div>
-                    <Badge variant="outline" className="text-[10px] tracking-wider uppercase font-extrabold text-primary mb-0.5 border-primary/30">
-                      Facility System
-                    </Badge>
-                    <h3 className="text-2xl font-black text-slate-900 dark:text-zinc-100 tracking-tight leading-none uppercase">
-                      {DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].label}
-                    </h3>
+                    <p className="text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Logs</p>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">Security & activity audit</p>
                   </div>
                 </div>
-                
-                <p className="text-slate-600 dark:text-zinc-300 font-sans text-sm leading-relaxed antialiased">
-                  {DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].desc}
-                </p>
+                <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
               </div>
 
-              <div className="pt-6 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between z-10">
-                <span className="text-xs text-slate-400 dark:text-zinc-500 font-mono tracking-wider">
-                  DISCOVER MODULE 0{((Math.round(dashboardRotation / 36) % 10 + 10) % 10 + 10) % 10 + 1}
-                </span>
-                <Button 
-                  variant="default" 
-                  size="icon" 
-                  className="h-12 w-12 rounded-2xl bg-zinc-950 dark:bg-zinc-100 dark:hover:bg-zinc-200 hover:bg-slate-800 text-white dark:text-zinc-950 shadow transition-all duration-300 group-hover:translate-x-1"
-                  onClick={() => {
-                    const targetView = DASHBOARD_FACILITIES[(Math.round(dashboardRotation / 36) % 10 + 10) % 10].id;
-                    if (targetView === 'facility-actions' && !canSeeActions) {
-                      toast.error("You do not have permission to access the Actions page.");
-                      return;
-                    }
-                    setActiveView(targetView);
-                  }}
-                >
-                  <ArrowRight className="h-5 w-5 text-white dark:text-zinc-950" />
-                </Button>
+              <div className="flex flex-col justify-between gap-3 pt-2">
+                <div className="text-2xl font-black text-slate-900 dark:text-zinc-100">
+                  {logs?.length || 0} <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-normal">Entries</span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400 line-clamp-2 leading-tight">
+                  Track Create, Update, Delete, Lock, Unlock, Open, and Close operations in real time.
+                </div>
               </div>
             </Card>
           </div>
 
+          {/* External Security Cameras */}
           <div className="space-y-4 overflow-hidden relative">
             <h2 className="text-xl font-bold flex items-center gap-2">
               <Camera className="h-5 w-5 text-primary" />
@@ -9763,70 +9851,53 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-            <div className="space-y-4">
+          {/* Quick Navigation Cards for all core modules */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold flex items-center gap-2">
-                <Play className="h-5 w-5 text-primary" />
-                Actions
+                <LayoutGrid className="h-5 w-5 text-primary" />
+                System Modules & Navigation
               </h2>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {actions && actions.length > 0 ? (
-                  actions.slice(0, 4).map(action => (
-                    <Card 
-                      key={action.id} 
-                      className="p-5 flex items-start gap-4 hover:border-primary/50 transition-colors cursor-pointer group bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-sm"
-                      onClick={() => setActiveView('facility-actions')}
-                    >
-                      <div className="h-12 w-12 shrink-0 rounded-2xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
-                        <Zap className="h-6 w-6" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-slate-800 dark:text-zinc-100 text-base mb-1 truncate">{action.actionName}</h4>
-                        <p className="text-xs text-slate-500 dark:text-zinc-400 line-clamp-2">{action.actionDescription || 'Automated device sequence execution.'}</p>
-                      </div>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="col-span-full">
-                    <NoItems icon={Zap} message="No actions configured." />
-                  </div>
-                )}
-              </div>
+              <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                Quick access to devices, rooms, and AI tools
+              </span>
             </div>
 
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Layers className="h-5 w-5 text-primary" />
-                Recent Activity
-              </h2>
-              <Card className="divide-y divide-slate-100 dark:divide-zinc-800 overflow-hidden bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800">
-                {logs && logs.length > 0 ? (
-                  logs.slice(0, 3).map(log => {
-                    const details = log.getPersonDto?.getPersonDetailsDto;
-                    const imageUrl = details?.imageUrl;
-                    const firstName = details?.firstName || 'System';
-                    return (
-                      <div key={log.id} className="p-4 flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center border border-slate-200 dark:border-zinc-800">
-                          {imageUrl ? (
-                            <img src={getFullImageUrl(imageUrl)} alt={`${firstName} avatar`} className="h-full w-full object-cover" />
-                          ) : (
-                            <UserIcon className="h-4 w-4 text-slate-400 dark:text-zinc-500" />
-                          )}
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+              {navigationCards.filter(c => c.visible).map(card => {
+                const CardIcon = card.icon;
+                return (
+                  <div
+                    key={card.id}
+                    id={card.id}
+                    onClick={card.onClick}
+                    className="p-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xs hover:border-primary/50 hover:bg-slate-50/80 dark:hover:bg-zinc-900/60 transition-all rounded-2xl cursor-pointer group flex flex-row items-center justify-between gap-3 w-full min-h-[56px]"
+                  >
+                    <div className="flex flex-row items-center gap-3 min-w-0 flex-1">
+                      {card.isFriday ? (
+                        <div className="h-9 w-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 overflow-hidden group-hover:scale-105 transition-transform">
+                          <DynamicParticleSphere 
+                            size={32} 
+                            audioLevel={isMicOverlayActive ? 160 : 30} 
+                            isIcon={true} 
+                          />
                         </div>
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm truncate font-medium"><span className="font-semibold text-slate-900 dark:text-zinc-100">{firstName}</span>: <span className="text-slate-700 dark:text-zinc-300">{log.logDetails}</span></p>
-                          <p className="text-xs text-slate-500 dark:text-zinc-400">{formatRelativeTime(log.timeOfAction)}</p>
+                      ) : (
+                        <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center border shrink-0 group-hover:scale-105 transition-transform", card.colorClass)}>
+                          <CardIcon className="h-4 w-4" />
                         </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="p-8">
-                    <NoItems icon={ClipboardList} message="No recent activity logs." />
+                      )}
+                      <span className="text-sm font-bold text-slate-900 dark:text-zinc-100 tracking-tight truncate group-hover:text-primary transition-colors select-none">
+                        {card.label}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-center shrink-0 ml-auto pl-1">
+                      <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                    </div>
                   </div>
-                )}
-              </Card>
+                );
+              })}
             </div>
           </div>
         </motion.div>
