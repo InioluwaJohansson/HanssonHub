@@ -188,6 +188,7 @@ import {
   ShieldAlert,
   MoreVertical,
   User as UserIcon,
+  Compass,
   Heart,
   Wrench,
   Save,
@@ -9553,12 +9554,12 @@ export default function App() {
         { id: 'actions', label: 'Actions', icon: Zap, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
       ];
 
-      const navigationCards = [
+      const quickAccessCards = [
         {
           id: 'nav-my-room',
-          label: 'MyRoom',
+          label: 'My Room',
           icon: HomeIcon,
-          count: `${userRooms?.length || 0} ${userRooms?.length === 1 ? 'Room' : 'Rooms'}`,
+          description: 'Manage personal room controls, lighting, and assigned devices.',
           onClick: () => {
             setSelectedUserRoomId(null);
             setActiveView('user-room');
@@ -9571,7 +9572,7 @@ export default function App() {
           id: 'nav-chats',
           label: 'Chats',
           icon: MessageSquare,
-          count: `${chats?.length || 0} ${chats?.length === 1 ? 'Chat' : 'Chats'}`,
+          description: 'Direct messaging, group channels, and real-time security alerts.',
           onClick: () => setIsChatModalOpen(true),
           visible: true,
           isFriday: false,
@@ -9581,7 +9582,7 @@ export default function App() {
           id: 'nav-contacts',
           label: 'Contacts',
           icon: Contact,
-          count: `${dashboardData?.totalContacts ?? (contacts?.length || 0)} ${((dashboardData?.totalContacts ?? (contacts?.length || 0)) === 1) ? 'Contact' : 'Contacts'}`,
+          description: 'Household directory, member profiles, and direct voice or video calling.',
           onClick: () => setActiveView('contacts'),
           visible: true,
           isFriday: false,
@@ -9591,7 +9592,7 @@ export default function App() {
           id: 'nav-friday',
           label: 'Friday',
           icon: Sparkles,
-          count: 'Voice AI',
+          description: 'AI voice assistant for automated control, inquiries, and facility actions.',
           onClick: () => {
             setIsMicOverlayActive(true);
             setIsMicMinimized(false);
@@ -9600,106 +9601,6 @@ export default function App() {
           visible: true,
           isFriday: true,
           colorClass: 'text-purple-500 bg-purple-500/10 border-purple-500/20',
-        },
-        {
-          id: 'nav-actions',
-          label: 'Actions',
-          icon: Zap,
-          count: `${actions?.length || 0} ${actions?.length === 1 ? 'Action' : 'Actions'}`,
-          onClick: () => setActiveView('facility-actions'),
-          visible: canSeeActions,
-          isFriday: false,
-          colorClass: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
-        },
-        {
-          id: 'nav-appliances',
-          label: 'Appliances',
-          icon: Power,
-          count: `${appliances?.length || 0} ${appliances?.length === 1 ? 'Device' : 'Devices'}`,
-          onClick: () => setActiveView('facility-appliances'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-orange-500 bg-orange-500/10 border-orange-500/20',
-        },
-        {
-          id: 'nav-cameras',
-          label: 'Cameras',
-          icon: Camera,
-          count: `${cameras?.length || 0} ${cameras?.length === 1 ? 'Feed' : 'Feeds'}`,
-          onClick: () => setActiveView('facility-cameras'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
-        },
-        {
-          id: 'nav-doors',
-          label: 'Doors',
-          icon: Lock,
-          count: `${doors?.length || 0} ${doors?.length === 1 ? 'Door' : 'Doors'}`,
-          onClick: () => setActiveView('facility-doors'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-rose-500 bg-rose-500/10 border-rose-500/20',
-        },
-        {
-          id: 'nav-externals',
-          label: 'Externals',
-          icon: Radio,
-          count: `${externals?.length || 0} ${externals?.length === 1 ? 'Sensor' : 'Sensors'}`,
-          onClick: () => setActiveView('facility-externals'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-teal-500 bg-teal-500/10 border-teal-500/20',
-        },
-        {
-          id: 'nav-hardware',
-          label: 'Hardware',
-          icon: Cpu,
-          count: `${hardwares?.length || 0} ${hardwares?.length === 1 ? 'Hub' : 'Hubs'}`,
-          onClick: () => setActiveView('facility-hardware'),
-          visible: isOwner,
-          isFriday: false,
-          colorClass: 'text-violet-500 bg-violet-500/10 border-violet-500/20',
-        },
-        {
-          id: 'nav-lights',
-          label: 'Lights',
-          icon: Lightbulb,
-          count: `${lights?.length || 0} ${lights?.length === 1 ? 'Light' : 'Lights'}`,
-          onClick: () => setActiveView('facility-lights'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20',
-        },
-        {
-          id: 'nav-windows',
-          label: 'Windows',
-          icon: WindowIcon,
-          count: `${windows?.length || 0} ${windows?.length === 1 ? 'Window' : 'Windows'}`,
-          onClick: () => setActiveView('facility-windows'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-cyan-500 bg-cyan-500/10 border-cyan-500/20',
-        },
-        {
-          id: 'nav-rooms',
-          label: 'Rooms',
-          icon: Sofa,
-          count: `${rooms?.length || 0} ${rooms?.length === 1 ? 'Room' : 'Rooms'}`,
-          onClick: () => setActiveView('facility-rooms'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-pink-500 bg-pink-500/10 border-pink-500/20',
-        },
-        {
-          id: 'nav-sections',
-          label: 'Sections',
-          icon: LayoutGrid,
-          count: `${sections?.length || 0} ${sections?.length === 1 ? 'Section' : 'Sections'}`,
-          onClick: () => setActiveView('facility-sections'),
-          visible: true,
-          isFriday: false,
-          colorClass: 'text-fuchsia-500 bg-fuchsia-500/10 border-fuchsia-500/20',
         },
       ];
 
@@ -9851,49 +9752,54 @@ export default function App() {
             </div>
           </div>
 
-          {/* Quick Navigation Cards for all core modules */}
+          {/* Quick Access */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold flex items-center gap-2">
-                <LayoutGrid className="h-5 w-5 text-primary" />
-                System Modules & Navigation
+                <Compass className="h-5 w-5 text-primary" />
+                Quick Access
               </h2>
               <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Quick access to devices, rooms, and AI tools
+                Core shortcuts to personal quarters, communication, and AI
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
-              {navigationCards.filter(c => c.visible).map(card => {
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {quickAccessCards.filter(c => c.visible).map(card => {
                 const CardIcon = card.icon;
                 return (
                   <div
                     key={card.id}
                     id={card.id}
                     onClick={card.onClick}
-                    className="p-3 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xs hover:border-primary/50 hover:bg-slate-50/80 dark:hover:bg-zinc-900/60 transition-all rounded-2xl cursor-pointer group flex flex-row items-center justify-between gap-3 w-full min-h-[56px]"
+                    className="p-5 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xs hover:border-primary/50 hover:bg-slate-50/80 dark:hover:bg-zinc-900/60 transition-all rounded-2xl cursor-pointer group flex flex-col justify-between min-h-[140px] gap-4"
                   >
-                    <div className="flex flex-row items-center gap-3 min-w-0 flex-1">
+                    <div className="flex items-center gap-3">
                       {card.isFriday ? (
-                        <div className="h-9 w-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 overflow-hidden group-hover:scale-105 transition-transform">
+                        <div className="h-10 w-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 overflow-hidden group-hover:scale-105 transition-transform">
                           <DynamicParticleSphere 
-                            size={32} 
+                            size={36} 
                             audioLevel={isMicOverlayActive ? 160 : 30} 
                             isIcon={true} 
                           />
                         </div>
                       ) : (
-                        <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center border shrink-0 group-hover:scale-105 transition-transform", card.colorClass)}>
-                          <CardIcon className="h-4 w-4" />
+                        <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center border shrink-0 group-hover:scale-105 transition-transform", card.colorClass)}>
+                          <CardIcon className="h-5 w-5" />
                         </div>
                       )}
-                      <span className="text-sm font-bold text-slate-900 dark:text-zinc-100 tracking-tight truncate group-hover:text-primary transition-colors select-none">
+                      <span className="text-base font-bold text-slate-900 dark:text-zinc-100 tracking-tight truncate group-hover:text-primary transition-colors select-none">
                         {card.label}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-center shrink-0 ml-auto pl-1">
-                      <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                    <div className="flex items-end justify-between gap-3 pt-1 border-t border-slate-100 dark:border-zinc-800/80">
+                      <p className="text-xs text-slate-500 dark:text-zinc-400 line-clamp-2 leading-relaxed flex-1">
+                        {card.description}
+                      </p>
+                      <div className="flex items-center justify-center shrink-0 p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-900 group-hover:bg-primary/10 transition-colors">
+                        <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                      </div>
                     </div>
                   </div>
                 );
@@ -12196,31 +12102,33 @@ export default function App() {
                       <Badge variant={isExternalTriggered(ext) ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
                         {isExternalTriggered(ext) ? 'TRIGGERED' : 'STANDBY'}
                       </Badge>
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Switch 
-                          checked={ext.isActive} 
-                          onCheckedChange={async (checked) => {
-                            try {
-                              const dto = {
-                                  id: Number(ext.id),
-                                  externalName: ext.externalName,
-                                  isActive: checked,
-                                  isTriggered: ext.isTriggered,
-                                  actionIds: ext.actionIds || [],
-                                  roomId: ext.roomId,
-                                  sectionId: ext.sectionId
-                              };
-                              await apiFetch('/External/UpdateExternal', { method: 'PUT', body: JSON.stringify(dto) });
-                              setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
-                              addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
-                              toast.success(`External device updated successfully`);
-                            } catch(err: any) {
-                              toast.error(`Failed to update external: ${err.message}`);
-                            }
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
+                      {(isExternalTriggered(ext) || !ext.isActive || isOwner) && (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <Switch 
+                            checked={ext.isActive} 
+                            onCheckedChange={async (checked) => {
+                              try {
+                                const dto = {
+                                    id: Number(ext.id),
+                                    externalName: ext.externalName,
+                                    isActive: checked,
+                                    isTriggered: ext.isTriggered,
+                                    actionIds: ext.actionIds || [],
+                                    roomId: ext.roomId,
+                                    sectionId: ext.sectionId
+                                };
+                                await apiFetch('/External/UpdateExternal', { method: 'PUT', body: JSON.stringify(dto) });
+                                setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
+                                addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
+                                toast.success(`External device updated successfully`);
+                              } catch(err: any) {
+                                toast.error(`Failed to update external: ${err.message}`);
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
