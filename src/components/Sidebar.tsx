@@ -29,7 +29,7 @@ import {
   Cpu,
   Radio,
   Video,
-  Zap
+  Play
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ROOMS, SECTIONS } from '../constants';
@@ -129,7 +129,7 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
 
   const facilityItems = [
     { id: 'facilities', label: 'Overview', icon: Layers },
-    ...(canSeeActions ? [{ id: 'facility-actions', label: 'Actions', icon: Zap }] : []),
+    ...(canSeeActions ? [{ id: 'facility-actions', label: 'Actions', icon: Play }] : []),
     { id: 'facility-appliances', label: 'Appliances', icon: Power },
     { id: 'facility-cameras', label: 'Cameras', icon: Camera },
     { id: 'facility-doors', label: 'Doors', icon: Lock },

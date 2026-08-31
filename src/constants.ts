@@ -380,7 +380,7 @@ export const getMockLogs = (count: number): GetLogDto[] => {
   return logsList;
 };
 
-export const INITIAL_LOGS: GetLogDto[] = getMockLogs(175);
+export const INITIAL_LOGS: GetLogDto[] = getMockLogs(50);
 
 export const GENERAL_CAMERAS = [
   { id: '14', name: 'Front Door Camera' },

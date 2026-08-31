@@ -413,7 +413,7 @@ const TokenCountdown = ({ expiryTime }: { expiryTime: string }) => {
 };
 
 const DASHBOARD_FACILITIES = [
-  { id: 'facility-actions', label: 'Actions', icon: Zap, desc: 'Automate security and operational response protocols across your connected hardware.' },
+  { id: 'facility-actions', label: 'Actions', icon: Play, desc: 'Automate security and operational response protocols across your connected hardware.' },
   { id: 'facility-appliances', label: 'Appliances', icon: Power, desc: 'Monitor state parameters and toggle smart appliances across rooms in real-time.' },
   { id: 'facility-cameras', label: 'Cameras', icon: Camera, desc: 'Access continuous video streams and manage surveillance of perimeter security points.' },
   { id: 'facility-doors', label: 'Doors', icon: Lock, desc: 'Control localized locks, verify open entry points, and view door status reports.' },
@@ -2508,7 +2508,7 @@ export default function App() {
   }, []);
 
   // New State
-  const [logs, setLogs] = React.useState<GetLogDto[]>([]);
+  const [logs, setLogs] = React.useState<GetLogDto[]>(INITIAL_LOGS);
   const [logPage, setLogPage] = React.useState<number>(1);
   const [hasMoreLogs, setHasMoreLogs] = React.useState<boolean>(true);
   const [selectedLog, setSelectedLog] = React.useState<GetLogDto | null>(null);
@@ -2715,6 +2715,8 @@ export default function App() {
     setChats([]);
     setChatMessages([]);
     setActiveChatId(null);
+    setAuthFailedAttempts(0);
+    authFailedAttemptsRef.current = 0;
     toast.success("Successfully logged out");
   };
 
@@ -3265,6 +3267,18 @@ export default function App() {
       apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
         .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
         .catch(err => console.error("Failed to preload actions", err));
+
+      apiFetch('/Log/GetAllLogs?page=1&pageSize=50', { method: 'POST', body: '' })
+        .then((res: any) => {
+          if (res && res.data && Array.isArray(res.data) && res.data.length > 0) {
+            setLogs(res.data);
+          } else {
+            setLogs(INITIAL_LOGS);
+          }
+        })
+        .catch(() => {
+          setLogs(INITIAL_LOGS);
+        });
     }
 
     // 1.5. Facilities Overview Reload
@@ -3717,8 +3731,13 @@ export default function App() {
   const [newSectionType, setNewSectionType] = React.useState<'general' | 'secretive'>('general');
   const [newSectionIsHidden, setNewSectionIsHidden] = React.useState(false);
 
+  // Logout All Confirmation Modal
+  const [isLogoutAllConfirmationOpen, setIsLogoutAllConfirmationOpen] = React.useState(false);
+
   // Auth Modal
   const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
+  const [authFailedAttempts, setAuthFailedAttempts] = React.useState(0);
+  const authFailedAttemptsRef = React.useRef(0);
   const [authCode, setAuthCode] = React.useState('');
   const [authError, setAuthError] = React.useState(false);
   const [authSuccess, setAuthSuccess] = React.useState(false);
@@ -7718,7 +7737,10 @@ export default function App() {
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
           .catch(() => setContactCategories([]));
         const p12 = apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setContacts(res.data); });
-        await Promise.all([p1, p1_user, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12]);
+        const pLogs = apiFetch('/Log/GetAllLogs?page=1&pageSize=50', { method: 'POST', body: '' })
+          .then((res: any) => { if (res && res.data && Array.isArray(res.data) && res.data.length > 0) setLogs(res.data); else setLogs(INITIAL_LOGS); })
+          .catch(() => setLogs(INITIAL_LOGS));
+        await Promise.all([p1, p1_user, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, pLogs]);
         setRefreshProgress(100);
         setRefreshState('success');
         setTimeout(() => setRefreshState('idle'), 1000);
@@ -8205,7 +8227,9 @@ export default function App() {
             method: 'POST'
           });
           
-          if (response.success || response === true || response.data === true) {
+          if (response?.success === true || response === true || response?.data === true || response?.isSuccess === true) {
+            authFailedAttemptsRef.current = 0;
+            setAuthFailedAttempts(0);
             setAuthSuccess(true);
             setTimeout(() => {
               onAuthSuccess?.();
@@ -8216,9 +8240,26 @@ export default function App() {
               setOnAuthSuccess(null);
             }, 800);
           } else {
+            // Failed verification in 200 response (returns false)
+            const currentFailed = authFailedAttemptsRef.current + 1;
+            authFailedAttemptsRef.current = currentFailed;
+            setAuthFailedAttempts(currentFailed);
+
+            if (currentFailed >= 3) {
+              authFailedAttemptsRef.current = 0;
+              setAuthFailedAttempts(0);
+              setIsAuthModalOpen(false);
+              setAuthCode('');
+              setAuthError(false);
+              setOnAuthSuccess(null);
+              toast.error("Authorization code failed 3 times. You have been logged out.");
+              handleLogout();
+              return;
+            }
+
             setAuthError(true);
             setAuthCode(''); // Clear the inputted code on verification failure so user can start again
-            toast.error(typeof response === 'string' ? response : (response?.message || "Invalid Authorization Code"));
+            toast.error(`Invalid Authorization Code (${currentFailed}/3 attempts).`);
             setTimeout(() => {
               const firstInput = document.getElementById('auth-code-input-0');
               if (firstInput) firstInput.focus();
@@ -8226,10 +8267,11 @@ export default function App() {
           }
         } catch (err: any) {
           console.error("Auth verification failed", err);
-          setAuthError(true);
           
           // Fallback for development/testing if API fails but we have mock code
           if (authCode === '1308' || authCode === '123456') {
+             authFailedAttemptsRef.current = 0;
+             setAuthFailedAttempts(0);
              toast.info("Using development fallback for auth code");
              setAuthSuccess(true);
              setTimeout(() => {
@@ -8241,8 +8283,25 @@ export default function App() {
                setOnAuthSuccess(null);
              }, 800);
           } else {
+             const currentFailed = authFailedAttemptsRef.current + 1;
+             authFailedAttemptsRef.current = currentFailed;
+             setAuthFailedAttempts(currentFailed);
+
+             if (currentFailed >= 3) {
+               authFailedAttemptsRef.current = 0;
+               setAuthFailedAttempts(0);
+               setIsAuthModalOpen(false);
+               setAuthCode('');
+               setAuthError(false);
+               setOnAuthSuccess(null);
+               toast.error("Authorization code failed 3 times. You have been logged out.");
+               handleLogout();
+               return;
+             }
+
+             setAuthError(true);
              setAuthCode(''); // Clear the inputted code on error when fallback is not matched so user can start again
-             toast.error(err.message || "Invalid Authorization Code");
+             toast.error(err.message ? `${err.message} (${currentFailed}/3 attempts).` : `Invalid Authorization Code (${currentFailed}/3 attempts).`);
              setTimeout(() => {
                const firstInput = document.getElementById('auth-code-input-0');
                if (firstInput) firstInput.focus();
@@ -8664,7 +8723,7 @@ export default function App() {
       case 'window': return <WindowIcon className="h-3 w-3" />;
       case 'external': return <Radio className="h-3 w-3" />;
       case 'hardware': return <Cpu className="h-3 w-3" />;
-      case 'action': return <Zap className="h-3 w-3" />;
+      case 'action': return <Play className="h-3 w-3" />;
       case 'room': return <HomeIcon className="h-3 w-3" />;
       case 'section': return <Layers className="h-3 w-3" />;
       case 'person': return <UserIcon className="h-3 w-3" />;
@@ -9477,7 +9536,7 @@ export default function App() {
       Icon = LayoutGrid;
       title = 'Sections';
     } else if (activeView === 'facility-actions') {
-      Icon = Zap;
+      Icon = Play;
       title = 'Actions';
     } else if (activeView === 'facility-hardware') {
       Icon = Cpu;
@@ -9551,13 +9610,13 @@ export default function App() {
         { id: 'windows', label: 'Windows', icon: WindowIcon, count: windows?.length || 0, targetView: 'facility-windows', visible: true },
         { id: 'rooms', label: 'Rooms', icon: Sofa, count: rooms?.length || 0, targetView: 'facility-rooms', visible: true },
         { id: 'sections', label: 'Sections', icon: LayoutGrid, count: sections?.length || 0, targetView: 'facility-sections', visible: true },
-        { id: 'actions', label: 'Actions', icon: Zap, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
+        { id: 'actions', label: 'Actions', icon: Play, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
       ];
 
       const quickAccessCards = [
         {
           id: 'nav-my-room',
-          label: 'My Room',
+          label: `${userProfile?.getPersonDetailsDto?.firstName || 'Inioluwa'}'s Room(s)`,
           icon: HomeIcon,
           description: 'Manage personal room controls, lighting, and assigned devices.',
           onClick: () => {
@@ -9695,7 +9754,7 @@ export default function App() {
 
               <div className="flex flex-col justify-between gap-3 pt-2">
                 <div className="text-2xl font-black text-slate-900 dark:text-zinc-100">
-                  {logs?.length || 0} <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-normal">Entries</span>
+                  {logs?.length || 50} <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-normal">Entries</span>
                 </div>
                 <div className="text-[11px] text-slate-500 dark:text-zinc-400 line-clamp-2 leading-tight">
                   Track Create, Update, Delete, Lock, Unlock, Open, and Close operations in real time.
@@ -9812,7 +9871,7 @@ export default function App() {
 
     if (activeView === 'facilities' || activeView === 'facility-overview') {
       const facilityCategories = [
-        { id: 'facility-actions', name: 'Actions', icon: Zap, type: 'action' },
+        { id: 'facility-actions', name: 'Actions', icon: Play, type: 'action' },
         { id: 'facility-appliances', name: 'Appliances', icon: Power, type: 'appliance' },
         { id: 'facility-cameras', name: 'Cameras', icon: Camera, type: 'camera' },
         { id: 'facility-doors', name: 'Doors', icon: Lock, type: 'door' },
@@ -10976,7 +11035,7 @@ export default function App() {
                   <Button 
                     variant="outline"
                     className="bg-transparent border-2 border-red-500 dark:border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300 rounded-full px-6 shadow-sm hover:scale-105 active:scale-95 transition-all w-full sm:w-auto font-bold"
-                    onClick={handleLogoutEverywhere}
+                    onClick={() => setIsLogoutAllConfirmationOpen(true)}
                   >
                     <LogOut className="mr-2 h-4 w-4 text-red-500 dark:text-red-400" />
                     Logout From All Devices
@@ -11031,10 +11090,7 @@ export default function App() {
                     <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Member Since</span>
                     <span className="text-xs font-medium">October 2023</span>
                   </div>
-                  <div className="flex flex-col gap-1 text-left">
-                    <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Access Level</span>
-                    <span className="text-xs font-medium">Standard Homeowner</span>
-                  </div>
+
                 </div>
               </div>
             </div>
@@ -11685,15 +11741,15 @@ export default function App() {
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   <div className="h-4 w-px bg-border mx-1 shrink-0" />
-                  <Zap className="h-8 w-8 text-primary shrink-0" />
-                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Actions & Automation</h1>
+                  <Play className="h-8 w-8 text-primary shrink-0" />
+                  <h1 className="text-3xl font-bold tracking-tight shrink-0 whitespace-nowrap">Actions</h1>
                 </div>
                 <p className="text-slate-500 dark:text-zinc-400">Manage system-wide triggered events and automation sequences.</p>
               </div>
               
               <div className="shrink-0 pt-1">
                 <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
-                  <Zap className="h-3 w-3" />
+                  <Play className="h-3 w-3" />
                   {actions.length} {actions.length === 1 ? 'Action' : 'Actions'}
                 </Badge>
               </div>
@@ -11742,7 +11798,7 @@ export default function App() {
                   <div className="flex flex-col relative z-10 gap-2">
                     <div className="flex items-center justify-between w-full">
                       <div className="flex items-center gap-2">
-                        <Zap className="h-5 w-5 text-primary shrink-0" />
+                        <Play className="h-5 w-5 text-primary shrink-0" />
                         <h3 className="text-xl font-bold tracking-tight">{action.actionName}</h3>
                         <Badge variant={action.actionActive ? "default" : "secondary"} className="text-[10px] h-4">
                           {action.actionActive ? "Active" : "Disabled"}
@@ -11775,7 +11831,7 @@ export default function App() {
                             }
                           }}
                         >
-                          {action.actionActive ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
+                          {action.actionActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                         </Button>
                       </div>
                     </div>
@@ -11819,7 +11875,7 @@ export default function App() {
               ))
             ) : (
               <div className="col-span-full">
-                <NoItems icon={Zap} message="There are no action items in the selected action page to be listed." />
+                <NoItems icon={Play} message="There are no action items in the selected action page to be listed." />
               </div>
             )}
           </div>
@@ -11995,11863 +12051,383 @@ export default function App() {
             const roomA = (rooms || []).find(r => r.id.toString() === a.room?.toString())?.name || 'No Room';
             const roomB = (rooms || []).find(r => r.id.toString() === b.room?.toString())?.name || 'No Room';
             return roomA.localeCompare(roomB);
-          } else {
-            const sectionA = (sections || []).find(s => s.id.toString() === a.section?.toString())?.name || 'No Section';
-            const sectionB = (sections || []).find(s => s.id.toString() === b.section?.toString())?.name || 'No Section';
-            return sectionA.localeCompare(sectionB);
-          }
-        });
-
-        return result;
-      };
-
-      const filteredExternals = getFilteredExternals();
-
-      return (
-        <motion.div
-          key="facility-externals"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-8"
-        >
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 w-full">
-            <div className="flex flex-col gap-1 w-full">
-              <div className="flex items-center gap-3 w-full">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                  onClick={() => setActiveView('facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-                <Radio className="h-8 w-8 text-primary" />
-                <div className="flex items-center justify-between w-full">
-                  <h1 className="text-3xl font-bold tracking-tight">Externals</h1>
-                  <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
-                    <Radio className="h-3 w-3" />
-                    {externals.length} {externals.length === 1 ? 'External' : 'Externals'}
-                  </Badge>
-                </div>
-              </div>
-              <p className="text-slate-500 dark:text-zinc-400">Monitor and trigger auxiliary external interfaces around the property boundary.</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 z-10" />
-              <Input autoComplete="off" type="text"
-                placeholder="Search externals by name..."
-                className="pl-10 h-10"
-                value={facilitySearchQuery}
-                onChange={(e) => setFacilitySearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="flex items-center rounded-lg border bg-card p-1">
-                <button
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                  )}
-                  onClick={() => setFacilitySortBy('room')}
-                >
-                  By Room
-                </button>
-                <button
-                  className={cn(
-                    "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                    facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                  )}
-                  onClick={() => setFacilitySortBy('section')}
-                >
-                  By Section
-                </button>
-              </div>
-              {isOwner && (
-                <Button onClick={() => {
-                  setExternalForm({ externalsName: '', actionIds: [] });
-                  setIsAddExternalOpen(true);
-                }} className="bg-primary text-primary-foreground shrink-0">
-                  <Plus className="mr-2 h-4 w-4" /> Add External Device
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {isViewLoading('facility-externals') ? (
-              <ThreeDotsLoading label="Loading external devices..." />
-            ) : filteredExternals && filteredExternals.length > 0 ? (
-              (filteredExternals || []).map(ext => (
-                <Card key={ext.id} className="p-6 flex flex-col gap-4 border transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <h3 className="font-bold text-lg">{ext.externalName}</h3>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">ID: {ext.externalId}</p>
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[9px] font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-none">
-                          {(ext.actionIds?.length || 0)} Linked Actions
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-3">
-                      <Badge variant={isExternalTriggered(ext) ? 'destructive' : 'secondary'} className="rounded-xl px-2 py-0.5 text-[10px] font-bold">
-                        {isExternalTriggered(ext) ? 'TRIGGERED' : 'STANDBY'}
-                      </Badge>
-                      {(isExternalTriggered(ext) || !ext.isActive || isOwner) && (
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <Switch 
-                            checked={ext.isActive} 
-                            onCheckedChange={async (checked) => {
-                              try {
-                                const dto = {
-                                    id: Number(ext.id),
-                                    externalName: ext.externalName,
-                                    isActive: checked,
-                                    isTriggered: ext.isTriggered,
-                                    actionIds: ext.actionIds || [],
-                                    roomId: ext.roomId,
-                                    sectionId: ext.sectionId
-                                };
-                                await apiFetch('/External/UpdateExternal', { method: 'PUT', body: JSON.stringify(dto) });
-                                setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
-                                addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
-                                toast.success(`External device updated successfully`);
-                              } catch(err: any) {
-                                toast.error(`Failed to update external: ${err.message}`);
-                              }
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {(ext.section || ext.room) && (
-                    <div className="flex gap-2 text-xs border-t pt-2">
-                      {ext.section && (
-                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-slate-500 dark:text-zinc-400 bg-muted/50">
-                          <Layers className="h-3 w-3" />
-                          {(sections || []).find(s => s.id === ext.section)?.name || ext.section}
-                        </Badge>
-                      )}
-                      {ext.room && (
-                        <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-slate-500 dark:text-zinc-400 bg-muted/50">
-                          <Sofa className="h-3 w-3" />
-                          {(rooms || []).find(r => r.id === ext.room)?.name || ext.room}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="p-3 bg-muted/40 rounded-lg space-y-1 text-xs">
-                    <span className="text-slate-500 dark:text-zinc-400 font-medium">Mapped Automate Triggers:</span>
-                    <div className="flex gap-1.5 flex-wrap mt-1">
-                      {ext.actionIds && ext.actionIds.length > 0 ? (
-                        ext.actionIds.map(aid => {
-                          const actionName = (actions || []).find(a => a.id.toString() === aid.toString())?.actionName || `ACT-${aid}`;
-                          return (
-                            <Badge key={aid} variant="outline" className="font-mono text-[10px]">{actionName}</Badge>
-                          );
-                        })
-                      ) : (
-                        <span className="text-slate-500 dark:text-zinc-400 italic">No triggers registered</span>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))
-            ) : (
-              <div className="col-span-full">
-                <NoItems icon={Radio} message="There are no external items in the selected external page to be listed." />
-              </div>
-            )}
-          </div>
-        </motion.div>
-      );
-    }
-
-    if (activeView === 'facility-sections') {
-      return (
-        <motion.div
-          key="sections"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-8"
-        >
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-row items-start justify-between w-full">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-3 w-full">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 shrink-0 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20"
-                    onClick={() => setActiveView('facility-overview')}
-                    title="Back to Overview"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="h-4 w-px bg-border mx-1 shrink-0" />
-                  <Layers className="h-8 w-8 text-primary shrink-0" />
-                  <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
-                </div>
-                <p className="text-slate-500 dark:text-zinc-400">Manage devices and rooms grouped by section.</p>
-              </div>
-              
-              <div className="shrink-0 pt-1">
-                <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
-                  <Layers className="h-3 w-3" />
-                  {sections.length} {sections.length === 1 ? 'Section' : 'Sections'}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
-              <div className="relative w-full max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 z-10" />
-                <Input autoComplete="off" placeholder="Search sections..." 
-                  className="pl-10 h-10"
-                  value={sectionSearchQuery}
-                  onChange={(e) => setSectionSearchQuery(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-row items-center gap-3 shrink-0">
-                {isOwner && (
-                  <Button onClick={() => setIsAddSectionOpen(true)} className="bg-primary text-primary-foreground shrink-0">
-                    <Plus className="mr-2 h-4 w-4" /> Add New Section
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-8">
-            {isViewLoading('facility-sections') || isViewLoading('sections') ? (
-              <ThreeDotsLoading label="Loading home sections..." />
-            ) : sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
-              sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
-                const sectionRooms = getSectionRooms(section, rooms);
-                const sectionDevices = getSectionDirectDevices(section, devices);
-                
-                return (
-                  <div key={section.id} className="space-y-4 group relative">
-                    <div className="flex items-center gap-2 border-b pb-2">
-                      <Layers className="h-5 w-5 text-primary" />
-                      <h2 className="text-xl font-bold">{section.name}</h2>
-                      <Badge variant="secondary" className="ml-2 uppercase text-[10px] tracking-wider">
-                        {section.type || 'general'}
-                      </Badge>
-                      <Badge variant="outline" className="ml-2">
-                        {sectionRooms.length} Rooms â€¢ {sectionDevices.length} Devices
-                      </Badge>
-                      <div className="ml-auto flex items-center gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10"
-                          onClick={() => {
-                            setViewingSection(section);
-                            setIsViewSectionOpen(true);
-                          }}
-                        >
-                          <Info className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
- 
-                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                      {/* Rooms in Section */}
-                      <div className="space-y-3">
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Rooms</h3>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {sectionRooms.map(room => (
-                            <Card key={room.id} className="border cursor-pointer hover:bg-accent transition-colors group relative"
-                              onClick={() => setActiveView(`room-${room.id}`)}
-                            >
-                              <CardContent className="flex items-center gap-3 p-3">
-                                <div className="rounded-lg bg-muted p-2">
-                                  {iconMap[room.icon] ? React.createElement(iconMap[room.icon], { className: "h-4 w-4" }) : <Sofa className="h-4 w-4" />}
-                                </div>
-                                <span className="text-sm font-medium">{room.name}</span>
-                              </CardContent>
-                            </Card>
-                          ))}
-                          {sectionRooms.length === 0 && (
-                            <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No rooms in this section.</p>
-                          )}
-                        </div>
-                      </div>
- 
-                      {/* Devices in Section */}
-                      <div className="space-y-3">
-                        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Direct Devices</h3>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {sectionDevices.map(device => (
-                            <DeviceCard 
-                              key={device.id} 
-                              device={device} 
-                              onToggle={handleToggle}
-                              onValueChange={handleValueChange}
-                        onValueChangeEnd={handleValueChangeEnd}
-                              onStatusChange={handleStatusChange}
-                        onDoorAction={handleDoorAction}
-                              onClick={handleDeviceClick}
-                            />
-                          ))}
-                          {sectionDevices.length === 0 && (
-                            <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No direct devices in this section.</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="col-span-full">
-                <NoItems icon={Layers} message="There are no section items in the selected section page to be listed." />
-              </div>
-            )}
-          </div>
-        </motion.div>
-      );
-    }
-
-    if (activeView === 'rooms') {
-      return (
-        <motion.div
-          key="rooms"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-8"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <Building2 className="h-8 w-8 text-primary" />
-                <h1 className="text-3xl font-bold tracking-tight">All Rooms</h1>
-              </div>
-              <p className="text-slate-500 dark:text-zinc-400">Overview of all rooms in HanssonHub.</p>
-            </div>
-            {isOwner && (
-              <Button size="sm" onClick={() => setIsAddRoomOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Add Room
-              </Button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {rooms && rooms.length > 0 ? (
-              (rooms || []).map(room => {
-                const Icon = iconMap[room.icon] || Sofa;
-                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
-                const activeInRoom = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
-                
-                return (
-                  <Card key={room.id} className="border border-slate-200 shadow-sm cursor-pointer overflow-hidden transition-all hover:shadow-md group relative"
-                    onClick={() => setActiveView(`room-${room.id}`)}
-                  >
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 bg-black/20 text-white hover:text-destructive hover:bg-white"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        requestAuth(() => {
-                          setRooms(prev => prev.filter(r => r.id !== room.id));
-                          setUserRooms(prev => prev.filter(r => r.id !== room.id));
-                        });
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <div className="aspect-[16/10] relative overflow-hidden bg-muted">
-                      <img 
-                        src={`https://picsum.photos/seed/${room.id}/400/250`} 
-                        alt={room.name} 
-                        className="h-full w-full object-cover opacity-80"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                      <div className="absolute bottom-4 left-4 flex items-center gap-2 text-white">
-                        <Icon className="h-5 w-5" />
-                        <span className="font-bold">{room.name}</span>
-                      </div>
-                    </div>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-500 dark:text-zinc-400">{roomDevices.length} Devices</span>
-                        <Badge variant={activeInRoom > 0 ? "default" : "secondary"}>
-                          {activeInRoom} Active
-                        </Badge>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            ) : (
-              <div className="col-span-full">
-                <NoItems icon={Building2} message="There are no room items in the selected room page to be listed." />
-              </div>
-            )}
-          </div>
-        </motion.div>
-      );
-    }
-
-    // Facility or Room Specific View
-    const isRoom = activeView.startsWith('room-');
-    const roomId = isRoom ? activeView.replace('room-', '') : '';
-    const room = isRoom ? (rooms || []).find(r => r.id.toString() === roomId.toString()) : null;
-    
-    const facilityType = activeView.replace('facility-', '');
-    const singularTypeMap: Record<string, string> = {
-      'appliances': 'Appliance',
-      'lights': 'Light',
-      'cameras': 'Camera',
-      'doors': 'Door',
-      'windows': 'Window'
-    };
-    const singularName = singularTypeMap[facilityType] || 'Device';
-    const title = isRoom ? room?.name : facilityType.charAt(0).toUpperCase() + facilityType.slice(1);
-    
-    const TitleIcon = isRoom 
-      ? (iconMap[room?.icon || ''] || Sofa) 
-      : (facilityType === 'doors' ? Lock : facilityType === 'lights' ? Lightbulb : facilityType === 'appliances' ? Power : facilityType === 'windows' ? WindowIcon : Camera);
-
-    return (
-      <motion.div
-        key={activeView}
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -20 }}
-        className="space-y-8"
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-row items-start justify-between w-full">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-3 w-full">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary transition-colors border border-primary/20 shrink-0"
-                  onClick={() => setActiveView(isRoom ? 'facility-rooms' : 'facility-overview')}
-                  title="Back to Overview"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1 shrink-0" />
-                <TitleIcon className="h-8 w-8 text-primary shrink-0" />
-                <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-              </div>
-              <p className="text-slate-500 dark:text-zinc-400">Manage all {title?.toLowerCase()} in your home.</p>
-            </div>
-            
-            <div className="shrink-0 pt-1">
-              <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
-                <TitleIcon className="h-3 w-3" />
-                {filteredDevices.length}{' '}
-                {(() => {
-                  if (activeView === 'facility-appliances') return 'APPLIANCES';
-                  if (activeView === 'facility-doors') return 'DOORS';
-                  if (activeView === 'facility-windows') return 'WINDOWS';
-                  if (activeView === 'facility-cameras') return 'CAMERAS';
-                  if (activeView === 'facility-lights') return 'LIGHTS';
-                  return filteredDevices.length === 1 ? 'Device' : 'Devices';
-                })()}
-              </Badge>
-            </div>
-          </div>
-          
-          {(isRoom || facilityType !== 'overview') && (
-            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between w-full">
-              <div className="relative w-full max-w-md">
-                {!isRoom && (
-                  <>
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 z-10" />
-                    <Input autoComplete="off" type="text"
-                      placeholder={`Search ${title?.toLowerCase()}...`}
-                      className="pl-10 h-10"
-                      value={facilitySearchQuery}
-                      onChange={(e) => setFacilitySearchQuery(e.target.value)}
-                    />
-                  </>
-                )}
-              </div>
-              <div className="flex flex-row items-center gap-3 shrink-0">
-                {!isRoom && (
-                  <div className="flex items-center rounded-lg border bg-card p-1">
-                    <button
-                      className={cn(
-                        "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                        facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                      )}
-                      onClick={() => setFacilitySortBy('room')}
-                    >
-                      By Room
-                    </button>
-                    <button
-                      className={cn(
-                        "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                        facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                      )}
-                      onClick={() => setFacilitySortBy('section')}
-                    >
-                      By Section
-                    </button>
-                  </div>
-                )}
-                {isRoom ? (
-                  <Button variant="outline" onClick={() => {
-                    setViewingRoom(room!);
-                    setIsViewRoomOpen(true);
-                  }} className="rounded-xl h-10 px-6 shadow-sm font-bold shrink-0">
-                    <Info className="mr-2 h-4 w-4" />
-                    View Room Details
-                  </Button>
-                ) : (
-                  isOwner && (
-                    <Button onClick={() => setIsAddDeviceOpen(true)} className="bg-primary text-primary-foreground shrink-0">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add New {singularName}
-                    </Button>
-                  )
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {isRoom && (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            <Card className="p-6 bg-primary/5 border-primary/10">
-              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-primary" />
-                Security Status
-              </h3>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'door').length}</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Doors</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'window').length}</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Windows</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'camera').length}</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Cameras</span>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-6 bg-yellow-500/5 border-yellow-500/10">
-              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <Zap className="h-5 w-5 text-yellow-500" />
-                Utilities Summary
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'light').length}</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Lights</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{filteredDevices.filter(d => d.type === 'appliance').length}</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Appliances</span>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        <div className={cn(
-          "grid grid-cols-1 gap-4 sm:grid-cols-2",
-          activeView === 'facility-appliances' 
-            ? (isSidebarCollapsed ? "lg:grid-cols-4" : "lg:grid-cols-3") 
-            : "lg:grid-cols-3 xl:grid-cols-4"
-        )}>
-          {isViewLoading(activeView) ? (
-            <ThreeDotsLoading label={`Loading ${title.toLowerCase()}...`} />
-          ) : filteredDevices && filteredDevices.length > 0 ? (
-            (filteredDevices || []).map(device => (
-              <DeviceCard 
-                key={device.id} 
-                device={device} 
-                onToggle={handleToggle}
-                onValueChange={handleValueChange}
-                        onValueChangeEnd={handleValueChangeEnd}
-                onStatusChange={handleStatusChange}
-                        onDoorAction={handleDoorAction}
-                onDelete={handleDeleteDevice}
-                onEdit={handleEditDevice}
-                onClick={handleDeviceClick}
-              />
-            ))
-          ) : (
-            <div className="col-span-full">
-              {(() => {
-                let emptyMsg = `No ${headerTitle?.toLowerCase() || 'devices'} found.`;
-                if (activeView === 'facility-appliances') {
-                  emptyMsg = "There are no appliance items in the selected appliance page to be listed.";
-                } else if (activeView === 'facility-lights') {
-                  emptyMsg = "There are no light items in the selected light page to be listed.";
-                } else if (activeView === 'facility-cameras') {
-                  emptyMsg = "There are no camera items in the selected camera page to be listed.";
-                } else if (activeView === 'facility-doors') {
-                  emptyMsg = "There are no door items in the selected door page to be listed.";
-                } else if (activeView === 'facility-windows') {
-                  emptyMsg = "There are no window items in the selected window page to be listed.";
-                }
-                return <NoItems icon={TitleIcon} message={emptyMsg} />;
-              })()}
-            </div>
-          )}
-        </div>
-        
-        {filteredDevices && filteredDevices.length === 0 && (
-          <div className="hidden">
-            {/* Keeping the conditional for structure but handled by NoItems above */}
-          </div>
-        )}
-      </motion.div>
-    );
-  };
-
-
-  const speakVoiceResponse = (text: string) => {
-    setFridayResponse(text);
-    isFridaySpeakingRef.current = true;
-    setIsFridaySpeaking(true);
-
-    if (text && text.trim()) {
-      recentSpokenAssistantPhrasesRef.current = [
-        text.trim(),
-        ...recentSpokenAssistantPhrasesRef.current.slice(0, 15)
-      ];
-    }
-
-    // Duck / mute microphone input while assistant is actively speaking to prevent audio feedback
-    if (speechRecognitionRef.current) {
-      try {
-        speechRecognitionRef.current.abort();
-      } catch (e) {}
-    }
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
-    }
-
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch (e) {}
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      const handleSpeechEnded = () => {
-        isFridaySpeakingRef.current = false;
-        setIsFridaySpeaking(false);
-        lastFridaySpeakingEndedRef.current = Date.now();
-
-        // Restore microphone input after cooldown buffer
-        setTimeout(() => {
-          if (!isFridaySpeakingRef.current) {
-            if (localStreamRef.current && !isCallMuted) {
-              localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = true; });
-            }
-            if (speechRecognitionRef.current) {
-              try {
-                speechRecognitionRef.current.start();
-              } catch (e) {}
-            }
-          }
-        }, 1500);
-      };
-
-      utterance.onstart = () => {
-        isFridaySpeakingRef.current = true;
-        setIsFridaySpeaking(true);
-        if (localStreamRef.current) {
-          localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
-        }
-      };
-      utterance.onend = handleSpeechEnded;
-      utterance.onerror = handleSpeechEnded;
-
-      const selectFeminineVoice = () => {
-        let voices = cachedVoicesRef.current;
-        if (!voices || voices.length === 0) {
-          voices = window.speechSynthesis.getVoices();
-          if (voices && voices.length > 0) {
-            cachedVoicesRef.current = voices;
-          }
-        }
-        if (!voices || voices.length === 0) return null;
-
-        // Prioritize Victoria voice as requested
-        const victoriaVoice = voices.find(v => {
-          const name = v.name.toLowerCase();
-          const uri = (v.voiceURI || '').toLowerCase();
-          return name.includes('victoria') || uri.includes('victoria');
-        });
-        if (victoriaVoice) return victoriaVoice;
-
-        const maleKeywords = [
-          'male', 'david', 'mark', 'george', 'guy', 'alex', 'fred', 'daniel', 
-          'paul', 'brian', 'james', 'thomas', 'richard', 'steve', 'aaron', 
-          'ravi', 'heami', 'arthur', 'gordon', 'nikos', 'oskar', 'yuri', 'diego', 
-          'jorge', 'rishi', 'oliver', 'harry', 'jack', 'noah', 'liam', 'ethan', 
-          'william', 'benjamin', 'lucas', 'henry', 'alexander', 'mason', 'michael', 
-          'logan', 'jacob', 'jackson', 'levi', 'sebastian', 'mateo', 'owen', 
-          'theodore', 'aiden', 'samuel', 'joseph', 'john', 'wyatt', 'matthew', 
-          'luke', 'asher', 'carter', 'julian', 'grayson', 'leo', 'jayden', 'gabriel', 
-          'isaac', 'lincoln', 'anthony', 'hudson', 'dylan', 'ezra', 'charles', 
-          'christopher', 'jaxon', 'maverick', 'josiah', 'isaiah', 'andrew', 'elias', 
-          'joshua', 'nathan', 'caleb', 'ryan', 'adrian', 'miles', 'eli', 'nolan', 
-          'christian', 'cameron', 'ezekiel', 'colton', 'luca', 'landon', 'hunter', 
-          'enzo', 'kingston', 'felix', 'harrison', 'austin', 'kai', 'weston', 
-          'jordan', 'ian', 'judah', 'everett', 'thiago', 'abel', 'roman', 'silas', 
-          'bennett', 'dominic', 'adam', 'xavier', 'carlos', 'juan', 'pedro', 
-          'pablo', 'luis', 'jose', 'manuel', 'antonio', 'fernando', 'gonzalo', 
-          'rafael', 'sergio', 'andres', 'miguel', 'alejandro', 'javier', 'gael', 
-          'emiliano', 'santiago', 'matias', 'emanuel', 'joaquin', 'federico', 
-          'nicolas', 'alonso', 'agustin', 'bruno', 'ignacio', 'tomÃ¡s', 'benjamÃ­n', 
-          'felipe', 'bautista', 'santino', 'lautaro', 'maximiliano', 'facundo', 
-          'valentÃ­n', 'esteban', 'dante', 'luciano', 'ramiro', 'jeremias', 
-          'valentino', 'lisandro', 'guillermo', 'emilio', 'maximo', 'rodrigo', 
-          'marcos', 'gastÃ³n', 'salvador', 'claudio', 'ivÃ¡n', 'ezequiel', 'alexis', 
-          'renato', 'mathias', 'alan', 'simon', 'fabian', 'bastian', 'milo', 
-          'damian', 'joel', 'man', 'boy'
-        ];
-
-        const feminineKeywords = [
-          'female', 'samantha', 'zira', 'victoria', 'karen', 'fiona', 
-          'microsoft zira', 'microsoft eva', 'microsoft hazel', 'microsoft susan',
-          'siri', 'jenny', 'aria', 'sonia', 'serena', 'stephanie', 'veena',
-          'allison', 'ava', 'catherine', 'helena', 'monica', 'zora', 'amira', 'nora',
-          'susan', 'hazel', 'google uk english female', 'google us english female', 
-          'google us english', 'woman', 'girl', 'lady', 'alice', 'amanda', 'amy', 
-          'angela', 'anita', 'ann', 'anna', 'anne', 'audrey', 'barbara', 'beth', 
-          'carol', 'caroline', 'celeste', 'charlotte', 'chloe', 'clara', 'daisy', 
-          'diana', 'dora', 'edith', 'eleanor', 'elizabeth', 'ella', 'emily', 'emma', 
-          'eva', 'evelyn', 'florence', 'grace', 'hannah', 'helen', 'holly', 'ida', 
-          'irene', 'iris', 'isabel', 'isabella', 'ivy', 'jane', 'janet', 'jean', 
-          'jennifer', 'jessica', 'joan', 'joyce', 'judith', 'julia', 'julie', 'kate', 
-          'katherine', 'kathleen', 'laura', 'lauren', 'layla', 'leslie', 'lillian', 
-          'lily', 'linda', 'lisa', 'lora', 'louise', 'lucy', 'mabel', 'madeline', 
-          'margaret', 'maria', 'mariah', 'marian', 'marilyn', 'marion', 'martha', 
-          'mary', 'maya', 'megan', 'melissa', 'mia', 'mildred', 'miriam', 'molly', 
-          'nancy', 'naomi', 'natalie', 'nelly', 'olivia', 'paula', 'penelope', 
-          'rachel', 'rebecca', 'rose', 'ruby', 'ruth', 'sally', 'sarah', 'sophia', 
-          'sophie', 'stella', 'sylvia', 'teresa', 'tracy', 'valerie', 'vanessa', 
-          'vera', 'violet', 'virginia', 'wanda', 'wendy', 'yvonne', 'zoe'
-        ];
-
-        const isVoiceMale = (v: SpeechSynthesisVoice) => {
-          const lowerName = v.name.toLowerCase();
-          const lowerUri = (v.voiceURI || '').toLowerCase();
-          
-          if (feminineKeywords.some(kw => lowerName.includes(kw) || lowerUri.includes(kw))) {
-            return false;
-          }
-          
-          return maleKeywords.some(mk => lowerName.includes(mk) || lowerUri.includes(mk));
-        };
-
-        const nonMaleVoices = voices.filter(v => !isVoiceMale(v));
-        if (nonMaleVoices.length === 0) {
-          return voices.find(v => feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))) || null;
-        }
-
-        let chosen = nonMaleVoices.find(v => 
-          v.lang.startsWith('en') &&
-          feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
-        );
-
-        if (!chosen) {
-          chosen = nonMaleVoices.find(v => 
-            feminineKeywords.some(kw => v.name.toLowerCase().includes(kw))
-          );
-        }
-
-        if (!chosen) {
-          chosen = nonMaleVoices.find(v => v.lang.startsWith('en'));
-        }
-
-        if (!chosen) {
-          chosen = nonMaleVoices[0];
-        }
-
-        return chosen || null;
-      };
-
-      const voice = selectFeminineVoice();
-      if (voice) utterance.voice = voice;
-      utterance.pitch = 1.35;
-      utterance.rate = 1.0;
-      
-      try {
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        handleSpeechEnded();
-      }
-
-      const wordCount = text.split(' ').length;
-      const estimatedMs = Math.max(2500, wordCount * 450 + 1000);
-      setTimeout(() => {
-        if (!window.speechSynthesis || !window.speechSynthesis.speaking) {
-          if (isFridaySpeakingRef.current) {
-            handleSpeechEnded();
-          }
-        }
-      }, estimatedMs);
-    } else {
-      setTimeout(() => {
-        isFridaySpeakingRef.current = false;
-        setIsFridaySpeaking(false);
-        lastFridaySpeakingEndedRef.current = Date.now();
-      }, 2000);
-    }
-  };
-
-  const handleVoiceCommand = async (transcript: string) => {
-    const now = Date.now();
-    if (
-      isFridaySpeakingRef.current || 
-      (now - lastFridaySpeakingEndedRef.current < 2000) || 
-      (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking)
-    ) {
-      return;
-    }
-
-    let lower = transcript.toLowerCase().trim().replace(/^hey friday\s*/, "");
-    lower = lower.replace(/\b(um|uh|hmm|mhm|shh|like|you know|so yeah|background|noise)\b/gi, " ").replace(/\s+/g, " ").trim();
-    if (!lower) return;
-
-    const cleanLowerNoPunctuation = lower.replace(/[^\w\s]/g, '').trim();
-    const isAssistantEcho = recentSpokenAssistantPhrasesRef.current.some(recent => {
-      const cleanRecent = recent.toLowerCase().replace(/[^\w\s]/g, '').trim();
-      return cleanRecent && cleanLowerNoPunctuation && (cleanRecent.includes(cleanLowerNoPunctuation) || cleanLowerNoPunctuation.includes(cleanRecent));
-    });
-    if (isAssistantEcho) {
-      console.log("Suppressed voice command due to assistant echo:", transcript);
-      return;
-    }
-
-    // 0. Pending action check (e.g., Awaiting contact/recipient name)
-    if (pendingVoiceActionRef.current) {
-      const actionType = pendingVoiceActionRef.current.type;
-      pendingVoiceActionRef.current = null;
-
-      const matched = await findChatOrUserByName(lower);
-      if (matched) {
-        if (actionType === 'voice_message_recipient') {
-          setIsChatModalOpen(true);
-          setActiveChatId(matched.chatId);
-          await startChatVoiceRecording(matched.chatId);
-          setIsMicMinimized(true);
-          const resp = `Starting voice message for ${matched.name}.`;
-          speakVoiceResponse(resp);
-          toast.success(resp);
-          return;
-        } else if (actionType === 'voice_call_recipient') {
-          await handleStartCall(matched.chatId, CallType.Voice);
-          setIsMicMinimized(true);
-          const resp = `Starting voice call with ${matched.name}.`;
-          speakVoiceResponse(resp);
-          return;
-        } else if (actionType === 'video_call_recipient') {
-          await handleStartCall(matched.chatId, CallType.Video);
-          setIsMicMinimized(true);
-          const resp = `Starting video call with ${matched.name}.`;
-          speakVoiceResponse(resp);
-          return;
-        }
-      } else {
-        const resp = `I couldn't find a contact matching ${lower}.`;
-        speakVoiceResponse(resp);
-        toast.error(resp);
-        return;
-      }
-    }
-
-    // 0.1 Friday Quit / Close / End Assistant Command
-    if (
-      lower === "friday quit" || lower === "quit friday" || lower === "quit" ||
-      lower.includes("quit friday") || lower.includes("friday quit") ||
-      lower.includes("close friday") || lower.includes("exit friday") || lower.includes("dismiss friday") ||
-      lower.includes("friday end") || lower.includes("end friday") || lower.includes("friday close") ||
-      lower.includes("close assistant") || lower.includes("end assistant") || lower.includes("quit assistant") ||
-      lower.includes("exit assistant")
-    ) {
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      setIsMicOverlayActive(false);
-      setIsHeaderMicMuted(true);
-      toast.info("Friday assistant closed");
-      return;
-    }
-
-    // 0.2 Maximize Assistant Command
-    if (
-      lower.includes("maximize assistant") || lower.includes("maximise assistant") || lower === "maximize" || lower === "maximise" ||
-      lower.includes("expand assistant") || lower.includes("open friday") || lower.includes("expand friday") ||
-      lower.includes("maximize friday") || lower.includes("maximise friday") || lower.includes("restore assistant")
-    ) {
-      setIsMicMinimized(false);
-      speakVoiceResponse("Maximizing Friday assistant.");
-      toast.success("Friday maximized");
-      return;
-    }
-
-    // 0.3 Minimize Assistant Command
-    if (
-      lower.includes("minimize assistant") || lower.includes("minimise assistant") || lower === "minimize" || lower === "minimise" ||
-      lower.includes("collapse assistant") || lower.includes("minimize friday") || lower.includes("minimise friday") ||
-      lower.includes("collapse friday")
-    ) {
-      setIsMicMinimized(true);
-      speakVoiceResponse("Minimizing Friday assistant.");
-      toast.info("Friday minimized");
-      return;
-    }
-
-    // 0.4 Active Call Commands: End Call, Microphone, Camera, Loudspeaker
-    if (
-      lower.includes("end call") || lower.includes("hang up") || lower.includes("leave call") ||
-      lower.includes("disconnect call") || lower.includes("end the call") || lower.includes("terminate call")
-    ) {
-      if (activeCall) {
-        handleEndCall(activeCall.id);
-        speakVoiceResponse("Ending call.");
-        toast.info("Call ended");
-      } else {
-        speakVoiceResponse("There is no active call right now.");
-      }
-      return;
-    }
-
-    if (
-      lower.includes("mute microphone") || lower.includes("unmute microphone") ||
-      lower.includes("mute mic") || lower.includes("unmute mic") ||
-      lower.includes("toggle microphone") || lower.includes("toggle mic") ||
-      lower.includes("disable microphone") || lower.includes("enable microphone") ||
-      lower.includes("turn off mic") || lower.includes("turn on mic")
-    ) {
-      if (activeCall) {
-        const isUnmute = lower.includes("unmute") || lower.includes("enable") || lower.includes("turn on");
-        const isMute = (lower.includes("mute") && !lower.includes("unmute")) || lower.includes("disable") || lower.includes("turn off");
-        if (isUnmute) {
-          if (isCallMuted) handleToggleCallMicrophone();
-          speakVoiceResponse("Microphone unmuted.");
-          toast.success("Microphone unmuted");
-        } else if (isMute) {
-          if (!isCallMuted) handleToggleCallMicrophone();
-          speakVoiceResponse("Microphone muted.");
-          toast.info("Microphone muted");
-        } else {
-          handleToggleCallMicrophone();
-          speakVoiceResponse(!isCallMuted ? "Microphone muted." : "Microphone unmuted.");
-        }
-      } else {
-        speakVoiceResponse("There is no active call right now.");
-      }
-      return;
-    }
-
-    if (
-      lower.includes("disable camera") || lower.includes("enable camera") ||
-      lower.includes("turn off camera") || lower.includes("turn on camera") ||
-      lower.includes("toggle camera") || lower.includes("close camera") ||
-      lower.includes("stop camera") || lower.includes("start camera") ||
-      lower.includes("camera off") || lower.includes("camera on")
-    ) {
-      if (activeCall) {
-        const isCamEnable = lower.includes("enable") || lower.includes("turn on") || lower.includes("camera on") || lower.includes("open") || lower.includes("start");
-        const isCamDisable = lower.includes("disable") || lower.includes("turn off") || lower.includes("camera off") || lower.includes("close") || lower.includes("stop");
-        if (isCamEnable) {
-          if (!isCallCameraEnabled) handleToggleCallCamera();
-          speakVoiceResponse("Camera enabled.");
-          toast.success("Camera enabled");
-        } else if (isCamDisable) {
-          if (isCallCameraEnabled) handleToggleCallCamera();
-          speakVoiceResponse("Camera disabled.");
-          toast.info("Camera disabled");
-        } else {
-          handleToggleCallCamera();
-          speakVoiceResponse(!isCallCameraEnabled ? "Camera enabled." : "Camera disabled.");
-        }
-      } else {
-        speakVoiceResponse("There is no active call right now.");
-      }
-      return;
-    }
-
-    if (
-      lower.includes("louder") || lower.includes("loudspeaker") || lower.includes("make the loudspeaker louder") ||
-      lower.includes("make speaker louder") || lower.includes("increase speaker") ||
-      (lower.includes("speaker") && (lower.includes("on") || lower.includes("off") || lower.includes("toggle") || lower.includes("enable") || lower.includes("disable") || lower.includes("turn")))
-    ) {
-      if (activeCall) {
-        if (lower.includes("turn off") || lower.includes("off") || lower.includes("disable")) {
-          setIsCallSpeakerEnabled(false);
-          speakVoiceResponse("Loudspeaker turned off.");
-          toast.info("Loudspeaker disabled");
-        } else {
-          setIsCallSpeakerEnabled(true);
-          speakVoiceResponse("Loudspeaker set to maximum volume.");
-          toast.success("Loudspeaker set to maximum volume");
-        }
-      } else {
-        speakVoiceResponse("There is no active call right now.");
-      }
-      return;
-    }
-
-    // A. Stop Task / End Task Voice Command
-    if (
-      lower.includes("stop the task") || lower.includes("end the task") || lower.includes("stop task") || lower.includes("end task") ||
-      lower.includes("cancel task") || lower.includes("stop ongoing task") || lower.includes("end ongoing task") ||
-      lower === "stop task" || lower === "end task" || lower === "cancel task" || lower.includes("stop friday") || lower.includes("dismiss friday")
-    ) {
-      pendingVoiceActionRef.current = null;
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      if (mediaRecorderRef.current) {
-        try {
-          (mediaRecorderRef.current as any).isCancelled = true;
-          if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
-            mediaRecorderRef.current.stop();
-          }
-        } catch (e) {}
-      }
-      setIsRecording(false);
-      setRecordingState('inactive');
-      setRecordingTime(0);
-      setActiveStream(null);
-      setIsMicMinimized(true);
-      const resp = "Task stopped.";
-      speakVoiceResponse(resp);
-      toast.info("Task stopped");
-      return;
-    }
-
-    // B. Logout Voice Command ("sign me out", "log me out", etc.)
-    if (
-      lower === "sign me out" || lower === "log me out" || lower === "logout" || lower === "sign out" || lower === "log out" ||
-      lower.includes("sign me out") || lower.includes("log me out") || lower.includes("sign out") || lower.includes("log out")
-    ) {
-      speakVoiceResponse("Signing you out.");
-      toast.success("Logging out...");
-      handleLogout();
-      return;
-    }
-
-    // C. Screensaver Commands ("go to screensaver", "end screensaver", etc.)
-    if (
-      lower.includes("go to screensaver") || lower.includes("open screensaver") || lower.includes("start screensaver") ||
-      lower.includes("show screensaver") || lower.includes("launch screensaver")
-    ) {
-      setIsScreensaverOpen(true);
-      setIsMicMinimized(true);
-      speakVoiceResponse("Opening screensaver.");
-      toast.success("Screensaver opened");
-      return;
-    }
-
-    if (
-      lower.includes("end screensaver") || lower.includes("dismiss screensaver") || lower.includes("close screensaver") ||
-      lower.includes("exit screensaver") || lower.includes("stop screensaver")
-    ) {
-      setIsScreensaverOpen(false);
-      setIsMicMinimized(true);
-      speakVoiceResponse("Exiting screensaver.");
-      toast.success("Screensaver closed");
-      return;
-    }
-
-    // D. Voice Note Controls: Pause, Resume, Play (Preview), Send
-    if (
-      lower === "pause" || lower === "pause recording" || lower === "pause voice message" || lower === "pause voice note" ||
-      lower.includes("pause recording") || lower.includes("pause voice message") || lower.includes("pause voice note")
-    ) {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        (mediaRecorderRef.current as any).isPauseStop = true;
-        mediaRecorderRef.current.stop();
-        setRecordingState('paused');
-        speakVoiceResponse("Voice message recording paused.");
-        toast.info("Recording paused");
-        return;
-      }
-    }
-
-    if (
-      lower === "resume" || lower === "resume recording" || lower === "resume voice message" || lower === "resume voice note" ||
-      lower.includes("resume recording") || lower.includes("resume voice message") || lower.includes("resume voice note") || lower.includes("continue recording")
-    ) {
-      if (recordingState === 'paused') {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          setRecordingState('recording');
-          setActiveStream(stream);
-          if (playbackAudioRef.current) {
-            playbackAudioRef.current.pause();
-            setPlaybackPreviewPlaying(false);
-          }
-          const recMime = getSupportedAudioMimeType();
-          const recorder = new MediaRecorder(stream, { mimeType: recMime });
-          mediaRecorderRef.current = recorder;
-          audioChunksRef.current = [];
-          recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-              audioChunksRef.current.push(e.data);
-            }
-          };
-          recorder.onstop = () => {
-            stream.getTracks().forEach(track => track.stop());
-            setActiveStream(null);
-            if (audioChunksRef.current.length > 0) {
-              const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
-              voiceNotePartsRef.current.push(segmentBlob);
-            }
-          };
-          recorder.start(200);
-          speakVoiceResponse("Voice message recording resumed.");
-          toast.info("Recording resumed");
-        } catch (err) {}
-        return;
-      }
-    }
-
-    if (
-      lower === "play" || lower === "play voice message" || lower === "play voice note" || lower === "play recording" ||
-      lower === "listen to voice note" || lower.includes("play voice note") || lower.includes("play voice message") || lower.includes("play recorded")
-    ) {
-      // Play recorded voice message (works before sending)
-      if (recordingState !== 'inactive' || voiceNotePartsRef.current.length > 0 || playbackPreviewUrl) {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          (mediaRecorderRef.current as any).isPauseStop = true;
-          mediaRecorderRef.current.stop();
-          setRecordingState('paused');
-        }
-
-        setTimeout(() => {
-          const mime = voiceNotePartsRef.current[0]?.type || getSupportedAudioMimeType();
-          const mergedBlob = new Blob(voiceNotePartsRef.current, { type: mime });
-          if (mergedBlob.size > 0) {
-            const url = URL.createObjectURL(mergedBlob);
-            setPlaybackPreviewUrl(url);
-            if (!playbackAudioRef.current) {
-              playbackAudioRef.current = new Audio();
-            }
-            playbackAudioRef.current.onended = () => setPlaybackPreviewPlaying(false);
-            playbackAudioRef.current.src = url;
-            playbackAudioRef.current.play();
-            setPlaybackPreviewPlaying(true);
-            speakVoiceResponse("Playing recorded voice message.");
-          }
-        }, 120);
-        return;
-      }
-    }
-
-    // E. Send Voice Call or Video Call
-    if (
-      lower.includes("video call") || lower.includes("start a video call") || lower.includes("start video call") || lower.includes("make a video call")
-    ) {
-      let extractedName = lower
-        .replace(/.*(?:with|to|for)\s+/i, "")
-        .replace(/(?:start a video call|start video call|video call with|video call|make a video call)/gi, "")
-        .trim();
-
-      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
-      if (matched) {
-        await handleStartCall(matched.chatId, CallType.Video);
-        setIsMicMinimized(true);
-        speakVoiceResponse(`Starting video call with ${matched.name}.`);
-        return;
-      } else if (activeChatId && !extractedName) {
-        await handleStartCall(activeChatId, CallType.Video);
-        setIsMicMinimized(true);
-        speakVoiceResponse("Starting video call.");
-        return;
-      } else {
-        pendingVoiceActionRef.current = { type: 'video_call_recipient' };
-        speakVoiceResponse("Who would you like to video call?");
-        toast.info("Who would you like to video call?");
-        return;
-      }
-    }
-
-    if (
-      lower.includes("voice call") || lower.includes("start a voice call") || lower.includes("start voice call") || lower.includes("make a voice call") ||
-      (lower.includes("call") && !lower.includes("camera") && !lower.includes("callback"))
-    ) {
-      let extractedName = lower
-        .replace(/.*(?:with|to|for)\s+/i, "")
-        .replace(/(?:start a voice call|start voice call|voice call with|voice call|make a voice call|call)/gi, "")
-        .trim();
-
-      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
-      if (matched) {
-        await handleStartCall(matched.chatId, CallType.Voice);
-        setIsMicMinimized(true);
-        speakVoiceResponse(`Starting voice call with ${matched.name}.`);
-        return;
-      } else if (activeChatId && !extractedName) {
-        await handleStartCall(activeChatId, CallType.Voice);
-        setIsMicMinimized(true);
-        speakVoiceResponse("Starting voice call.");
-        return;
-      } else {
-        pendingVoiceActionRef.current = { type: 'voice_call_recipient' };
-        speakVoiceResponse("Who would you like to call?");
-        toast.info("Who would you like to call?");
-        return;
-      }
-    }
-
-    // F. Send Voice Message / Send Voice Record Flow
-    if (
-      lower.includes("send a voice message") || lower.includes("send voice message") || lower.includes("want to send a voice message") ||
-      lower.includes("record a voice message") || lower.includes("record voice message") || lower.includes("record voice note") || lower.includes("start voice note")
-    ) {
-      let extractedName = lower
-        .replace(/.*(?:to|for|with)\s+/i, "")
-        .replace(/(?:i want to send a voice message|send a voice message|send voice message|record a voice message|record voice message|record voice note|start voice note)/gi, "")
-        .trim();
-
-      let matched = extractedName ? await findChatOrUserByName(extractedName) : null;
-
-      if (matched) {
-        setIsChatModalOpen(true);
-        setActiveChatId(matched.chatId);
-        await startChatVoiceRecording(matched.chatId);
-        setIsMicMinimized(true);
-        const resp = `Starting voice message for ${matched.name}.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      } else if (activeChatId && !extractedName) {
-        setIsChatModalOpen(true);
-        await startChatVoiceRecording(activeChatId);
-        setIsMicMinimized(true);
-        const resp = "Starting voice message.";
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      } else {
-        pendingVoiceActionRef.current = { type: 'voice_message_recipient' };
-        speakVoiceResponse("Who would you like to send a voice message to?");
-        toast.info("Who would you like to send a voice message to?");
-        return;
-      }
-    }
-
-    // G. Permissions Guard: Friday cannot open add or edit functions EXCEPT chat modals and allowed voice commands
-    const isChatModalIntent = 
-      lower.includes("group") || 
-      lower.includes("chat") || 
-      lower.includes("message") || 
-      lower.includes("text") || 
-      lower.includes("call") ||
-      lower.includes("action");
-
-    const isAddOrEditIntent = 
-      /\b(add|create|new|edit|update|modify|delete|remove)\b/.test(lower);
-
-    if (isAddOrEditIntent && !isChatModalIntent) {
-      const resp = "I don't have permission to open add or edit functions.";
-      speakVoiceResponse(resp);
-      toast.error(resp);
-      return;
-    }
-
-    // H. Chat Modals (Allowed)
-    if (lower.includes("group")) {
-      setIsGroupMode(true);
-      setSelectedParticipants([]);
-      setNewGroupName("");
-      setNewGroupDescription("");
-      setIsNewChatOpen(true);
-      setIsMicMinimized(true);
-      const resp = "Opening new group creation modal.";
-      speakVoiceResponse(resp);
-      toast.success(resp);
-      return;
-    }
-
-    if (lower.includes("start a new chat") || lower.includes("new chat") || lower.includes("start a chat")) {
-      setIsGroupMode(false);
-      setIsNewChatOpen(true);
-      setIsMicMinimized(true);
-      const resp = "Opening new chat modal.";
-      speakVoiceResponse(resp);
-      toast.success(resp);
-      return;
-    }
-
-    // I. Lock / Unlock User Room Voice Command
-    if (
-      lower.includes("lock room") || lower.includes("lock my room") || lower.includes("lock the room") || lower.includes("lock user room") ||
-      lower.includes("unlock room") || lower.includes("unlock my room") || lower.includes("unlock the room") || lower.includes("unlock user room") ||
-      lower === "lock room" || lower === "unlock room"
-    ) {
-      const isUnlockIntent = lower.includes("unlock");
-      const userRoomId = selectedUserRoomId || (userRooms && userRooms[0] ? userRooms[0].id.toString() : 'bedroom');
-
-      setActiveView('user-room');
-      if (!selectedUserRoomId && userRooms && userRooms.length > 0) {
-        setSelectedUserRoomId(userRooms[0].id);
-      }
-
-      await toggleRoomLock(userRoomId);
-      setIsMicMinimized(true);
-      const resp = isUnlockIntent ? "Unlocking room." : "Locking room.";
-      speakVoiceResponse(resp);
-      return;
-    }
-
-    // J. Start/Play Action and Pause/End/Stop Action
-    if (
-      lower.includes("play action") || lower.includes("start action") || lower.includes("run action") || lower.includes("trigger action") ||
-      lower.includes("pause action") || lower.includes("stop action") || lower.includes("end action") || lower.includes("deactivate action") ||
-      lower.startsWith("play ") || lower.startsWith("run ") || lower.startsWith("trigger ") || lower.startsWith("start ") || lower.startsWith("pause ") || lower.startsWith("stop ") || lower.startsWith("end ")
-    ) {
-      const isStartIntent = lower.includes("play") || lower.includes("start") || lower.includes("run") || lower.includes("trigger");
-      const targetActionName = lower
-        .replace(/^play\s+action\s+/i, "")
-        .replace(/^start\s+action\s+/i, "")
-        .replace(/^run\s+action\s+/i, "")
-        .replace(/^trigger\s+action\s+/i, "")
-        .replace(/^pause\s+action\s+/i, "")
-        .replace(/^stop\s+action\s+/i, "")
-        .replace(/^end\s+action\s+/i, "")
-        .replace(/^deactivate\s+action\s+/i, "")
-        .replace(/^play\s+/i, "")
-        .replace(/^start\s+/i, "")
-        .replace(/^run\s+/i, "")
-        .replace(/^trigger\s+/i, "")
-        .replace(/^pause\s+/i, "")
-        .replace(/^stop\s+/i, "")
-        .replace(/^end\s+/i, "")
-        .replace(/^the\s+/i, "")
-        .trim();
-
-      if (targetActionName) {
-        const matchedAction = (actions || []).find(a => 
-          a.actionName.toLowerCase() === targetActionName.toLowerCase() ||
-          a.actionName.toLowerCase().includes(targetActionName.toLowerCase()) ||
-          targetActionName.toLowerCase().includes(a.actionName.toLowerCase())
-        );
-
-        if (matchedAction) {
-          setActions(prev => prev.map(a => a.id === matchedAction.id ? { ...a, actionActive: isStartIntent } : a));
-          
-          try {
-            await apiFetch(`/Action/ActivateDeactivateAction?id=${matchedAction.id}`, {
-              method: 'POST',
-              body: ''
-            });
-          } catch (err: any) {
-            console.error("Failed to toggle action", err);
-          }
-
-          setActiveView('facility-actions');
-          setIsMicMinimized(true);
-          const resp = `${isStartIntent ? 'Playing' : 'Stopping'} action ${matchedAction.actionName}.`;
-          speakVoiceResponse(resp);
-          toast.success(resp);
-          return;
-        }
-      }
-    }
-
-    // K. Voice Navigation
-    const navMap: { keywords: string[]; view: NavView; label: string }[] = [
-      { keywords: ["dashboard", "home screen", "main page", "overview page"], view: 'dashboard', label: 'Dashboard' },
-      { keywords: ["my room", "user room", "my rooms"], view: 'user-room', label: "User Rooms" },
-      { keywords: ["facility overview", "facilities overview", "facilities"], view: 'facility-overview', label: "Facilities Overview" },
-      { keywords: ["facility actions", "actions", "automations", "automation"], view: 'facility-actions', label: "Facility Actions" },
-      { keywords: ["facility appliances", "appliances"], view: 'facility-appliances', label: "Appliances" },
-      { keywords: ["facility cameras", "cameras"], view: 'facility-cameras', label: "Cameras" },
-      { keywords: ["facility doors", "doors"], view: 'facility-doors', label: "Doors" },
-      { keywords: ["facility externals", "externals"], view: 'facility-externals', label: "Externals" },
-      { keywords: ["facility hardware", "hardware"], view: 'facility-hardware', label: "Hardware" },
-      { keywords: ["facility lights", "lights"], view: 'facility-lights', label: "Lights" },
-      { keywords: ["facility windows", "windows"], view: 'facility-windows', label: "Windows" },
-      { keywords: ["facility rooms", "all rooms"], view: 'facility-rooms', label: "Facility Rooms" },
-      { keywords: ["facility sections", "sections"], view: 'facility-sections', label: "Sections" },
-      { keywords: ["contacts", "contact list"], view: 'contacts', label: "Contacts" },
-      { keywords: ["all users", "users", "user list"], view: 'all-users', label: "All Users" },
-      { keywords: ["activity logs", "logs", "history"], view: 'logs', label: "Logs" },
-      { keywords: ["profile", "my profile", "settings"], view: 'profile', label: "Profile & Settings" }
-    ];
-
-    for (const item of navMap) {
-      if (item.keywords.some(kw => lower.includes(kw))) {
-        setActiveView(item.view);
-        setIsMicMinimized(true);
-        const resp = `Navigating to ${item.label}.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      }
-    }
-
-    // L. View Modals (e.g. "show external A")
-    if (lower.includes("external")) {
-      const extClean = lower.replace("show", "").replace("open", "").replace("external", "").replace("the", "").trim();
-      const matchedExt = externals.find(e => 
-        (e.externalName && e.externalName.toLowerCase().includes(extClean)) || 
-        (extClean && e.externalName && extClean.includes(e.externalName.toLowerCase()))
-      ) || externals[0];
-
-      if (matchedExt) {
-        setSelectedExternal(matchedExt);
-        setIsViewExternalOpen(true);
-        setIsMicMinimized(true);
-        const resp = `Showing external ${matchedExt.externalName || 'details'}.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      }
-    }
-
-    // M. Brightness Adjustment
-    if (lower.includes("brightness") || lower.includes("%")) {
-      let pctMatch = lower.match(/(\d+)\s*%/);
-      if (!pctMatch) {
-        pctMatch = lower.match(/(?:to|at)\s*(\d+)/);
-      }
-      if (pctMatch) {
-        const percentage = parseInt(pctMatch[1], 10);
-        let devNameClean = lower
-          .replace(/set|change|adjust/g, "")
-          .replace(/the/g, "")
-          .replace(/brightness/g, "")
-          .replace(/of|for|to/g, "")
-          .replace(pctMatch[0], "")
-          .replace(/%/g, "")
-          .trim();
-
-        const matchedLight = devices.find(d => 
-          d.type === 'light' && 
-          (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
-        );
-
-        if (matchedLight) {
-          const rawId = matchedLight.id.includes('-') ? matchedLight.id.split('-')[1] : matchedLight.id;
-          const lightDto = (lights || []).find(l => l.id.toString() === rawId.toString());
-          const currentIsActive = matchedLight.status === 'on';
-
-          try {
-            await apiFetch('/Light/UpdateLight', {
-              method: 'PUT',
-              body: JSON.stringify({
-                id: parseInt(rawId),
-                isActive: currentIsActive,
-                lightName: lightDto?.lightName || matchedLight.name,
-                brightnessLevel: percentage,
-                roomId: resolveRoomId(lightDto?.roomId, rooms),
-                sectionId: resolveSectionId(lightDto?.sectionId, sections)
-              })
-            });
-            setDevices(prev => prev.map(dev => dev.id === matchedLight.id ? { ...dev, status: 'on', value: percentage } : dev));
-            setLights(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: true, brightnessLevel: percentage } : item));
-            
-            const resp = `Setting brightness of ${matchedLight.name} to ${percentage} percent.`;
-            speakVoiceResponse(resp);
-            toast.success(resp);
-            setIsMicMinimized(true);
-          } catch (err: any) {
-            toast.error(`Failed to update brightness: ${err.message}`);
-          }
-          return;
-        } else {
-          const resp = `I could not find a light matching ${devNameClean || 'that name'}.`;
-          speakVoiceResponse(resp);
-          toast.error(resp);
-          return;
-        }
-      }
-    }
-
-    // N. Door/Window Actions: Lock, Unlock, Open, Close
-    const doorActions = ['lock', 'unlock', 'open', 'close'];
-    let matchedAction: 'lock'|'unlock'|'open'|'close' | null = null;
-    for (const act of doorActions) {
-      if (lower.startsWith(act) || lower.includes(` ${act} `) || lower.endsWith(` ${act}`)) {
-        matchedAction = act as any;
-        break;
-      }
-    }
-
-    if (matchedAction) {
-      const devNameClean = lower
-        .replace(matchedAction, "")
-        .replace(/the/g, "")
-        .trim();
-
-      if (devNameClean.includes("all doors") || devNameClean === "doors" || devNameClean === "all door") {
-        const doorDevs = devices.filter(d => d.type === 'door');
-        for (const dev of doorDevs) {
-          await handleDoorAction(dev.id, matchedAction);
-        }
-        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing all doors.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        setIsMicMinimized(true);
-        return;
-      }
-
-      if (devNameClean.includes("all windows") || devNameClean === "windows" || devNameClean === "all window") {
-        const winDevs = devices.filter(d => d.type === 'window');
-        for (const dev of winDevs) {
-          await handleDoorAction(dev.id, matchedAction);
-        }
-        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing all windows.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        setIsMicMinimized(true);
-        return;
-      }
-
-      const matchedDev = devices.find(d => 
-        (d.type === 'door' || d.type === 'window') && 
-        (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
-      );
-
-      if (matchedDev) {
-        await handleDoorAction(matchedDev.id, matchedAction);
-        const resp = `${matchedAction.charAt(0).toUpperCase() + matchedAction.slice(1)}ing ${matchedDev.name}.`;
-        speakVoiceResponse(resp);
-        setIsMicMinimized(true);
-        return;
-      } else {
-        const resp = `I could not find a door or window matching ${devNameClean || 'that name'}.`;
-        speakVoiceResponse(resp);
-        toast.error(resp);
-        return;
-      }
-    }
-
-    // O. Put on, turn on, put off, turn off, switch on, switch off
-    const turnOnWords = ['turn on', 'put on', 'switch on', 'activate', 'enable', 'open camera'];
-    const turnOffWords = ['turn off', 'put off', 'switch off', 'deactivate', 'disable', 'close camera'];
-    let isTurnOn = false;
-    let isTurnOff = false;
-    let activeWord = '';
-
-    for (const w of turnOnWords) {
-      if (lower.includes(w)) {
-        isTurnOn = true;
-        activeWord = w;
-        break;
-      }
-    }
-    if (!isTurnOn) {
-      for (const w of turnOffWords) {
-        if (lower.includes(w)) {
-          isTurnOff = true;
-          activeWord = w;
-          break;
-        }
-      }
-    }
-
-    if (isTurnOn || isTurnOff) {
-      const devNameClean = lower
-        .replace(activeWord, "")
-        .replace(/the/g, "")
-        .trim();
-
-      const matchedDev = devices.find(d => 
-        (d.type === 'light' || d.type === 'appliance' || d.type === 'camera' || d.type === 'external' as any) && 
-        (d.name.toLowerCase().includes(devNameClean) || devNameClean.includes(d.name.toLowerCase()))
-      );
-
-      if (matchedDev) {
-        const isCurrentlyOn = matchedDev.status === 'on' || matchedDev.status === 'active';
-        if (isTurnOn && isCurrentlyOn) {
-          const resp = `${matchedDev.name} is already on.`;
-          speakVoiceResponse(resp);
-          toast.info(resp);
-          setIsMicMinimized(true);
-          return;
-        }
-        if (isTurnOff && !isCurrentlyOn) {
-          const resp = `${matchedDev.name} is already off.`;
-          speakVoiceResponse(resp);
-          toast.info(resp);
-          setIsMicMinimized(true);
-          return;
-        }
-
-        await handleToggle(matchedDev.id);
-        const resp = `Turning ${isTurnOn ? 'on' : 'off'} ${matchedDev.name}.`;
-        speakVoiceResponse(resp);
-        setIsMicMinimized(true);
-        return;
-      } else {
-        const resp = `I could not find a device matching ${devNameClean || 'that name'}.`;
-        speakVoiceResponse(resp);
-        toast.error(resp);
-        return;
-      }
-    }
-
-    // P. Chat modal opening & messaging
-    if (
-      lower === "open chat" || lower === "open chats" || lower === "show chats" || lower === "show chat" ||
-      lower === "open message" || lower === "open messages" || lower === "show message" || lower === "show messages" ||
-      lower === "open chat modal" || lower === "chat modal" || lower === "chats" || lower === "chat" || lower === "messages" ||
-      lower.includes("open chat") || lower.includes("open chats") || lower.includes("open messages") || lower.includes("open messaging") ||
-      lower.includes("want to message someone") || lower.includes("message someone") || lower.includes("send a message to someone")
-    ) {
-      setIsChatModalOpen(true);
-      setIsMicMinimized(true);
-      const resp = "Opening chats.";
-      speakVoiceResponse(resp);
-      toast.success(resp);
-      return;
-    }
-
-    // Q. Send message or send voice note
-    if (
-      lower === "send" || lower === "send message" || lower === "send text" || lower === "send voice note" || lower === "send voice record" ||
-      lower.includes("send message") || lower.includes("send voice note") || lower.includes("send text") || lower.includes("send voice record")
-    ) {
-      if (recordingState !== 'inactive') {
-        await sendVoiceNote();
-        setIsMicMinimized(true);
-        const resp = "Sending voice message.";
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      } else if (chatInput.trim() && activeChatId !== null) {
-        await handleSendMessage({
-          chatId: activeChatId,
-          content: chatInput.trim(),
-          type: MessageType.Text,
-          attachments: []
-        });
-        setChatInput("");
-        setIsMicMinimized(true);
-        const resp = "Sending message.";
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        return;
-      }
-    }
-
-    // R. Message a User or Group
-    if (lower.includes("message") || lower.includes("text") || lower.includes("chat with") || lower.includes("send message to") || lower.includes("send text to")) {
-      let matchedGroup: ChatDto | null = null;
-      for (const c of (chats || [])) {
-        if (c.isGroup && c.name && lower.includes(c.name.toLowerCase())) {
-          matchedGroup = c;
-          break;
-        }
-      }
-
-      if (matchedGroup) {
-        setIsChatModalOpen(true);
-        setActiveChatId(matchedGroup.id);
-
-        let msgText = '';
-        const separators = ['saying', 'say', 'to say', ':', 'message', 'text'];
-        for (const sep of separators) {
-          const parts = lower.split(sep);
-          if (parts.length > 1) {
-            const possibleMsg = parts.slice(1).join(sep).trim();
-            if (possibleMsg.length > 0 && !matchedGroup.name.toLowerCase().includes(possibleMsg)) {
-              msgText = possibleMsg;
-              break;
-            }
-          }
-        }
-
-        if (msgText) {
-          msgText = msgText.charAt(0).toUpperCase() + msgText.slice(1);
-          setChatInput(msgText);
-          if (lower.includes("send")) {
-            setTimeout(() => {
-              handleSendMessage({
-                chatId: matchedGroup.id,
-                content: msgText,
-                type: MessageType.Text,
-                attachments: []
-              });
-            }, 150);
-          }
-        }
-
-        const resp = `Opening chat for group ${matchedGroup.name}.`;
-        speakVoiceResponse(resp);
-        toast.success(resp);
-        setIsMicMinimized(true);
-        return;
-      }
-
-      let matchedUser: any = null;
-      for (const u of (allUsers || [])) {
-        const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
-        const first = u.getPersonDetailsDto.firstName.toLowerCase();
-        if (lower.includes(fullName) || (first.length > 2 && lower.includes(first))) {
-          matchedUser = u;
-          break;
-        }
-      }
-
-      if (matchedUser) {
-        const targetName = `${matchedUser.getPersonDetailsDto.firstName} ${matchedUser.getPersonDetailsDto.lastName}`;
-        const existingChat = (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === matchedUser.id));
-        let cId = existingChat?.id;
-
-        if (!cId) {
-          try {
-            const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${matchedUser.id}`, { method: 'POST' });
-            await loadMyChats(true);
-            cId = response?.id || (chats || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === matchedUser.id))?.id;
-          } catch (err) {}
-        }
-
-        if (cId) {
-          setIsChatModalOpen(true);
-          setActiveChatId(cId);
-
-          let msgText = '';
-          const separators = ['saying', 'say', 'to say', ':', 'message', 'text'];
-          for (const sep of separators) {
-            const parts = lower.split(sep);
-            if (parts.length > 1) {
-              const possibleMsg = parts.slice(1).join(sep).trim();
-              if (possibleMsg.length > 0 && !matchedUser.getPersonDetailsDto.firstName.toLowerCase().includes(possibleMsg)) {
-                msgText = possibleMsg;
-                break;
-              }
-            }
-          }
-
-          if (msgText) {
-            msgText = msgText.charAt(0).toUpperCase() + msgText.slice(1);
-            setChatInput(msgText);
-            if (lower.includes("send")) {
-              setTimeout(() => {
-                handleSendMessage({
-                  chatId: cId,
-                  content: msgText,
-                  type: MessageType.Text,
-                  attachments: []
-                });
-              }, 150);
-            }
-          }
-
-          const resp = `Opening chat with ${targetName}.`;
-          speakVoiceResponse(resp);
-          toast.success(resp);
-          setIsMicMinimized(true);
-          return;
-        }
-      }
-    }
-
-    // Question Answering Fallback via Friday AI
-    try {
-      const askRes = await fetch("/api/assistant/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: lower,
-          context: `User: ${userProfile?.getPersonDetailsDto?.firstName || 'User'}, Devices count: ${devices.length}`
-        })
-      });
-      const askData = await askRes.json();
-      if (askData && askData.answer) {
-        speakVoiceResponse(askData.answer);
-        toast.info(askData.answer);
-        setIsMicMinimized(true);
-        return;
-      }
-    } catch (err) {
-      console.error("Error asking Friday AI:", err);
-    }
-
-    const defaultResp = `I heard: "${lower}". How can I assist you?`;
-    speakVoiceResponse(defaultResp);
-    toast.info(defaultResp);
-    setIsMicMinimized(true);
-    return;
-  };
-
-
-  React.useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    speechRecognitionRef.current = recognition;
-
-    recognition.onresult = (event: any) => {
-      // Guard against AI assistant feeding back its own voice output
-      const now = Date.now();
-      const isAssistantActive = isFridaySpeakingRef.current || 
-        (now - lastFridaySpeakingEndedRef.current < 2500) || 
-        (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking);
-
-      if (isAssistantActive) {
-        return;
-      }
-
-      let currentTranscript = '';
-      let isFinalResult = false;
-      let minConfidence = 1.0;
-      let hasConfidenceInfo = false;
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const item = event.results[i][0];
-        const conf = (item && typeof item.confidence === 'number' && item.confidence > 0) ? item.confidence : undefined;
-        if (conf !== undefined) {
-          hasConfidenceInfo = true;
-          minConfidence = Math.min(minConfidence, conf);
-        }
-
-        // Skip background chatter or low-confidence audio segments
-        if (conf !== undefined && conf < 0.42 && event.results[i].isFinal) {
-          continue;
-        }
-
-        currentTranscript += item.transcript;
-        if (event.results[i].isFinal) {
-          isFinalResult = true;
-        }
-      }
-
-      // If confidence score indicates background chatter / noise, ignore it
-      if (hasConfidenceInfo && minConfidence < 0.42 && isFinalResult) {
-        return;
-      }
-
-      const lowerTranscript = currentTranscript.toLowerCase().trim();
-
-      // Echo prevention check against known assistant phrases and recent spoken responses
-      const assistantPhrases = [
-        'how can i assist you',
-        'i heard',
-        'starting voice message',
-        'starting voice call',
-        'starting video call',
-        'maximizing friday assistant',
-        'minimizing friday assistant',
-        'microphone muted',
-        'microphone unmuted',
-        'camera enabled',
-        'camera disabled',
-        'there is no active call right now',
-        'opening screensaver',
-        'exiting screensaver',
-        'signing you out',
-        'who would you like to',
-        'turned on',
-        'turned off',
-        'friday assistant closed',
-        'sending voice message',
-        'playing recorded voice message',
-        'couldn\'t find a contact'
-      ];
-
-      const cleanCandidate = lowerTranscript.replace(/^hey friday\s*/, '').replace(/[^\w\s]/g, '').trim();
-      const isAssistantEcho = assistantPhrases.some(p => cleanCandidate.includes(p) || p.includes(cleanCandidate)) ||
-        recentSpokenAssistantPhrasesRef.current.some(recent => {
-          const cleanRecent = recent.toLowerCase().replace(/[^\w\s]/g, '').trim();
-          if (!cleanRecent || !cleanCandidate) return false;
-          return cleanRecent.includes(cleanCandidate) || cleanCandidate.includes(cleanRecent) ||
-            (cleanCandidate.length > 5 && cleanRecent.startsWith(cleanCandidate.substring(0, 15)));
-        });
-
-      if (isAssistantEcho) {
-        return;
-      }
-
-      setTranscription(currentTranscript);
-      
-      if (lowerTranscript.includes("hey friday") && isLoggedIn) {
-         if (!isMicOverlayActive) {
-            setIsMicOverlayActive(true);
-            setIsHeaderMicMuted(false);
-            
-            // Check if call is active
-            if (activeCall) {
-               wasCallMutedBeforeHeyFridayRef.current = isCallMuted;
-               if (!isCallMuted) {
-                  // Mute call
-                  handleToggleCallMicrophone();
-               }
-            }
-         }
-      }
-
-      if (lowerTranscript.includes("dispose")) {
-         if (isMicOverlayActive) {
-            setIsMicOverlayActive(false);
-            setIsHeaderMicMuted(true);
-            
-            // Unmute call if it wasn't muted before
-            if (activeCall && !wasCallMutedBeforeHeyFridayRef.current && isCallMuted) {
-               handleToggleCallMicrophone();
-            }
-         }
-      }
-
-      if (isFinalResult && isMicOverlayActive && currentTranscript.trim().length > 0) {
-        const clean = lowerTranscript.replace("hey friday", "").trim();
-        // Filter out short background noise fillers
-        const cleanNoNoise = clean.replace(/\b(um|uh|hmm|mhm|shh|eh|ahh)\b/gi, '').trim();
-        if (cleanNoNoise.length > 1 && clean !== "dispose") {
-          handleVoiceCommand(cleanNoNoise);
-        }
-      }
-    };
-
-    recognition.onend = () => {
-      if (isFridaySpeakingRef.current || (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking)) {
-        return;
-      }
-      try {
-        recognition.start();
-      } catch (e) {}
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {}
-
-    return () => {
-      recognition.onend = null;
-      recognition.stop();
-    };
-  }, [isMicOverlayActive, activeCall, isCallMuted, devices, lights, doors, allUsers, chats]);
-
-  if (!isLoggedIn) {
-    return (
-      <>
-        <Toaster position="bottom-right" richColors />
-        <LoginScreen 
-          onLoginSuccess={handleLoginSuccess} 
-          theme={theme}
-          toggleTheme={toggleTheme}
-        />
-      </>
-    );
-  }
-
-  if (!userProfile) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-background text-slate-500 dark:text-zinc-400 flex-col gap-4">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <p className="text-sm font-medium tracking-tight">Initializing HanssonHub Profile...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
-      <Toaster position="bottom-right" richColors />
-      <Sidebar 
-        activeView={activeView} 
-        onViewChange={setActiveView} 
-        rooms={rooms}
-        sections={sections}
-        userProfile={userProfile}
-        isCollapsed={isSidebarCollapsed}
-      />
-      
-      <main className="flex flex-1 flex-col min-h-0 overflow-hidden relative">
-
-        {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b px-8 bg-card/30 backdrop-blur-md z-10 shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 mr-4 mt-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Shield className="h-5 w-5" />
-              </div>
-              <span className="text-lg font-bold tracking-tight">HanssonHub</span>
-            </div>
-            <div className="h-8 w-[1px] bg-border mr-4" />
-            <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
-              <HeaderIcon className="h-4 w-4" />
-              <span className="text-sm font-medium">
-                {headerTitle}
-              </span>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Muted div with rounded edges containing theme toggle, microphone button, and chat button */}
-            <div className="flex items-center gap-2.5 bg-muted/80 hover:bg-muted/90 p-2 px-3 rounded-full border border-border/50 shadow-2xs transition-all">
-              {/* Theme Toggle Button */}
-              <div 
-                onClick={toggleTheme}
-                className="flex items-center bg-background/90 hover:bg-background border border-border/60 rounded-full p-1 cursor-pointer transition-all shadow-2xs gap-0.5 select-none"
-                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              >
-                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'light' ? "bg-amber-500 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
-                  <Sun className="h-3.5 w-3.5" />
-                </div>
-                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'dark' ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
-                  <Moon className="h-3.5 w-3.5" />
-                </div>
-              </div>
-
-              {/* Microphone Button */}
-              <button 
-                className={cn(
-                  "relative rounded-full p-1.5 transition-all flex items-center justify-center border border-border/50 shadow-2xs cursor-pointer overflow-hidden",
-                  isMicOverlayActive 
-                    ? "bg-rose-500/10 border-rose-300 hover:bg-rose-500/20" 
-                    : "bg-background/90 hover:bg-background text-foreground"
-                )}
-                onClick={() => {
-                  if (!isMicOverlayActive) {
-                    setIsMicOverlayActive(true);
-                    setIsHeaderMicMuted(false);
-                  } else {
-                    setIsMicOverlayActive(false);
-                    setIsHeaderMicMuted(true);
-                  }
-                }}
-                title={isMicOverlayActive ? "Stop Friday Assistant" : "Friday AI Assistant"}
-              >
-                <div className="flex items-center justify-center w-5 h-5 overflow-hidden rounded-full">
-                  <DynamicParticleSphere size={20} audioLevel={isMicOverlayActive ? 140 : 0} isIcon={true} />
-                </div>
-              </button>
-
-              {/* Chat Button */}
-              <button 
-                className="relative rounded-full p-1.5 bg-background/90 hover:bg-background text-foreground border border-border/50 shadow-2xs transition-all flex items-center justify-center cursor-pointer"
-                onClick={() => setIsChatModalOpen(true)}
-                title="Chats"
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
-              </button>
-            </div>
-
-            {/* Logout Button */}
-            <motion.button 
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors rounded-xl border-0 outline-none flex items-center justify-center cursor-pointer font-sans group relative"
-              onClick={handleLogout}
-              title="Logout"
-            >
-              <motion.div
-                animate={{ x: [0, 2.5, 0] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-                className="flex items-center justify-center"
-              >
-                <LogOut className="h-5 w-5 group-hover:translate-x-0.5 group-hover:-rotate-6 transition-transform duration-200" />
-              </motion.div>
-            </motion.button>
-          </div>
-        </header>
-        <div className="flex-1 min-h-0 overflow-y-auto relative">
-        <div 
-          className={cn(
-            "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
-            refreshState === 'idle' ? "opacity-0 w-0" : "opacity-100",
-            refreshState === 'loading' ? "bg-black w-[70%]" : 
-            (refreshState === 'success' ? "bg-green-500 w-full" : 
-            (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
-          )}
-        /><div className="p-8 pb-12 min-h-full">
-            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
-              <div className="min-h-full px-2 py-1.5">
-                <AnimatePresence mode="wait">
-                  {renderView()}
-                </AnimatePresence>
-              </div>
-            </PullToRefresh></div></div>
-      </main>
-
-      {/* Add Device Dialog */}
-      <Dialog open={isAddDeviceOpen} onOpenChange={setIsAddDeviceOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              {(() => {
-                return <PlusCircle className="h-5 w-5 text-primary" />;
-              })()}
-              Add New {(() => {
-                const type = activeView.replace('facility-', '');
-                const map: Record<string, string> = {
-                  'appliances': 'Appliance',
-                  'lights': 'Light',
-                  'cameras': 'Camera',
-                  'doors': 'Door',
-                  'windows': 'Window'
-                };
-                return map[type] || 'Device';
-              })()}
-            </DialogTitle>
-          <DialogDescription>
-            Connect a new smart device to your HanssonHub.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="overflow-y-auto max-h-[60vh] pr-4 scrollbar-hide">
-        <div className="grid gap-4 pt-[3px] pb-4 px-1">
-          <div className="grid gap-2">
-            <Label htmlFor="name" className="flex items-center gap-2">
-              {(() => {
-                const type = activeView.replace('facility-', '');
-                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
-                return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
-              })()}
-              {(() => {
-                const type = activeView.replace('facility-', '');
-                const map: Record<string, string> = {
-                  'appliances': 'Appliance Name',
-                  'lights': 'Light Name',
-                  'cameras': 'Camera Name',
-                  'doors': 'Door Name',
-                  'windows': 'Window Name'
-                };
-                  return map[type] || 'Device Name';
-                })()}
-              </Label>
-              <Input autoComplete="off" id="name" 
-                placeholder={`e.g. ${(() => {
-                  const type = activeView.replace('facility-', '');
-                  if (type === 'lights') return 'Desk Lamp';
-                  if (type === 'doors') return 'Main Entrance';
-                  if (type === 'cameras') return 'Backyard Camera';
-                  if (type === 'appliances') return 'Coffee Maker';
-                  return 'My Device';
-                })()}`}
-                value={newDevice.name}
-                onChange={(e) => setNewDevice(prev => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
-
-            {activeView === 'facility-appliances' && (
-              <div className="grid gap-2">
-                <Label htmlFor="appliance-type" className="flex items-center gap-2">
-                  <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Appliance Type
-                </Label>
-                <Select 
-                  value={newDevice.applianceType?.toString() || '1'} 
-                  onValueChange={(v) => setNewDevice(prev => ({ ...prev, applianceType: parseInt(v) }))}
-                >
-                  <SelectTrigger id="appliance-type">
-                    <SelectValue placeholder="Select appliance type">
-                      {((appNamesDetailList?.applianceType || []).find((t: any) => t.id.toString() === (newDevice.applianceType?.toString() || '1'))?.name) || 'Select appliance type'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(appNamesDetailList?.applianceType || []).map(t => (
-                      <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {activeView === 'facility-cameras' && (
-              <div className="space-y-4 pt-2 border-t mt-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                    <Globe className="h-3 w-3" />
-                    IP Address
-                  </Label>
-                  <Input autoComplete="off" id="ipAddress" 
-                    type="text"
-                    placeholder="e.g. 192.168.1.100"
-                    value={newDevice.ipAddress || ''}
-                    onChange={(e) => setNewDevice(prev => ({ ...prev, ipAddress: e.target.value }))}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                      <UserCircle className="h-3 w-3" />
-                      Username
-                    </Label>
-                    <Input autoComplete="off" id="username" 
-                      type="text"
-                      placeholder="admin"
-                      value={newDevice.username || ''}
-                      onChange={(e) => setNewDevice(prev => ({ ...prev, username: e.target.value }))}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                      <Shield className="h-3 w-3" />
-                      Password
-                    </Label>
-                    <Input autoComplete="off" id="password" 
-                      type="password"
-                      placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
-                      value={newDevice.password || ''}
-                      onChange={(e) => setNewDevice(prev => ({ ...prev, password: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                      <Video className="h-3 w-3" />
-                      Stream Path
-                    </Label>
-                    <Input autoComplete="off" id="streamPath" 
-                      type="text"
-                      placeholder="/live"
-                      value={newDevice.streamPath || ''}
-                      onChange={(e) => setNewDevice(prev => ({ ...prev, streamPath: e.target.value }))}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                      <Settings2 className="h-3 w-3" />
-                      Port
-                    </Label>
-                    <Input autoComplete="off" id="port" 
-                      type="number"
-                      placeholder="80"
-                      value={newDevice.port !== undefined ? newDevice.port : ''}
-                      onChange={(e) => setNewDevice(prev => ({ ...prev, port: parseInt(e.target.value) || 0 }))}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeView === 'facility-doors' && (
-              <div className="grid gap-2">
-                <Label htmlFor="door-type" className="flex items-center gap-2">
-                  <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Door Type
-                </Label>
-                <Select 
-                  value={newDevice.doorType?.toString() || '1'} 
-                  onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: parseInt(v) }))}
-                >
-                  <SelectTrigger id="door-type">
-                    <SelectValue placeholder="Select type">
-                      {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (newDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(appNamesDetailList?.doorType || []).map((dt: any) => (
-                      <SelectItem key={dt.id} value={dt.id.toString()}>
-                        {dt.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label htmlFor="section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Section Name (Optional)
-              </Label>
-              <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
-              >
-                <SelectTrigger id="section">
-                  <SelectValue placeholder="Select section">
-                    {newDevice.section && newDevice.section !== 'none'
-                      ? ((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Select section')
-                      : 'No Section'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Section</SelectItem>
-                  {(sections || []).map(section => (
-                    <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room" className="flex items-center gap-2">
-                <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Room Name (Optional)
-              </Label>
-              <Select 
-                value={newDevice.room || 'none'} 
-                onValueChange={(v) => {
-                  if (v === 'none') {
-                    setNewDevice(prev => ({ ...prev, room: undefined }));
-                  } else {
-                    const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                    const sectId = getRoomSectionId(v);
-                    setNewDevice(prev => ({ 
-                      ...prev, 
-                      room: v,
-                      section: sectId || undefined
-                    }));
-                  }
-                }}
-              >
-                <SelectTrigger id="room">
-                  <SelectValue placeholder="Select room">
-                    {newDevice.room && newDevice.room !== 'none'
-                      ? ((rooms || []).find(r => r.id.toString() === newDevice.room?.toString())?.name || 'Select room')
-                      : 'No Room'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Room</SelectItem>
-                  {newDevice.section && newDevice.section !== 'none' ? (
-                    <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                        Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
-                      </div>
-                      {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                        Unassigned Rooms
-                      </div>
-                      {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                      ))}
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-              {!newDevice.section || newDevice.section === 'none' ? (
-                <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
-              ) : (
-                <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'section')}</span>
-              )}
-            </div>
-          </div>
-          </div>
-          <DialogFooter>
-            
-            <Button onClick={handleAddDevice} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add {(() => {
-                const type = activeView.replace('facility-', '');
-                const map: Record<string, string> = {
-                  'appliances': 'Appliance',
-                  'lights': 'Light',
-                  'cameras': 'Camera',
-                  'doors': 'Door',
-                  'windows': 'Window'
-                };
-                return map[type] || 'Device';
-              })()}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Room Dialog */}
-      <Dialog open={isAddRoomOpen} onOpenChange={setIsAddRoomOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Sofa className="h-5 w-5 text-primary" />
-              Add New Room
-            </DialogTitle>
-            <DialogDescription>
-              Create a new room in your HanssonHub.
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh] overflow-y-auto px-1">
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="room-name" className="flex items-center gap-2">
-                <Edit3 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Room Name
-              </Label>
-              <Input autoComplete="off" id="room-name" 
-                placeholder="e.g. Study" 
-                value={newRoom.name}
-                onChange={(e) => setNewRoom(prev => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room-person" className="flex items-center gap-2">
-                <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Person Name
-              </Label>
-              <Select 
-                value={newRoom.personId?.toString() || 'none'} 
-                onValueChange={(v) => setNewRoom(prev => ({ ...prev, personId: v === 'none' ? undefined : parseInt(v) }))}
-              >
-                <SelectTrigger id="room-person">
-                  <SelectValue placeholder="Select person">
-                    {newRoom.personId && newRoom.personId !== 'none'
-                      ? (() => {
-                          const u = (allUsers || []).find(user => user.id.toString() === newRoom.personId?.toString());
-                          return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
-                        })()
-                      : 'No Person Assigned'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Person Assigned</SelectItem>
-                  {(allUsers || []).map(u => (
-                    <SelectItem key={u.id} value={u.id.toString()}>
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
-                          <img 
-                            src={u.getPersonDetailsDto.imageUrl || undefined} 
-                            alt={u.getPersonDetailsDto.firstName} 
-                            className="h-full w-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room-section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Section Name (Optional)
-              </Label>
-              <Select value={newRoom.section || 'none'} onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
-              >
-                <SelectTrigger id="room-section">
-                  <SelectValue placeholder="Select section">
-                    {newRoom.section && newRoom.section !== 'none'
-                      ? ((sections || []).find(s => s.id.toString() === newRoom.section?.toString())?.name || 'Select section')
-                      : 'No Section'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Section</SelectItem>
-                  {(sections || []).map(section => (
-                    <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room-icon" className="flex items-center gap-2">
-                <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Icon
-              </Label>
-              <Select 
-                value={newRoom.icon} 
-                onValueChange={(v) => setNewRoom(prev => ({ ...prev, icon: v }))}
-              >
-                <SelectTrigger id="room-icon">
-                  <SelectValue placeholder="Select icon" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Sofa">Living Room (Sofa)</SelectItem>
-                  <SelectItem value="Utensils">Kitchen (Utensils)</SelectItem>
-                  <SelectItem value="Bed">Bedroom (Bed)</SelectItem>
-                  <SelectItem value="Bath">Bathroom (Bath)</SelectItem>
-                  <SelectItem value="Car">Garage (Car)</SelectItem>
-                  <SelectItem value="Trees">Outdoor (Trees)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
-              <div className="space-y-0.5">
-                <Label htmlFor="room-hidden" className="text-sm font-medium flex items-center gap-2">
-                  <EyeOff className="h-3.5 w-3.5" /> Hidden Room
-                </Label>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
-              </div>
-              <Switch 
-                id="room-hidden" 
-                checked={newRoom.isHidden || false} 
-                onCheckedChange={(checked) => setNewRoom(prev => ({ ...prev, isHidden: checked }))} 
-              />
-            </div>
-          </div>
-          </ScrollArea>
-          <DialogFooter>
-            
-            <Button onClick={handleAddRoom} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add Room
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Edit3 className="h-5 w-5 text-primary" />
-              Edit {editingSection?.name || 'Section'}
-            </DialogTitle>
-            <DialogDescription>Update the details and visibility of this section.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
-                Section Name
-              </Label>
-              <Input autoComplete="off" id="edit-sec-name" 
-                value={editingSection?.name || ''}
-                onChange={(e) => setEditingSection(prev => prev ? { ...prev, name: e.target.value } : null)}
-              />
-            </div>
-            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
-              <div className="space-y-0.5">
-                <Label htmlFor="edit-sec-hidden" className="text-sm font-medium flex items-center gap-2">
-                  <EyeOff className="h-3.5 w-3.5" /> Hidden Section
-                </Label>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
-              </div>
-              <Switch 
-                id="edit-sec-hidden" 
-                checked={editingSection?.isHidden || false} 
-                onCheckedChange={(checked) => setEditingSection(prev => prev ? { ...prev, isHidden: checked } : null)} 
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            
-            <Button onClick={() => {
-              if (editingSection?.id && editingSection.name) {
-                requestAuth(async () => {
-                  try {
-                    let idVal = editingSection.dbId;
-                    if (!idVal && editingSection.id) {
-                      const match = editingSection.id.toString().match(/\d+/);
-                      if (match) idVal = parseInt(match[0], 10);
-                    }
-                    if (!idVal) {
-                      const matchedSec = (sections || []).find(s => s.id?.toString() === editingSection.id?.toString() || s.name === editingSection.name);
-                      if (matchedSec) idVal = matchedSec.dbId;
-                    }
-                    if (!idVal) {
-                      idVal = Number(editingSection.id);
-                    }
-                    const nameVal = encodeURIComponent(editingSection.name);
-                    const isHiddenVal = editingSection.isHidden ? 'true' : 'false';
-                    const url = `/Section/UpdateSection?Id=${idVal}&SectionName=${nameVal}&IsHidden=${isHiddenVal}`;
-                    
-                    await apiFetch(url, { method: 'PUT' });
-                    setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, isHidden: editingSection.isHidden }) : s));
-                    setIsEditSectionOpen(false);
-                    toast.success("Section updated successfully");
-                  } catch (err: any) {
-                    console.error("Failed to update section", err);
-                    toast.error(`Failed to update section: ${err.message}`);
-                  }
-                });
-              }
-            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Password Change Dialog */}
-      <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
-        <DialogContent className="sm:max-w-[400px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-              <Key className="h-5 w-5 text-blue-500" />
-              Change Password
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">
-              Update your account password. You will need your current password and your authorization code.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="password-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
-              <Input autoComplete="off" id="password-token" 
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                className={cn("bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.token ? "border-b-green-400" : "")}
-                value={passwordData.token}
-                onChange={(e) => setPasswordData(prev => ({ ...prev, token: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="new-password" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Lock className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> New Password</Label>
-              <div className="relative">
-                <Input autoComplete="off" id="new-password" 
-                  type={showNewPassword ? "text" : "password"}
-                  className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.newPassword ? "border-b-green-400" : "")}
-                  value={passwordData.newPassword}
-                  onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                >
-                  {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password-auth-code" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Authorization Code</Label>
-              <div className="relative">
-                <Input autoComplete="off" id="password-auth-code" 
-                  type={showAuthCode ? "text" : "password"}
-                  placeholder="000000"
-                  maxLength={6}
-                  className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", passwordData.authorizationCode.length === 6 ? "border-b-green-400" : "")}
-                  value={passwordData.authorizationCode}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '');
-                    setPasswordData(prev => ({ ...prev, authorizationCode: val }));
-                  }}
-                />
-                 <button 
-                  type="button" 
-                  onClick={() => setShowAuthCode(!showAuthCode)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                >
-                  {showAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={async () => {
-              try {
-                await apiFetch('/User/ChangePassword', {
-                  method: 'PUT',
-                  body: JSON.stringify({
-                    id: userProfile?.getUserDto?.id || 0,
-                    userName: userProfile?.getUserDto?.userName || "",
-                    password: passwordData.token,
-                    newPassword: passwordData.newPassword,
-                    tokenCode: passwordData.token,
-                    authorizationCode: passwordData.authorizationCode
-                  })
-                });
-                toast.success('Password updated successfully');
-                setIsPasswordModalOpen(false);
-                setPasswordData({ token: '', newPassword: '', authorizationCode: '' });
-              } catch (err: any) {
-                console.error("Failed to update password", err);
-                toast.error(`Update failed: ${err.message}`);
-              }
-            }} className="bg-transparent border-2 border-slate-200 dark:border-zinc-800 text-black dark:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-900 flex items-center gap-2">
-              <Key className="h-4 w-4 text-blue-600 dark:text-zinc-300" />
-              Update Password
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Authorization Code Dialog */}
-      <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
-        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 dark:border-yellow-600 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 shadow-lg shadow-yellow-100/50 dark:shadow-none">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 font-bold">
-              <ShieldAlert className="h-5 w-5" />
-              Change Authorization Code
-            </DialogTitle>
-            <DialogDescription className="text-yellow-800/80 dark:text-yellow-200 font-medium">
-              This is a sensitive operation. Please enter your credentials to authorize the action.
-            </DialogDescription>
-          </DialogHeader>
-        <div className="grid gap-4 pt-[3px] pb-4">
-          <div className="grid gap-2">
-            <Label htmlFor="auth-pwd" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Lock className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Login Password</Label>
-            <div className="relative">
-              <Input autoComplete="off" id="auth-pwd" 
-                type={showAuthPwd ? "text" : "password"}
-                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.password ? "border-b-green-400" : "")}
-                value={authCodeData.password}
-                onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
-              />
-              <button 
-                type="button" 
-                onClick={() => setShowAuthPwd(!showAuthPwd)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-              >
-                {showAuthPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="auth-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
-            <Input autoComplete="off" id="auth-token" 
-              placeholder="XXXX-XXXX-XXXX-XXXX"
-              className={cn("bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.token ? "border-b-green-400" : "")}
-              value={authCodeData.token}
-              onChange={(e) => setAuthCodeData(prev => ({ ...prev, token: e.target.value }))}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="new-auth" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> New Authorization Code</Label>
-            <div className="relative">
-              <Input autoComplete="off" id="new-auth" 
-                type={showNewAuthCode ? "text" : "password"}
-                placeholder="000000"
-                maxLength={6}
-                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
-                value={authCodeData.newAuthorizationCode}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, '');
-                  setAuthCodeData(prev => ({ ...prev, newAuthorizationCode: val }));
-                }}
-              />
-               <button 
-                type="button" 
-                onClick={() => setShowNewAuthCode(!showNewAuthCode)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-              >
-                {showNewAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-        </div>
-          <DialogFooter>
-            <Button 
-               onClick={async () => {
-                if (pendingUserAction) {
-                  const authPayload = {
-                     id: pendingUserAction.userId || 0,
-                     userName: userProfile?.getUserDto?.userName || "",
-                     password: authCodeData.password,
-                     tokenCode: authCodeData.token,
-                     authorizationCode: authCodeData.newAuthorizationCode
-                  };
-                  try {
-                    if (pendingUserAction.type === 'delete') {
-                      await apiFetch(`/Person/DeletePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
-                      setAllUsers(prev => prev.filter(u => u.id !== pendingUserAction.userId));
-                      toast.success("User deleted safely");
-                    } else if (pendingUserAction.type === 'disable' || pendingUserAction.type === 'toggle-disable') {
-                      await apiFetch(`/Person/DisablePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
-                      setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { 
-                        ...u, 
-                        disabled: !u.disabled, 
-                        getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
-                      } : u));
-                      toast.success(`User status updated via API`);
-                    } else if (pendingUserAction.type === 'delete-address') {
-                      setUserProfile(p => ({
-                        ...p,
-                        getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: (p.getPersonDetailsDto.getAddressDtos || []).filter((_, i) => i !== pendingUserAction.index) }
-                      }));
-                      toast.success("Address removed locally");
-                    } else if (pendingUserAction.type === 'delete-contact') {
-                      setUserProfile(p => ({
-                        ...p,
-                        getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: (p.getPersonDetailsDto.getContactDetailsDtos || []).filter((_, i) => i !== pendingUserAction.index) }
-                      }));
-                      toast.success("Contact removed locally");
-                    } else if (pendingUserAction.type === 'update-role' && pendingUserAction.targetRole) {
-                      const targetRole = pendingUserAction.targetRole;
-                      await apiFetch('/User/UpdateUserRole', {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                          id: pendingUserAction.userId || 0,
-                          userName: "string",
-                          role: targetRole
-                        })
-                      });
-                      setAllUsers(prev => prev.map(u => u.getUserDto.id === pendingUserAction.userId ? {
-                        ...u,
-                        getUserDto: { ...u.getUserDto, role: targetRole, roleName: Role[targetRole] }
-                      } : u));
-                      toast.success("Role updated successfully");
-                    }
-                  } catch (err: any) {
-                    console.error("Action error", err);
-                    toast.error(`Error: ${err.message}`);
-                    return;
-                  }
-                  setPendingUserAction(null);
-                  setIsViewPersonDetailsOpen(false);
-                  setIsAuthCodeModalOpen(false);
-                } else {
-                  try {
-                    await apiFetch('/User/ChangeAuthorizationCode', {
-                      method: 'PUT',
-                      body: JSON.stringify({
-                        id: userProfile?.getUserDto?.id || 0,
-                        userName: userProfile?.getUserDto?.userName || "",
-                        password: authCodeData.password,
-                        tokenCode: authCodeData.token,
-                        newAuthorizationCode: authCodeData.newAuthorizationCode
-                      })
-                    });
-                    toast.success('Authorization code updated successfully');
-                    setAuthCodeData({ id: 0, userName: '', password: '', token: '', newAuthorizationCode: '' });
-                    setIsAuthCodeModalOpen(false);
-                  } catch (err: any) {
-                    console.error("Failed to update auth code", err);
-                    toast.error(`Update failed: ${err.message}`);
-                  }
-                }
-              }} 
-              className="bg-transparent border-2 border-yellow-600 dark:border-yellow-500 text-black dark:text-zinc-100 hover:bg-yellow-50 dark:hover:bg-yellow-950/40 flex items-center gap-2"
-            >
-              <Key className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-              Authorize Action
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Add New Person Dialog */}
-      <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
-        <DialogContent className="sm:max-w-[600px] flex flex-col max-h-[90vh]">
-          <DialogHeader className="mb-0 shrink-0">
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5 text-primary" />
-              Add New Household Member
-            </DialogTitle>
-            <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto px-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <div className="grid gap-6 pt-[3px] py-4">
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
-                  <UserIcon className="h-4 w-4" />
-                  Personal Information
-                </h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-fname">First Name</Label>
-                    <Input autoComplete="off" id="p-fname" className={newPerson.createPersonDetailsDto.firstName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.firstName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, firstName: e.target.value } }))} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-lname">Last Name</Label>
-                    <Input autoComplete="off" id="p-lname" className={newPerson.createPersonDetailsDto.lastName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.lastName} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, lastName: e.target.value } }))} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-dob">Date of Birth</Label>
-                    <Input autoComplete="off" id="p-dob" type="date" className={newPerson.createPersonDetailsDto.dateOfBirth ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createPersonDetailsDto.dateOfBirth} onChange={(e) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, dateOfBirth: e.target.value } }))} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-gender">Gender</Label>
-                    <Select value={newPerson.createPersonDetailsDto.gender.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createPersonDetailsDto: { ...p.createPersonDetailsDto, gender: parseInt(v) } }))}>
-                      <SelectTrigger id="p-gender">
-                        <SelectValue placeholder="Select gender">
-                          {(() => {
-                            const g = newPerson.createPersonDetailsDto.gender.toString();
-                            if (g === '1') return 'Male';
-                            if (g === '2') return 'Female';
-                            if (g === '3') return 'Other';
-                            return 'Select gender';
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Male</SelectItem>
-                        <SelectItem value="2">Female</SelectItem>
-                        <SelectItem value="3">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="p-relation">Relation to Owner</Label>
-                  <Input autoComplete="off" id="p-relation" placeholder="e.g. Spouse, Brother, etc." className={newPerson.relation ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.relation} onChange={(e) => setNewPerson(p => ({ ...p, relation: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
-                  <Key className="h-4 w-4" />
-                  User Account & Security
-                </h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-uname">Username</Label>
-                    <Input autoComplete="off" id="p-uname" className={newPerson.createUserDto.userName ? "border-b-2 border-b-green-400" : "border-b-2 border-b-slate-200"} value={newPerson.createUserDto.userName} onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, userName: e.target.value } }))} />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-role">System Role</Label>
-                    <Select value={newPerson.createUserDto.role.toString()} onValueChange={(v) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, role: parseInt(v) } }))}>
-                      <SelectTrigger id="p-role">
-                        <SelectValue placeholder="Select role">
-                          {newPerson.createUserDto.role !== undefined
-                            ? ((appNamesDetailList?.role || []).find(r => r.id.toString() === newPerson.createUserDto.role.toString())?.name || 'Select role')
-                            : 'Select role'}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="2">Wife</SelectItem>
-                        <SelectItem value="3">Child</SelectItem>
-                        <SelectItem value="4">Relative</SelectItem>
-                        <SelectItem value="5">Visitor</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-pwd">Password</Label>
-                    <div className="relative">
-                      <Input autoComplete="off" id="p-pwd" 
-                        type={showAddMemberPassword ? "text" : "password"} 
-                        className={cn("pr-9 border-b-2", newPerson.createUserDto.password ? "border-b-green-400" : "border-b-slate-200")} 
-                        value={newPerson.createUserDto.password} 
-                        onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, password: e.target.value } }))} 
-                      />
-                      <button 
-                        type="button" 
-                        onClick={() => setShowAddMemberPassword(!showAddMemberPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                      >
-                        {showAddMemberPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="p-auth">Initial Auth Code (6 digits)</Label>
-                    <div className="relative">
-                      <Input autoComplete="off" id="p-auth" 
-                        type={showAddMemberAuthCode ? "text" : "password"} 
-                        placeholder="000000" 
-                        maxLength={6} 
-                        className={cn("pr-9 border-b-2", newPerson.createUserDto.authorizationCode.length === 6 ? "border-b-green-400" : "border-b-slate-200")} 
-                        value={newPerson.createUserDto.authorizationCode} 
-                        onChange={(e) => setNewPerson(p => ({ ...p, createUserDto: { ...p.createUserDto, authorizationCode: e.target.value } }))} 
-                      />
-                      <button 
-                        type="button" 
-                        onClick={() => setShowAddMemberAuthCode(!showAddMemberAuthCode)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                      >
-                        {showAddMemberAuthCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="shrink-0 pt-4 border-t">
-            
-            <Button onClick={async () => {
-              try {
-                const response: any = await apiFetch('/Person/CreatePerson', {
-                  method: 'POST',
-                  body: JSON.stringify(newPerson)
-                });
-                const isSuccess = response?.isSuccess !== false && response?.status !== false;
-                if (isSuccess) {
-                  // Reload the list of persons from the backend to ensure the new person is displayed and has all DB fields
-                  try {
-                    const personsRes: any = await apiFetch('/Person/GetAllPersons', { method: 'POST' });
-                    if (personsRes && personsRes.data && Array.isArray(personsRes.data)) {
-                      setAllUsers(personsRes.data);
-                    }
-                  } catch (reloadErr) {
-                    console.error("Failed to reload members after creation", reloadErr);
-                  }
-                  setIsAddPersonOpen(false);
-                  toast.success("Member created successfully");
-                } else {
-                  toast.error(response?.message || "Failed to create member");
-                }
-              } catch (err: any) {
-                console.error("Failed to create user", err);
-                toast.error(err.message || "Failed to create user");
-              }
-            }} className="bg-primary text-primary-foreground flex items-center gap-2">
-              <UserPlus className="h-4 w-4" />
-              Create Member
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Person Role Dialog */}
-      <Dialog open={isEditPersonRoleOpen} onOpenChange={setIsEditPersonRoleOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              Update {updateUserRoleData.userName || 'User'} Role
-            </DialogTitle>
-            <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-role-select" className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Select New Role
-              </Label>
-              <Select value={updateUserRoleData.role.toString()} onValueChange={(v) => setUpdateUserRoleData(p => ({ ...p, role: parseInt(v) }))}>
-                <SelectTrigger id="edit-role-select" className="bg-transparent text-foreground dark:text-zinc-100 border-primary/20">
-                  <SelectValue placeholder="Select role">
-                    {updateUserRoleData.role !== undefined
-                      ? ((appNamesDetailList?.role || []).find(r => r.id.toString() === updateUserRoleData.role?.toString())?.name || 'Select role')
-                      : 'Select role'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {(appNamesDetailList?.role || []).map(r => (
-                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            
-            <Button onClick={() => {
-              requestAuth(async () => {
-                const targetRole = updateUserRoleData.role;
-                try {
-                  await apiFetch('/User/UpdateUserRole', {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                      id: updateUserRoleData.id || 0,
-                      userName: updateUserRoleData.userName || '',
-                      role: targetRole
-                    })
-                  });
-                  setAllUsers(prev => prev.map(u => u.getUserDto.id === updateUserRoleData.id ? {
-                    ...u,
-                    getUserDto: {
-                      ...u.getUserDto,
-                      role: targetRole,
-                      roleName: Role[targetRole]
-                    }
-                  } : u));
-                  toast.success("User role updated successfully");
-                  setIsEditPersonRoleOpen(false);
-                  setIsViewPersonDetailsOpen(false);
-                } catch (err: any) {
-                  console.error("Failed to update user role", err);
-                  toast.error(`Failed to update role: ${err.message}`);
-                }
-              });
-            }} className="bg-transparent border-2 border-primary text-foreground dark:text-zinc-100 hover:bg-primary/5 flex items-center gap-2">
-              <RefreshCw className="h-4 w-4" />
-              Update Access
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* View Person Details Dialog */}
-      <Dialog open={isViewPersonDetailsOpen} onOpenChange={setIsViewPersonDetailsOpen}>
-        <DialogContent className="sm:max-w-[600px]" showCloseButton={false}>
-          <DialogHeader className="mb-0">
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col">
-                <DialogTitle className="flex items-center gap-2">
-                  <UserCircle className="h-5 w-5 text-primary" />
-                  View User Profile: {viewingPerson?.getPersonDetailsDto.firstName} {viewingPerson?.getPersonDetailsDto.lastName}
-                </DialogTitle>
-                <DialogDescription className="mt-0">Detailed view of user properties and system settings.</DialogDescription>
-              </div>
-              <div className="flex items-center gap-2 pr-6">
-                {isOwner && (
-                  <>
-                    <Button 
-                       variant="ghost" 
-                       size="icon" 
-                       className="h-8 w-8 bg-transparent border border-slate-200 text-black dark:text-zinc-100 hover:bg-slate-50"
-                      onClick={() => {
-                        if (viewingPerson) {
-                          setUpdateUserRoleData({
-                            id: viewingPerson.getUserDto.id,
-                            userName: viewingPerson.getUserDto.userName,
-                            password: '',
-                            role: viewingPerson.getUserDto.role
-                          });
-                          setIsEditPersonRoleOpen(true);
-                        }
-                      }}
-                    >
-                      <Settings2 className="h-4 w-4 text-blue-500" />
-                    </Button>
-                    <Button 
-                       variant="ghost" 
-                       size="icon" 
-                       className={cn(
-                        "h-8 w-8 bg-transparent border hover:bg-muted",
-                        viewingPerson?.disabled ? "text-green-600 border-green-200" : "text-yellow-600 border-yellow-200"
-                      )}
-                      onClick={() => {
-                        if (viewingPerson) {
-                          requestAuth(async () => {
-                            try {
-                              const pId = viewingPerson.id;
-                              await apiFetch(`/Person/DisablePerson?personId=${pId}`, { method: 'PUT' });
-                              const nextDisabled = !viewingPerson.disabled;
-                              setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
-                                ...u, 
-                                disabled: nextDisabled, 
-                                getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: nextDisabled } 
-                              } : u));
-                              setIsViewPersonDetailsOpen(false);
-                              toast.success(`User status updated successfully`);
-                            } catch (err: any) {
-                              console.error("Failed to disable person", err);
-                              toast.error(`Failed to update status: ${err.message}`);
-                            }
-                          });
-                        }
-                      }}
-                    >
-                      {viewingPerson?.disabled ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                    </Button>
-                    <Button 
-                       variant="ghost" 
-                       size="icon" 
-                       className="h-8 w-8 bg-transparent border border-red-200 text-black dark:text-zinc-100 hover:bg-red-50"
-                      onClick={() => {
-                        if (viewingPerson) {
-                          requestAuth(async () => {
-                            try {
-                              const pId = viewingPerson.id;
-                              await apiFetch(`/Person/DeletePerson?personId=${pId}`, { method: 'PUT' });
-                              setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
-                              setIsViewPersonDetailsOpen(false);
-                              toast.success("User deleted successfully");
-                            } catch (err: any) {
-                              console.error("Failed to delete person", err);
-                              toast.error(`Deletion failed: ${err.message}`);
-                            }
-                          });
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-600" />
-                    </Button>
-                    <div className="h-4 w-px bg-border mx-1" />
-                  </>
-                )}
-                <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-                  <X className="h-4 w-4" />
-                </DialogClose>
-              </div>
-            </div>
-          </DialogHeader>
-          <ScrollArea className="max-h-[70vh]">
-            <div className="space-y-6 pt-[3px] pb-4">
-              {viewingPerson && (
-                <>
-                  {/* Identity Section */}
-                  <div className="flex items-start gap-6 border-b pb-4">
-                    <div className="h-24 w-24 rounded-2xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-2 border-primary/10 shadow-inner font-bold text-lg text-slate-700">
-                      {viewingPerson.getPersonDetailsDto.imageUrl ? (
-                        <img 
-                          src={getFullImageUrl(viewingPerson.getPersonDetailsDto.imageUrl)} 
-                          alt="Profile" 
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-cover" 
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                            const parent = (e.target as HTMLImageElement).parentElement;
-                            if (parent) {
-                              parent.innerHTML = `<span class="font-bold text-lg text-slate-700">${getInitials(viewingPerson.getPersonDetailsDto.firstName, viewingPerson.getPersonDetailsDto.lastName)}</span>`;
-                            }
-                          }}
-                        />
-                      ) : (
-                        <span>{getInitials(viewingPerson.getPersonDetailsDto.firstName, viewingPerson.getPersonDetailsDto.lastName)}</span>
-                      )}
-                    </div>
-                    <div className="space-y-3 flex-1">
-                      <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest">Core Identity</h4>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Username</Label>
-                          <p className="font-medium font-mono">{viewingPerson.getUserDto.userName}</p>
-                        </div>
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">System Role</Label>
-                          <Badge variant="outline" className="mt-1">{viewingPerson.getUserDto.roleName}</Badge>
-                        </div>
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Internal ID</Label>
-                          <p className="font-medium font-mono text-slate-500 dark:text-zinc-400 text-xs">{viewingPerson.personId}</p>
-                        </div>
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Gender</Label>
-                          <p className="font-medium">{Gender[viewingPerson.getPersonDetailsDto.gender]}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Contact Section */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest border-b pb-1">Contact Channels</h4>
-                    {(viewingPerson?.getPersonDetailsDto?.getContactDetailsDtos || []).map((c, i) => (
-                      <div key={i} className="bg-muted/30 p-3 rounded-lg grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Email</Label>
-                          <p className="truncate" title={c.email}>{c.email}</p>
-                        </div>
-                        <div>
-                          <Label className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Phone</Label>
-                          <p>{c.phoneNumber}</p>
-                        </div>
-                      </div>
-                    ))}
-                    {viewingPerson.getPersonDetailsDto.getContactDetailsDtos.length === 0 && <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No contact channels defined.</p>}
-                  </div>
-
-                  {/* Address Section */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest border-b pb-1">Physical Addresses</h4>
-                    {(viewingPerson?.getPersonDetailsDto?.getAddressDtos || []).map((a, i) => (
-                      <div key={i} className="bg-muted/30 p-3 rounded-lg space-y-1 text-sm">
-                        <p className="font-medium">{a.numberLine} {a.street}</p>
-                        <p className="text-slate-500 dark:text-zinc-400 text-xs">{a.city}, {a.state}, {a.country}</p>
-                        {a.postalCode && <p className="text-slate-500 dark:text-zinc-400 text-[10px]">Postal: {a.postalCode}</p>}
-                      </div>
-                    ))}
-                    {viewingPerson.getPersonDetailsDto.getAddressDtos.length === 0 && <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No addresses saved.</p>}
-                  </div>
-                </>
-              )}
-            </div>
-          </ScrollArea>
-          <DialogFooter className="sm:justify-end">
-            {/* Removed Close View button as per request */}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-              <PlusCircle className="h-5 w-5 text-primary" />
-              Add New Category
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">Create a new category to organize your contacts.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
-            <div className="grid gap-2">
-              <Label htmlFor="cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
-              <Input autoComplete="off" id="cat-name" 
-                placeholder="e.g. Emergency, Family, Services" 
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
-              <Input autoComplete="off" id="cat-desc" 
-                placeholder="Brief description of this category" 
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
-                value={newCategoryDescription}
-                onChange={(e) => setNewCategoryDescription(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
-                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
-                  const Icon = iconMap[iconName];
-                  return (
-                    <Button
-                      key={iconName}
-                      variant="outline"
-                      size="icon"
-                      className={cn(
-                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
-                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
-                      )}
-                      onClick={() => setNewCategoryIcon(iconName)}
-                    >
-                      {Icon && <Icon className="h-5 w-5" />}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end my-auto min-h-[72px]">
-            <Button onClick={handleAddCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add New Category
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-              <Edit3 className="h-5 w-5 text-primary" />
-              Edit Category
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">Update category details and icon.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
-              <Input autoComplete="off" id="edit-cat-name" 
-                placeholder="e.g. Emergency, Family, Services" 
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
-              <Input autoComplete="off" id="edit-cat-desc" 
-                placeholder="Brief description of this category" 
-                value={newCategoryDescription}
-                onChange={(e) => setNewCategoryDescription(e.target.value)}
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
-                {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
-                  const Icon = iconMap[iconName];
-                  return (
-                    <Button
-                      key={iconName}
-                      variant="outline"
-                      size="icon"
-                      className={cn(
-                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
-                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
-                      )}
-                      onClick={() => setNewCategoryIcon(iconName)}
-                    >
-                      {Icon && <Icon className="h-5 w-5" />}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end">
-            <Button onClick={handleEditCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) { setEditingContactId(null); setIsNewContactImageSelected(false); } }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 shadow-2xl">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {editingContactId ? <UserCog className="h-5 w-5 text-primary" /> : <UserPlus className="h-5 w-5 text-primary" />}
-                <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-zinc-100">
-                  {editingContactId ? `Edit ${newContact.firstName || 'Contact'}` : 'Add New Contact'}
-                </DialogTitle>
-              </div>
-            </div>
-            <DialogDescription className="text-xs font-medium mt-1 text-slate-500 dark:text-zinc-400">Fill in the contact details and addresses.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh] p-8 pt-2 bg-slate-50 dark:bg-zinc-900">
-            <div className="grid gap-6 pt-[3px] pb-4">
-              <div className="flex gap-8 items-start">
-                <div className="flex-1 space-y-5">
-                  <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                      <UserCircle className="h-3 w-3" /> First Name
-                    </Label>
-                    <Input autoComplete="off" placeholder="First Name" 
-                      className={newContact.firstName ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
-                      value={newContact.firstName}
-                      onChange={(e) => setNewContact(prev => ({ ...prev, firstName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                      <UserCircle className="h-3 w-3" /> Last Name
-                    </Label>
-                    <Input autoComplete="off" placeholder="Last Name" 
-                      className={newContact.lastName ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
-                      value={newContact.lastName}
-                      onChange={(e) => setNewContact(prev => ({ ...prev, lastName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                      <Layers className="h-3 w-3" /> Category
-                    </Label>
-                    <Select 
-                      value={newContact.contactCategory.toString()} 
-                      onValueChange={(val) => setNewContact(prev => ({ ...prev, contactCategory: parseInt(val) }))}
-                    >
-                      <SelectTrigger className="h-10 rounded-none bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 border-0 border-b-2 border-slate-200 dark:border-zinc-800 shadow-none">
-                        <SelectValue placeholder="Select Category">
-                          {newContact.contactCategory
-                            ? ((appNamesDetailList?.contactCategoryIdNames || []).find(cat => cat.id.toString() === newContact.contactCategory.toString())?.name || 'Select Category')
-                            : 'Select Category'}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(appNamesDetailList?.contactCategoryIdNames || []).map(cat => (
-                          <SelectItem key={cat.id} value={cat.id.toString()}>{cat.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-center gap-3">
-                  <Label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400 self-start ml-2">
-                    <Camera className="h-3 w-3" /> Avatar
-                  </Label>
-                  <div 
-                    className="relative h-40 w-40 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden cursor-pointer group bg-muted/30 hover:bg-muted transition-all shadow-sm"
-                    onClick={() => document.getElementById('contact-avatar-upload')?.click()}
-                  >
-                    {newContact.imageUrl ? (
-                      <img src={getFullImageUrl(newContact.imageUrl) || undefined} alt="Avatar" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex flex-col items-center gap-2 text-slate-500 dark:text-zinc-400">
-                        <ImagePlus className="h-8 w-8" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Upload</span>
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity backdrop-blur-[2px]">
-                      <Pencil className="h-6 w-6 text-white" />
-                    </div>
-                  </div>
-                  <input 
-                    id="contact-avatar-upload"
-                    type="file" 
-                    className="hidden" 
-                    accept="image/*"
-                    onChange={(e) => handleImageSelect(e, 'contact')}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold flex items-center gap-2">
-                    <Phone className="h-4 w-4" /> Contact Details (Phone & Email)
-                  </Label>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setNewContact(prev => ({ 
-                      ...prev, 
-                      contactDetails: [...prev.contactDetails, { phoneNumber: '', email: '', personDetailsId: 0 }] 
-                    }))}
-                  >
-                    <Plus className="h-4 w-4 mr-1" /> Add
-                  </Button>
-                </div>
-                {newContact.contactDetails.map((detail, idx) => (
-                  <div key={idx} className="p-4 rounded-xl border bg-muted/20 space-y-4 relative group">
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="absolute top-2 right-2 h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => {
-                        const detailId = detail.id || 0;
-                        if (editingContactId && detailId > 0) {
-                          requestAuth(async () => {
-                            try {
-                              await apiFetch(`/Contact/DeleteContactDetails?contactId=${editingContactId}&contactDetailId=${detailId}`, { method: 'PUT' });
-                              const contactDetails = newContact.contactDetails.filter((_, i) => i !== idx);
-                              setNewContact(prev => ({ ...prev, contactDetails }));
-                              toast.success('Contact detail deleted successfully');
-                            } catch (err: any) {
-                              toast.error(`Error deleting contact detail: ${err.message}`);
-                            }
-                          });
-                        } else {
-                          const contactDetails = newContact.contactDetails.filter((_, i) => i !== idx);
-                          setNewContact(prev => ({ ...prev, contactDetails }));
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Phone</Label>
-                        <Input autoComplete="off" placeholder="+123..." 
-                          className={detail.phoneNumber ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
-                          value={detail.phoneNumber}
-                          onChange={(e) => {
-                            const details = [...newContact.contactDetails];
-                            details[idx].phoneNumber = e.target.value;
-                            setNewContact(prev => ({ ...prev, contactDetails: details }));
-                          }}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Email</Label>
-                        <Input autoComplete="off" placeholder="email@example.com" 
-                          className={detail.email ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"}
-                          value={detail.email}
-                          onChange={(e) => {
-                            const details = [...newContact.contactDetails];
-                            details[idx].email = e.target.value;
-                            setNewContact(prev => ({ ...prev, contactDetails: details }));
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold flex items-center gap-2">
-                    <MapPin className="h-4 w-4" /> Addresses
-                  </Label>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => setNewContact(prev => ({ 
-                      ...prev, 
-                      address: [...prev.address, { 
-                        numberLine: '', street: '', city: '', region: '', state: '', country: '', postalCode: '' 
-                      }] 
-                    }))}
-                  >
-                    <Plus className="h-4 w-4 mr-1" /> Add
-                  </Button>
-                </div>
-                {newContact.address.map((addr, idx) => (
-                  <div key={idx} className="p-4 rounded-xl border bg-muted/20 space-y-4 relative group">
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="absolute top-2 right-2 h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => {
-                        const addrId = addr.id || 0;
-                        if (editingContactId && addrId > 0) {
-                          requestAuth(async () => {
-                            try {
-                              await apiFetch(`/Contact/DeleteContactAddress?contactId=${editingContactId}&contactAddressId=${addrId}`, { method: 'PUT' });
-                              const address = newContact.address.filter((_, i) => i !== idx);
-                              setNewContact(prev => ({ ...prev, address }));
-                              toast.success('Contact address deleted successfully');
-                            } catch (err: any) {
-                              toast.error(`Error deleting contact address: ${err.message}`);
-                            }
-                          });
-                        } else {
-                          const address = newContact.address.filter((_, i) => i !== idx);
-                          setNewContact(prev => ({ ...prev, address }));
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Number Line</Label>
-                        <Input autoComplete="off" className={addr.numberLine ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.numberLine} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].numberLine = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Street</Label>
-                        <Input autoComplete="off" className={addr.street ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.street} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].street = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">City</Label>
-                        <Input autoComplete="off" className={addr.city ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.city} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].city = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Region</Label>
-                        <Input autoComplete="off" className={addr.region ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.region} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].region = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">State</Label>
-                        <Input autoComplete="off" className={addr.state ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.state} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].state = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Country</Label>
-                        <Input autoComplete="off" className={addr.country ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.country} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].country = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                      <div className="space-y-1 col-span-2">
-                        <Label className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400">Postal Code</Label>
-                        <Input autoComplete="off" className={addr.postalCode ? "h-10 border-b-2 border-b-green-400 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" : "h-10 border-b-2 border-b-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100"} value={addr.postalCode} onChange={(e) => {
-                          const list = [...newContact.address];
-                          list[idx].postalCode = e.target.value;
-                          setNewContact(prev => ({ ...prev, address: list }));
-                        }} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 gap-3 bg-white dark:bg-zinc-900 flex items-center justify-end sm:items-center">
-            <Button onClick={handleAddContact} className="bg-black dark:bg-zinc-950 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 px-4 mb-3 font-normal flex items-center justify-center gap-2">
-              {editingContactId ? <Save className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-              {editingContactId ? 'Update Contact' : 'Save Contact'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isDeleteContactOpen} onOpenChange={setIsDeleteContactOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <ShieldAlert className="h-5 w-5" />
-              Delete Contact
-            </DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {contactToDelete?.firstName} {contactToDelete?.lastName}? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            
-            <Button variant="destructive" onClick={handleDeleteContact}>Delete Contact</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAddSceneOpen} onOpenChange={setIsAddSceneOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Film className="h-5 w-5 text-primary" />
-              Add New Scene
-            </DialogTitle>
-            <DialogDescription>
-              Create a new automated scene for your home.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="scene-name">Scene Name</Label>
-              <Input autoComplete="off" id="scene-name" 
-                placeholder="e.g. Movie Night" 
-                value={newScene.name}
-                onChange={(e) => setNewScene(prev => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="scene-icon">Icon</Label>
-              <Select 
-                value={newScene.icon} 
-                onValueChange={(v) => setNewScene(prev => ({ ...prev, icon: v }))}
-              >
-                <SelectTrigger id="scene-icon">
-                  <SelectValue placeholder="Select icon" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Film">Movie (Film)</SelectItem>
-                  <SelectItem value="Sun">Day (Sun)</SelectItem>
-                  <SelectItem value="HomeIcon">Home (Home)</SelectItem>
-                  <SelectItem value="Shield">Security (Shield)</SelectItem>
-                  <SelectItem value="Zap">Energy (Zap)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            
-            <Button onClick={handleAddScene}>Add Scene</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAddSectionOpen} onOpenChange={setIsAddSectionOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
-              Add New Section
-            </DialogTitle>
-            <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
-                Section Name
-              </Label>
-              <Input autoComplete="off" id="sec-name" 
-                placeholder="e.g. Backyard, Garage, Attic" 
-                value={newSectionName}
-                onChange={(e) => setNewSectionName(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
-              <div className="space-y-0.5">
-                <Label htmlFor="sec-hidden" className="text-sm font-medium flex items-center gap-2">
-                  <EyeOff className="h-3.5 w-3.5" /> Hidden Section
-                </Label>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
-              </div>
-              <Switch 
-                id="sec-hidden" 
-                checked={newSectionIsHidden} 
-                onCheckedChange={setNewSectionIsHidden} 
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            
-            <Button onClick={handleAddSection} className="flex items-center gap-2 bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <PlusCircle className="h-4 w-4" />
-              Add Section
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent showCloseButton={false} className={cn("sm:max-w-[520px] border-2 transition-colors duration-300 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/20" : authError ? "border-red-500 bg-white dark:bg-zinc-950" : "border-yellow-400 dark:border-yellow-600 shadow-lg shadow-yellow-100/50 dark:shadow-none bg-white dark:bg-zinc-950")}>
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
-            {/* Left Column (Current Contents) */}
-            <div className="sm:col-span-7 space-y-4">
-              <div className="space-y-2">
-                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
-                  <Key className="h-5 w-5 text-primary animate-pulse" />
-                  Authorization Required
-                </DialogTitle>
-                <DialogDescription>
-                  Please enter your 6-digit numerical authorization code to proceed with the operation.
-                </DialogDescription>
-              </div>
-              
-              <div className="flex flex-col gap-3">
-                <div className="flex gap-2 justify-center w-full">
-                  {[0, 1, 2, 3, 4, 5].map((index) => (
-                    <input
-                      key={index}
-                      id={`auth-code-input-${index}`}
-                      type="password"
-                      autoComplete="off"
-                      maxLength={1}
-                      disabled={isVerifyingAuth || authSuccess}
-                      className={cn(
-                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100",
-                        authSuccess 
-                          ? "border-green-500 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/40" 
-                          : authError
-                            ? "border-red-500 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400"
-                            : authCode[index] 
-                              ? "border-primary bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" 
-                              : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:border-primary text-slate-900 dark:text-zinc-100"
-                      )}
-                      value={authCode[index] || ''}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Backspace' && !authCode[index]) {
-                          const prev = document.getElementById(`auth-code-input-${index - 1}`);
-                          if (prev) prev.focus();
-                        }
-                      }}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '');
-                        if (val) {
-                          const newCode = authCode.substring(0, index) + val + authCode.substring(index + 1);
-                          const limitedCode = newCode.substring(0, 6);
-                          setAuthCode(limitedCode);
-                          setAuthError(false);
-                          const next = document.getElementById(`auth-code-input-${index + 1}`);
-                          if (next) next.focus();
-                        } else {
-                          const newCode = authCode.substring(0, index) + authCode.substring(index + 1);
-                          setAuthCode(newCode);
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
-                {isVerifyingAuth ? (
-                  <div className="flex flex-col items-center justify-center py-2 space-y-1.5 animate-in fade-in duration-200">
-                    <div className="flex space-x-1.5 items-center">
-                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
-                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
-                      <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce" />
-                    </div>
-                    <p className="text-xs font-semibold text-primary animate-pulse">Verifying authorization...</p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">This is a sensitive operation.</p>
-                )}
-              </div>
-            </div>
-
-            {/* Right Column (Keypad) */}
-            <div className="sm:col-span-5 flex flex-col items-center justify-center p-3 border-t sm:border-t-0 sm:border-l-2 border-muted bg-muted/20 dark:bg-transparent rounded-none">
-              <div className="grid grid-cols-3 gap-2 w-full max-w-[180px]">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                  <Button
-                    key={num}
-                    variant="outline"
-                    disabled={isVerifyingAuth || authSuccess}
-                    className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground focus:ring-2 focus:ring-primary transition-all p-0 flex items-center justify-center"
-                    onClick={() => {
-                      if (authCode.length < 6) {
-                        setAuthCode(prev => prev + num);
-                        setAuthError(false);
-                      }
-                    }}
-                  >
-                    {num}
-                  </Button>
-                ))}
-                {/* Clear */}
-                <Button
-                  variant="outline"
-                  disabled={isVerifyingAuth || authSuccess}
-                  className="h-11 w-11 text-[11px] font-semibold rounded-full text-red-500 hover:bg-red-50 p-0 flex items-center justify-center"
-                  onClick={() => {
-                    setAuthCode('');
-                    setAuthError(false);
-                  }}
-                >
-                  Clear
-                </Button>
-                {/* 0 */}
-                <Button
-                  variant="outline"
-                  disabled={isVerifyingAuth || authSuccess}
-                  className="h-11 w-11 text-base font-semibold rounded-full hover:bg-primary hover:text-primary-foreground transition-all p-0 flex items-center justify-center"
-                  onClick={() => {
-                    if (authCode.length < 6) {
-                      setAuthCode(prev => prev + '0');
-                      setAuthError(false);
-                    }
-                  }}
-                >
-                  0
-                </Button>
-                {/* Delete/Backspace */}
-                <Button
-                  variant="outline"
-                  disabled={isVerifyingAuth || authSuccess}
-                  className="h-11 w-11 text-sm font-semibold rounded-full hover:bg-muted p-0 flex items-center justify-center"
-                  onClick={() => {
-                    setAuthCode(prev => prev.slice(0, -1));
-                    setAuthError(false);
-                  }}
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Device Dialog */}
-      <Dialog open={isEditDeviceOpen} onOpenChange={setIsEditDeviceOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              {editingDevice && (() => {
-                const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
-                return <Icon className="h-5 w-5 text-primary" />;
-              })()}
-              Edit {editingDevice?.name || 'Device'}
-            </DialogTitle>
-            <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
-          </DialogHeader>
-          {editingDevice && (
-            <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-device-name" className="flex items-center gap-2">
-                  {(() => {
-                    const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
-                    return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
-                  })()}
-                  {(() => {
-                    if (editingDevice.type === 'window') return 'Window Name';
-                    const map: Record<string, string> = {
-                      'appliance': 'Appliance Name',
-                      'light': 'Light Name',
-                      'camera': 'Camera Name',
-                      'door': 'Door Name'
-                    };
-                    return map[editingDevice.type] || 'Device Name';
-                  })()}
-                </Label>
-                <Input autoComplete="off" id="edit-device-name" 
-                  value={editingDevice.name || ''}
-                  onChange={(e) => setEditingDevice({ ...editingDevice, name: e.target.value })}
-                />
-              </div>
-
-              {editingDevice.type === 'camera' && (
-                <div className="space-y-4 pt-2 border-t mt-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-ipAddress" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                      <Globe className="h-3 w-3" />
-                      IP Address
-                    </Label>
-                    <Input autoComplete="off" id="edit-ipAddress" 
-                      placeholder="e.g. 192.168.1.100"
-                      value={editingDevice.ipAddress || ''}
-                      onChange={(e) => setEditingDevice({ ...editingDevice, ipAddress: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="edit-username" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                        <UserCircle className="h-3 w-3" />
-                        Username
-                      </Label>
-                      <Input autoComplete="off" id="edit-username" 
-                        placeholder="admin"
-                        value={editingDevice.username || ''}
-                        onChange={(e) => setEditingDevice({ ...editingDevice, username: e.target.value })}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="edit-password" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                        <Shield className="h-3 w-3" />
-                        Password
-                      </Label>
-                      <Input autoComplete="off" id="edit-password" 
-                        type="password"
-                        placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
-                        value={editingDevice.password || ''}
-                        onChange={(e) => setEditingDevice({ ...editingDevice, password: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="edit-streamPath" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                        <Video className="h-3 w-3" />
-                        Stream Path
-                      </Label>
-                      <Input autoComplete="off" id="edit-streamPath" 
-                        placeholder="/live"
-                        value={editingDevice.streamPath || ''}
-                        onChange={(e) => setEditingDevice({ ...editingDevice, streamPath: e.target.value })}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="edit-port" className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold">
-                        <Settings2 className="h-3 w-3" />
-                        Port
-                      </Label>
-                      <Input autoComplete="off" id="edit-port" 
-                        type="number"
-                        placeholder="80"
-                        value={editingDevice.port || 80}
-                        onChange={(e) => setEditingDevice({ ...editingDevice, port: parseInt(e.target.value) || 0 })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {editingDevice.type === 'appliance' && (
-                <div className="grid gap-2 text-left">
-                  <Label htmlFor="edit-appliance-type" className="flex items-center gap-2">
-                    <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                    Appliance Type
-                  </Label>
-                  <Select 
-                    value={editingDevice.applianceType?.toString() || '1'} 
-                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, applianceType: parseInt(v) })}
-                  >
-                    <SelectTrigger id="edit-appliance-type">
-                      <SelectValue placeholder="Select type">
-                        {((appNamesDetailList?.applianceType || []).find((t: any) => t.id.toString() === (editingDevice.applianceType?.toString() || '1'))?.name) || 'Select type'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(appNamesDetailList?.applianceType || []).map(t => (
-                        <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {editingDevice.type === 'door' && (
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-door-type" className="flex items-center gap-2">
-                    <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                    Door Type
-                  </Label>
-                  <Select 
-                    value={editingDevice.doorType?.toString() || '1'} 
-                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: parseInt(v) })}
-                  >
-                    <SelectTrigger id="edit-door-type">
-                      <SelectValue placeholder="Select type">
-                        {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (editingDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(appNamesDetailList?.doorType || []).map((dt: any) => (
-                        <SelectItem key={dt.id} value={dt.id.toString()}>
-                          {dt.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              <div className="grid gap-2">
-                <Label htmlFor="edit-device-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Section
-                </Label>
-                <Select 
-                  value={editingDevice.section || 'none'} 
-                  onValueChange={(v) => setEditingDevice({ 
-                    ...editingDevice, 
-                    section: v === 'none' ? undefined : v,
-                    room: undefined 
-                  })}
-                >
-                  <SelectTrigger id="edit-device-section">
-                    <SelectValue placeholder="Select section">
-                      {editingDevice.section && editingDevice.section !== 'none'
-                        ? ((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Select section')
-                        : 'No Section'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Section</SelectItem>
-                    {(sections || []).map(s => (
-                      <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="edit-device-room" className="flex items-center gap-2">
-                  <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Room
-                </Label>
-                <Select 
-                  value={editingDevice.room || 'none'} 
-                  onValueChange={(v) => {
-                    if (v === 'none') {
-                      setEditingDevice({ ...editingDevice, room: undefined });
-                    } else {
-                      const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                      const sectId = getRoomSectionId(v);
-                      setEditingDevice({
-                        ...editingDevice,
-                        room: v,
-                        section: sectId || undefined
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger id="edit-device-room">
-                    <SelectValue placeholder="Select room">
-                      {editingDevice.room && editingDevice.room !== 'none'
-                        ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
-                        : 'No Room (Section Level)'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Room</SelectItem>
-                    {editingDevice.section && editingDevice.section !== 'none' ? (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
-                        </div>
-                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Unassigned Rooms
-                        </div>
-                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-                {!editingDevice.section || editingDevice.section === 'none' ? (
-                  <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
-                ) : (
-                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'section')}</span>
-                )}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            
-            <Button onClick={handleSaveDevice} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* View Room Dialog */}
-      <Dialog open={isViewRoomOpen} onOpenChange={setIsViewRoomOpen}>
-        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (viewingRoom) {
-                      handleEditRoom(viewingRoom);
-                      setIsViewRoomOpen(false);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (viewingRoom) {
-                      handleDeleteRoom(viewingRoom.id);
-                      setIsViewRoomOpen(false);
-                      setActiveView('facility-rooms');
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Sofa className="h-5 w-5 text-primary" />
-              View {viewingRoom?.name || 'Room'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and configuration for {viewingRoom?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {viewingRoom && (() => {
-            const currentRoomDto = (rooms || []).find((r: any) => r.id.toString() === viewingRoom.id.toString()) as any;
-            return (
-              <div className="pt-[3px] pb-4 space-y-5">
-                <div className="grid grid-cols-2 gap-4">
-                  
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                    <div className="font-medium">{(sections || []).find(s => s.id.toString() === viewingRoom.section?.toString() || s.id.toString() === currentRoomDto?.sectionId?.toString())?.name || 'N/A'}</div>
-                  </div>
-                  {currentRoomDto && (
-                    <>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{getUserNameById(currentRoomDto.createdBy) || currentRoomDto.createdByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                        <div className="font-medium">{currentRoomDto.createdOn ? format(new Date(currentRoomDto.createdOn), 'PPp') : 'N/A'}</div>
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Hidden Status</span>
-                        <div className="font-medium">
-                          {currentRoomDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{getUserNameById(currentRoomDto.lastModifiedBy) || currentRoomDto.lastModifiedByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified On</span>
-                        <div className="font-medium">{currentRoomDto.lastModifiedOn ? format(new Date(currentRoomDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      {/* Token Generation Modal */}
-      <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-foreground" showCloseButton={false}>
-          <div className="absolute right-6 top-6 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white dark:bg-zinc-950">
-            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-zinc-100">
-              <Key className="h-6 w-6 text-primary" />
-              Generated Token
-            </DialogTitle>
-            <DialogDescription className="text-xs mt-1 text-slate-500 dark:text-zinc-400">
-              Copy this token and keep it safe. It is required for external system integrations.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6 pt-4">
-            <div className="bg-slate-50 dark:bg-zinc-800/60 p-6 rounded-2xl border border-slate-100 dark:border-zinc-700/60 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest">Authentication Token</span>
-                {generatedToken?.expiryTime && <TokenCountdown expiryTime={generatedToken.expiryTime} />}
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 bg-white dark:bg-zinc-950 p-4 rounded-xl border border-slate-100 dark:border-zinc-800 font-mono text-sm break-all select-all text-emerald-600 dark:text-emerald-400 shadow-inner">
-                  {generatedToken?.tokenCode}
-                </div>
-                <Button 
-                  size="icon"
-                  variant="outline"
-                  className="shrink-0 h-12 w-12 rounded-xl bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 transition-all border-slate-100 dark:border-zinc-700 shadow-sm"
-                  onClick={() => {
-                    if (generatedToken?.tokenCode) {
-                      navigator.clipboard.writeText(generatedToken.tokenCode);
-                      toast.success("Token copied to clipboard!");
-                    }
-                  }}
-                >
-                  <Copy className="h-5 w-5 text-primary" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Room Dialog */}
-      <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Sofa className="h-5 w-5 text-primary" />
-              Edit {editingRoom?.name || 'Room'}
-            </DialogTitle>
-            <DialogDescription>Update the details of this room.</DialogDescription>
-          </DialogHeader>
-          {editingRoom && (
-            <ScrollArea className="max-h-[60vh] pr-2 px-1">
-            <div className="grid gap-4 pt-[3px] pb-4 pr-1">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-room-name" className="flex items-center gap-2">
-                  <Edit3 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Room Name
-                </Label>
-                <Input autoComplete="off" id="edit-room-name" 
-                  value={editingRoom.name || ''}
-                  onChange={(e) => setEditingRoom({ ...editingRoom, name: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-room-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Section
-                </Label>
-                <Select 
-                  value={editingRoom.section || ''} 
-                  onValueChange={(v) => setEditingRoom({ ...editingRoom, section: v })}
-                >
-                  <SelectTrigger id="edit-room-section">
-                    <SelectValue placeholder="Select section">
-                      {editingRoom.section && editingRoom.section !== 'none'
-                        ? ((sections || []).find(s => s.id.toString() === editingRoom.section?.toString())?.name || 'Select section')
-                        : 'Select section'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(sections || []).map(s => (
-                      <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-room-icon" className="flex items-center gap-2">
-                  <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Icon
-                </Label>
-                <Select 
-                  value={editingRoom.icon || 'Sofa'} 
-                  onValueChange={(v) => setEditingRoom({ ...editingRoom, icon: v })}
-                >
-                  <SelectTrigger id="edit-room-icon">
-                    <SelectValue placeholder="Select icon" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Sofa">Living Room (Sofa)</SelectItem>
-                    <SelectItem value="Utensils">Kitchen (Utensils)</SelectItem>
-                    <SelectItem value="Bed">Bedroom (Bed)</SelectItem>
-                    <SelectItem value="Bath">Bathroom (Bath)</SelectItem>
-                    <SelectItem value="Car">Garage (Car)</SelectItem>
-                    <SelectItem value="Trees">Outdoor (Trees)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-room-person" className="flex items-center gap-2">
-                  <UserIcon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Assigned Person
-                </Label>
-                <Select 
-                  value={editingRoom.personId?.toString() || 'none'} 
-                  onValueChange={(v) => setEditingRoom({ ...editingRoom, personId: v === 'none' ? undefined : parseInt(v) })}
-                >
-                  <SelectTrigger id="edit-room-person">
-                    <SelectValue placeholder="Select person">
-                      {editingRoom.personId && editingRoom.personId !== 'none'
-                        ? (() => {
-                            const u = (allUsers || []).find(user => user.id.toString() === editingRoom.personId?.toString());
-                            return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
-                          })()
-                        : 'No Person Assigned'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Person Assigned</SelectItem>
-                    {(allUsers || []).map(u => (
-                      <SelectItem key={u.id} value={u.id.toString()}>
-                        <div className="flex items-center gap-2">
-                          <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
-                            <img 
-                              src={u.getPersonDetailsDto.imageUrl || undefined} 
-                              alt={u.getPersonDetailsDto.firstName} 
-                              className="h-full w-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                          <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center justify-between mt-2 p-3 bg-muted/50 rounded-lg border border-border/50">
-                <div className="space-y-0.5">
-                  <Label htmlFor="edit-room-hidden" className="text-sm font-medium flex items-center gap-2">
-                    <EyeOff className="h-3.5 w-3.5" /> Hidden Room
-                  </Label>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-wider">Hide from normal views</p>
-                </div>
-                <Switch 
-                  id="edit-room-hidden" 
-                  checked={editingRoom.isHidden || false} 
-                  onCheckedChange={(checked) => setEditingRoom({ ...editingRoom, isHidden: checked })} 
-                />
-              </div>
-            </div>
-            </ScrollArea>
-          )}
-          <DialogFooter>
-            
-            <Button 
-              className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700"
-              onClick={() => {
-                if (editingRoom?.id && editingRoom.name) {
-                  handleSaveRoom();
-                }
-              }}
-            >
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isViewContactOpen} onOpenChange={setIsViewContactOpen}>
-        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                setIsViewContactOpen(false);
-                handleEditContact(viewingContact!);
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (viewingContact) {
-                  setContactToDelete(viewingContact);
-                  setIsDeleteContactOpen(true);
-                  setIsViewContactOpen(false);
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Contact className="h-5 w-5 text-primary" />
-              View {viewingContact?.firstName || 'Contact'}
-            </DialogTitle>
-          </DialogHeader>
-          {viewingContact && (
-            <div className="flex flex-col gap-6 pt-[3px] pb-4 overflow-y-auto max-h-[70vh] pr-2">
-              <div className="flex items-center gap-4">
-                <div className="h-20 w-20 rounded-full overflow-hidden bg-muted flex items-center justify-center text-3xl font-bold border-4 border-primary/10">
-                  {viewingContact.imageUrl ? (
-                    <img src={getFullImageUrl(viewingContact.imageUrl) || undefined} alt={viewingContact.firstName} className="h-full w-full object-cover" />
-                  ) : (
-                    viewingContact.firstName.charAt(0)
-                  )}
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold tracking-tight">{viewingContact.firstName} {viewingContact.lastName}</h3>
-                  <Badge variant="secondary" className="mt-1 bg-primary/10 text-primary hover:bg-primary/20 border-0">{viewingContact.getContactCategoryDto.name}</Badge>
-                </div>
-              </div>
-              
-              <div className="space-y-6">
-                {viewingContact.contactDetails.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-slate-500 dark:text-zinc-400"><Phone className="h-3 w-3" /> Communication</h4>
-                    <div className="grid gap-2">
-                      {(viewingContact?.contactDetails || []).map((d, i) => (
-                        <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
-                          <div className="flex justify-between items-center text-sm font-bold">
-                            <span className="flex items-center gap-2"><Mail className="h-3 w-3 text-primary/60" /> {d.email}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-xs text-slate-500 dark:text-zinc-400 mt-1">
-                            <span className="flex items-center gap-2"><Smartphone className="h-3 w-3" /> {d.phoneNumber}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {viewingContact.address.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 text-slate-500 dark:text-zinc-400"><MapPin className="h-3 w-3" /> Locations</h4>
-                    <div className="grid gap-2">
-                      {(viewingContact?.address || []).map((a, i) => (
-                        <div key={i} className="flex flex-col p-3 rounded-xl bg-muted/30 border border-muted-foreground/5 transition-all hover:bg-muted/50">
-                          <span className="text-sm font-bold">{a.numberLine} {a.street}</span>
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">{a.city}, {a.region}, {a.state}</span>
-                          <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400/60 uppercase tracking-widest mt-1">{a.postalCode} â€¢ {a.country}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      
-      <ImageCropperModal
-        isOpen={isCropperOpen}
-        onClose={() => setIsCropperOpen(false)}
-        imageSrc={cropImageSrc}
-        onCropComplete={handleCropComplete}
-      />
-      
-      <ImageCropperModal
-        isOpen={isGroupImageCropperOpen}
-        onClose={() => {
-          setIsGroupImageCropperOpen(false);
-          setTempGroupImageUrl("");
-        }}
-        imageSrc={tempGroupImageUrl}
-        onCropComplete={async (base64Str) => {
-          const file = base64ToFile(base64Str, 'group-image.jpg');
-          setNewGroupImageFile(file);
-          setNewGroupImageUrl(base64Str);
-          setIsGroupImageCropperOpen(false);
-          setTempGroupImageUrl("");
-        }}
-      />
-
-      {/* Hardware Detail Modal */}
-      <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
-        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (selectedHardware) {
-                        setHardwareForm({
-                          ...selectedHardware,
-                          applianceIdNames: selectedHardware.applianceIdNames || [],
-                          cameraIdNames: selectedHardware.cameraIdNames || [],
-                          lightIdNames: selectedHardware.lightIdNames || [],
-                          windowIdNames: selectedHardware.windowIdNames || [],
-                          doorIdNames: selectedHardware.doorIdNames || [],
-                          externalIdNames: selectedHardware.externalIdNames || [],
-                        });
-                        setIsHardwareDetailOpen(false);
-                        setIsEditHardwareOpen(true);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (selectedHardware) {
-                      requestAuth(() => {
-                        setHardwares(prev => prev.filter(h => h.id !== selectedHardware.id));
-                        setIsHardwareDetailOpen(false);
-                      });
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Cpu className="h-6 w-6 text-primary" />
-              View {selectedHardware?.hardwareName || 'Hardware'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed telemetry and component assignment for the selected system node.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedHardware && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] pb-4">
-              {/* Left Column: Details */}
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Controller Name</span>
-                    <p className="font-bold text-lg">{selectedHardware.hardwareName}</p>
-                  </div>
-                  <div className="p-4 bg-muted/40 rounded-xl space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Device ID / Serial</span>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-mono font-bold text-sm text-primary truncate max-w-[100px]">{selectedHardware.hardwareId}</p>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(selectedHardware.hardwareId || '')}>
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-muted/20 border rounded-xl space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-semibold">Authentication Key</span>
-                    <div className="flex items-center gap-1">
-                      <Badge variant="outline" className="font-mono text-xs font-semibold px-2 py-0.5 select-all max-w-[120px] truncate">{selectedHardware.authKey}</Badge>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => navigator.clipboard.writeText(selectedHardware.authKey || '')}>
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t">
-                    <span className="text-sm font-medium">Network Link Status</span>
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.isActive ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'}`}></span>
-                      <span className="text-xs font-semibold">{selectedHardware.isActive ? 'ONLINE' : 'OFFLINE'}</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t">
-                    <span className="text-sm font-medium">Power Status</span>
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${selectedHardware.powerActive ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                      <span className="text-xs font-semibold">{selectedHardware.powerActive ? 'POWERED OK' : 'POWER OUTAGE'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: Linked Devices Summary Lists */}
-              <div className="space-y-4 md:border-l md:pl-6">
-                <h3 className="text-xs uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400 border-b pb-1">Assigned Infrastructure Map</h3>
-                
-                <div className="space-y-3">
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Appliances ({selectedHardware.applianceIdNames?.length || 0}/8 max)</span>
-                    {selectedHardware.applianceIdNames && selectedHardware.applianceIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.applianceIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No appliances assigned to this controller.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Cameras ({selectedHardware.cameraIdNames?.length || 0}/3 max)</span>
-                    {selectedHardware.cameraIdNames && selectedHardware.cameraIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.cameraIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No cameras assigned to this controller.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Lights ({selectedHardware.lightIdNames?.length || 0}/6 max)</span>
-                    {selectedHardware.lightIdNames && selectedHardware.lightIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.lightIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No lights assigned to this controller.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Doors & Entry Checks ({selectedHardware.doorIdNames?.length || 0}/4 max)</span>
-                    {selectedHardware.doorIdNames && selectedHardware.doorIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.doorIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No door systems assigned.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Windows ({selectedHardware.windowIdNames?.length || 0}/4 max)</span>
-                    {selectedHardware.windowIdNames && selectedHardware.windowIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.windowIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No automation windows assigned.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Externals/Aux ({selectedHardware.externalIdNames?.length || 0}/5 max)</span>
-                    {selectedHardware.externalIdNames && selectedHardware.externalIdNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(selectedHardware.externalIdNames || []).map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No external units assigned.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Hardware Modal */}
-      <Dialog open={isAddHardwareOpen} onOpenChange={setIsAddHardwareOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Cpu className="h-6 w-6 text-primary" />
-              Add New Hardware
-            </DialogTitle>
-            <DialogDescription>
-              Deploy a new central node or smart bridging unit to link with facilities.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 pt-[3px] pb-3">
-            <div className="grid gap-2">
-              <Label htmlFor="add-hw-name" className="flex items-center gap-2">
-                <Cpu className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware Name
-              </Label>
-              <Input autoComplete="off" id="add-hw-name" 
-                placeholder="e.g. Living Room Node Bridge" 
-                value={hardwareForm.hardwareName || ''}
-                onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            
-            <Button onClick={() => {
-              if (!hardwareForm.hardwareName) return;
-              requestAuth(async () => {
-                try {
-                  const res: any = await apiFetch('/Hardware/CreateHardware', {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                      hardwareName: hardwareForm.hardwareName
-                    })
-                  });
-                  if (res && res.data) {
-                    setHardwares(prev => [...prev, res.data]);
-                    setIsAddHardwareOpen(false);
-                    toast.success("Hardware created successfully");
-                  }
-                } catch (err: any) {
-                  console.error("Failed to create hardware", err);
-                  toast.error(`Creation failed: ${err.message}`);
-                }
-              });
-            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700"><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Hardware Modal (UpdateHardwareDto wrapper) */}
-      <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
-        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-[90vw]">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-6 w-6 text-primary" />
-              Edit {hardwareForm?.hardwareName || 'Hardware'}
-            </DialogTitle>
-            <DialogDescription>
-              Assign physical and virtual peripherals to this system hub.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] py-4">
-            {/* Left Column: Editable Details */}
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="edit-hw-name" className="flex items-center gap-2">
-                  <Cpu className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware Name
-                </Label>
-                <Input autoComplete="off" id="edit-hw-name" 
-                  value={hardwareForm.hardwareName || ''}
-                  onChange={(e) => setHardwareForm(prev => ({ ...prev, hardwareName: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Settings2 className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware ID / Serial
-                </Label>
-                <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
-                  <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.hardwareId}</p>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.hardwareId || '')}>
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Key className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Auth Security Key (Read-Only)
-                </Label>
-                <div className="flex items-center gap-2 bg-muted/40 border rounded-md p-2">
-                  <p className="font-mono text-sm flex-1 truncate select-all">{hardwareForm.authKey}</p>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigator.clipboard.writeText(hardwareForm.authKey || '')}>
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Toggle Facility Assignments */}
-            <div className="space-y-4 md:border-l md:pl-6 flex flex-col min-h-0">
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide border-b pb-1 shrink-0">Toggle Facility Assignments</h3>
-
-              <ScrollArea className="flex-1 -mr-4 pr-4 max-h-[50vh]">
-                <div className="space-y-4 pb-4">
-                  {/* Appliances Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Connected Appliances ({Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (8 - (hardwareForm.applianceIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 8 - (hardwareForm.applianceIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(appliances || []).map(dev => {
-                        const isSelected = hardwareForm.applianceIdNames?.some(x => x.id === dev.id);
-                        return (
-                          <Badge 
-                            key={`app-${dev.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.applianceIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, applianceIdNames: currentList.filter(x => x.id !== dev.id) }));
-                              } else {
-                                if (currentList.length >= 8) {
-                                  toast.error("Limit reached: You cannot add more than 8 appliances to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, applianceIdNames: [...currentList, { id: dev.id, name: dev.applianceName }] }));
-                              }
-                            }}
-                          >
-                            {dev.applianceName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Cameras Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Assigned Security Cameras ({Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (3 - (hardwareForm.cameraIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 3 - (hardwareForm.cameraIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(cameras || []).map(dev => {
-                        const isSelected = hardwareForm.cameraIdNames?.some(x => x.id === dev.id);
-                        return (
-                          <Badge 
-                            key={`cam-${dev.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.cameraIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, cameraIdNames: currentList.filter(x => x.id !== dev.id) }));
-                              } else {
-                                if (currentList.length >= 3) {
-                                  toast.error("Limit reached: You cannot add more than 3 cameras to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, cameraIdNames: [...currentList, { id: dev.id, name: dev.cameraName }] }));
-                              }
-                            }}
-                          >
-                            {dev.cameraName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Lights Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Controlled Lighting ({Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (6 - (hardwareForm.lightIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 6 - (hardwareForm.lightIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(lights || []).map(dev => {
-                        const isSelected = hardwareForm.lightIdNames?.some(x => x.id === dev.id);
-                        return (
-                          <Badge 
-                            key={`light-${dev.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.lightIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, lightIdNames: currentList.filter(x => x.id !== dev.id) }));
-                              } else {
-                                if (currentList.length >= 6) {
-                                  toast.error("Limit reached: You cannot add more than 6 lights to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, lightIdNames: [...currentList, { id: dev.id, name: dev.lightName }] }));
-                              }
-                            }}
-                          >
-                            {dev.lightName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Window Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Automated Windows ({Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (4 - (hardwareForm.windowIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 4 - (hardwareForm.windowIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(windows || []).map(dev => {
-                        const isSelected = hardwareForm.windowIdNames?.some(x => x.id === dev.id);
-                        return (
-                          <Badge 
-                            key={`win-${dev.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.windowIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, windowIdNames: currentList.filter(x => x.id !== dev.id) }));
-                              } else {
-                                if (currentList.length >= 4) {
-                                  toast.error("Limit reached: You cannot add more than 4 windows to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, windowIdNames: [...currentList, { id: dev.id, name: dev.windowName }] }));
-                              }
-                            }}
-                          >
-                            {dev.windowName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Door Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Automated Doors ({Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (4 - (hardwareForm.doorIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 4 - (hardwareForm.doorIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(doors || []).map(dev => {
-                        const isSelected = hardwareForm.doorIdNames?.some(x => x.id === dev.id);
-                        return (
-                          <Badge 
-                            key={`door-${dev.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.doorIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, doorIdNames: currentList.filter(x => x.id !== dev.id) }));
-                              } else {
-                                if (currentList.length >= 4) {
-                                  toast.error("Limit reached: You cannot add more than 4 doors to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, doorIdNames: [...currentList, { id: dev.id, name: dev.doorName }] }));
-                              }
-                            }}
-                          >
-                            {dev.doorName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Externals Selection */}
-                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Peripheral Auxiliaries ({Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left)</span>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono",
-                        (5 - (hardwareForm.externalIdNames?.length || 0)) <= 0
-                          ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
-                      )}>
-                        {Math.max(0, 5 - (hardwareForm.externalIdNames?.length || 0))} left
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(externals || []).map(ext => {
-                        const isSelected = hardwareForm.externalIdNames?.some(x => x.id === ext.id);
-                        return (
-                          <Badge 
-                            key={`ext-${ext.id}`} 
-                            variant={isSelected ? 'default' : 'outline'}
-                            className="cursor-pointer hover:opacity-85"
-                            onClick={() => {
-                              const currentList = hardwareForm.externalIdNames || [];
-                              if (isSelected) {
-                                setHardwareForm(prev => ({ ...prev, externalIdNames: currentList.filter(x => x.id !== ext.id) }));
-                              } else {
-                                if (currentList.length >= 5) {
-                                  toast.error("Limit reached: You cannot add more than 5 externals to a hardware.");
-                                  return;
-                                }
-                                setHardwareForm(prev => ({ ...prev, externalIdNames: [...currentList, { id: ext.id, name: ext.externalName }] }));
-                              }
-                            }}
-                          >
-                            {ext.externalName} {isSelected && 'âœ“'}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
-            </div>
-            </ScrollArea>
-          </div>
-        </div>
-
-        <DialogFooter>
-            
-            <Button onClick={() => {
-              if (!hardwareForm.id) return;
-              
-              requestAuth(async () => {
-                // Pack as UpdateHardwareDto
-                const updateDto: UpdateHardwareDto = {
-                  id: Number(hardwareForm.id),
-                  hardwareName: hardwareForm.hardwareName || '',
-                  authKey: hardwareForm.authKey || '',
-                  lightIds: (hardwareForm.lightIdNames || []).map(x => x.id),
-                  applianceIds: (hardwareForm.applianceIdNames || []).map(x => x.id),
-                  cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
-                  windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
-                  doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
-                  externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
-                };
-
-                try {
-                  await apiFetch('/Hardware/UpdateHardware', {
-                    method: 'PUT',
-                    body: JSON.stringify(updateDto)
-                  });
-                } catch (err: any) {
-                  // Fallback: try GET if PUT fails due to strange swagger definition
-                  try {
-                    await apiFetch('/Hardware/UpdateHardware', {
-                      method: 'POST',
-                      body: JSON.stringify(updateDto)
-                    });
-                  } catch (e: any) {
-                    console.error("Failed to update hardware remotely", e);
-                    toast.error(`Hardware update failed: ${err.message}`);
-                    return;
-                  }
-                }
-
-                setHardwares(prev => prev.map(item => item.id === updateDto.id ? {
-                  ...item,
-                  hardwareName: updateDto.hardwareName,
-                  authKey: updateDto.authKey,
-                  lightIdNames: hardwareForm.lightIdNames || [],
-                  applianceIdNames: hardwareForm.applianceIdNames || [],
-                  cameraIdNames: hardwareForm.cameraIdNames || [],
-                  windowIdNames: hardwareForm.windowIdNames || [],
-                  doorIdNames: hardwareForm.doorIdNames || [],
-                  externalIdNames: hardwareForm.externalIdNames || [],
-                } : item));
-
-                setIsEditHardwareOpen(false);
-                addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
-                toast.success('Hardware updated successfully');
-              });
-            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-
-      {/* Add External Device Modal */}
-      <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-600 shadow-2xl">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Radio className="h-6 w-6 text-primary" />
-              Add New External
-            </DialogTitle>
-            <DialogDescription>
-              Deploy a new peripheral automation unit to track custom safety events.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 pt-[3px] pb-3">
-            <div className="grid gap-2">
-              <Label htmlFor="ext-name" className="flex items-center gap-2">
-                <Radio className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> External Name
-              </Label>
-              <Input autoComplete="off" id="ext-name" 
-                placeholder="e.g. Laser Gate Switch" 
-                value={externalForm.externalName || ''}
-                onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
-                className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="ext-section" className="flex items-center gap-2">
-                  <WindowIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Section
-                </Label>
-                <Select 
-                  value={externalForm.sectionId?.toString() || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ 
-                    ...prev, 
-                    sectionId: val === 'none' ? undefined : val,
-                    roomId: undefined
-                  }))}
-                >
-                  <SelectTrigger id="ext-section" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
-                    <SelectValue placeholder="Select section">
-                      {externalForm.sectionId && externalForm.sectionId !== 'none'
-                        ? ((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Select section')
-                        : 'No Section'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Section</SelectItem>
-                    {(sections || []).map(section => (
-                      <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="ext-room" className="flex items-center gap-2">
-                  <HomeIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Room
-                </Label>
-                <Select 
-                  value={externalForm.roomId?.toString() || 'none'} 
-                  onValueChange={(val) => {
-                    if (val === 'none') {
-                      setExternalForm(prev => ({ ...prev, roomId: undefined }));
-                    } else {
-                      const sectId = getRoomSectionId(val);
-                      setExternalForm(prev => ({
-                        ...prev,
-                        roomId: parseInt(val, 10),
-                        sectionId: sectId || undefined
-                      }));
-                    }
-                  }}
-                >
-                  <SelectTrigger id="ext-room" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
-                    <SelectValue placeholder="Select room">
-                      {externalForm.roomId && externalForm.roomId !== 'none'
-                        ? ((rooms || []).find(r => r.id.toString() === externalForm.roomId?.toString())?.name || 'Select room')
-                        : 'No Room'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Room</SelectItem>
-                    {externalForm.sectionId && externalForm.sectionId !== 'none' ? (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Rooms under {((sections || []).find(s => s.id.toString() === externalForm.sectionId?.toString())?.name || 'Selected Section')}
-                        </div>
-                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.sectionId?.toString()).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Unassigned Rooms
-                        </div>
-                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
-                <Zap className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Link to Trigger Actions
-              </Label>
-              <div className="flex flex-wrap gap-2">
-                {(actions || []).map((s) => {
-                  const aid = s.id;
-                  const isSelected = externalForm.actionIds?.includes(aid);
-                  return (
-                    <Badge 
-                      key={`add-ext-act-${s.id}`}
-                      variant={isSelected ? 'default' : 'outline'}
-                      className="cursor-pointer"
-                      onClick={() => {
-                        const ids = externalForm.actionIds || [];
-                        if (isSelected) {
-                          setExternalForm(prev => ({ ...prev, actionIds: ids.filter(id => id !== aid) }));
-                        } else {
-                          setExternalForm(prev => ({ ...prev, actionIds: [...ids, aid] }));
-                        }
-                      }}
-                    >
-                      {s.actionName}
-                    </Badge>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button 
-              onClick={() => {
-                if (!externalForm.externalName) return;
-                requestAuth(async () => {
-                  try {
-                    const payload = {
-                      roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
-                      sectionId: resolveSectionId(externalForm.sectionId, sections),
-                      isHidden: true,
-                      externalName: externalForm.externalName,
-                      actionIds: (externalForm.actionIds || []).map(Number)
-                    };
-                    await apiFetch('/External/CreateExternal', {
-                      method: 'POST',
-                      body: JSON.stringify(payload)
-                    });
-                    toast.success('External device added successfully!');
-                    setIsAddExternalOpen(false);
-                    addLogEntry('Window Control', `Added Boundary Device: ${externalForm.externalName}`);
-                    setExternalForm({});
-                  } catch (err: any) {
-                    toast.error(`Error adding external device: ${err.message}`);
-                  }
-                });
-              }}
-            className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <PlusCircle className="mr-2 h-5 w-5" /> Add External
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-
-      
-      {/* View External Modal */}
-      <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (selectedExternal) {
-                      setExternalForm(selectedExternal);
-                      setIsViewExternalOpen(false);
-                      setIsEditExternalOpen(true);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => requestAuth(async () => {
-                    try {
-                      if (selectedExternal) {
-                        await apiFetch(`/External/DeleteExternal?externalId=${selectedExternal.id}`, { method: 'PUT' });
-                        setExternals(prev => prev.filter(e => e.id !== selectedExternal.id));
-                        setIsViewExternalOpen(false);
-                        addLogEntry('Hardware Security', `Removed external device: ${selectedExternal.externalName}`);
-                        toast.success('External device removed successfully');
-                      }
-                    } catch (err: any) {
-                      toast.error(`Error deleting external device: ${err.message}`);
-                    }
-                  })}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Radio className="h-5 w-5 text-primary" />
-              View {selectedExternal?.externalName || 'External'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and security controls for {selectedExternal?.externalName}.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedExternal && (
-            <div className="pt-[3px] pb-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Triggered Status</span>
-                  <div className="flex items-center gap-2 font-medium">
-                    {isExternalTriggered(selectedExternal) ? (
-                      <Badge variant="destructive" className="animate-pulse">Triggered</Badge>
-                    ) : (
-                      <Badge variant="secondary">Standby</Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">External ID</span>
-                  <div className="font-medium font-mono uppercase">{selectedExternal.externalId}</div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                  <div className="font-medium">
-                    {selectedExternal.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">
-                    {resolveSectionName(selectedExternal, selectedExternal, sections, rooms)}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
-                  <div className="font-medium">{(rooms || []).find(r => r.id === selectedExternal.roomId || r.id.toString() === selectedExternal.roomId?.toString())?.name || 'N/A'}</div>
-                </div>
-                
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                  <div className="font-medium">{getUserNameById(selectedExternal.createdBy) || selectedExternal.createdByName || 'System'}</div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                  <div className="font-medium">{selectedExternal.createdOn ? format(new Date(selectedExternal.createdOn), 'PPp') : 'N/A'}</div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                  <div className="font-medium">{getUserNameById(selectedExternal.lastModifiedBy) || selectedExternal.lastModifiedByName || 'System'}</div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified On</span>
-                  <div className="font-medium">{selectedExternal.lastModifiedOn ? format(new Date(selectedExternal.lastModifiedOn), 'PPp') : 'Never'}</div>
-                </div>
-                <div className="space-y-1 col-span-2">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Linked Triggers</span>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {selectedExternal.actionIds && selectedExternal.actionIds.length > 0 ? (
-                      (selectedExternal.actionIds || []).map(aid => {
-                        const action = (actions || []).find(a => a.id === aid);
-                        return (
-                          <Badge key={aid} variant="outline" className="bg-primary/5 text-primary border-primary/10">
-                            {action?.actionName || `Action #${aid}`}
-                          </Badge>
-                        );
-                      })
-                    ) : (
-                      <span className="text-sm text-slate-500 dark:text-zinc-400 font-medium">No actions linked</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit External Device Modal */}
-      <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="mb-0">
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-              <Pencil className="h-6 w-6 text-primary" />
-              Edit {externalForm?.externalName || 'External'}
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">
-              Modify name pattern and linked trigger actions.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 pt-[3px] pb-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-2">
-                <Radio className="h-3 w-3" /> External Device Name
-              </Label>
-              <Input autoComplete="off" id="edit-ext-name" 
-                value={externalForm.externalName || ''}
-                onChange={(e) => setExternalForm(prev => ({ ...prev, externalName: e.target.value }))}
-                className="rounded-none border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100"
-              />
-            </div>
-            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-zinc-900 rounded-2xl border border-slate-100 dark:border-zinc-800">
-              <div className="space-y-0.5">
-                <Label className="text-sm font-bold text-slate-600 dark:text-zinc-200 flex items-center gap-2">
-                  <Power className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Device Active State
-                </Label>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Enable or disable this external interface</p>
-              </div>
-              <Switch 
-                checked={externalForm.isActive} 
-                onCheckedChange={(checked) => setExternalForm(prev => ({ ...prev, isActive: checked }))}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-ext-section" className="flex items-center gap-2">
-                  <WindowIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Section Name
-                </Label>
-                <Select 
-                  value={externalForm.section || 'none'} 
-                  onValueChange={(val) => setExternalForm(prev => ({ 
-                    ...prev, 
-                    section: val === 'none' ? undefined : val,
-                    room: undefined
-                  }))}
-                >
-                  <SelectTrigger id="edit-ext-section" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
-                    <SelectValue placeholder="Select section">
-                      {externalForm.section && externalForm.section !== 'none'
-                        ? ((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Select section')
-                        : 'No Section'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Section</SelectItem>
-                    {(sections || []).map(section => (
-                      <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="edit-ext-room" className="flex items-center gap-2">
-                  <HomeIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Room Name
-                </Label>
-                <Select 
-                  value={externalForm.room || 'none'} 
-                  onValueChange={(val) => {
-                    if (val === 'none') {
-                      setExternalForm(prev => ({ ...prev, room: undefined }));
-                    } else {
-                      const sectId = getRoomSectionId(val);
-                      setExternalForm(prev => ({
-                        ...prev,
-                        room: val,
-                        section: sectId || undefined
-                      }));
-                    }
-                  }}
-                >
-                  <SelectTrigger id="edit-ext-room" className="h-10 rounded-none bg-transparent text-slate-900 dark:text-zinc-100 shadow-none">
-                    <SelectValue placeholder="Select room">
-                      {externalForm.room && externalForm.room !== 'none'
-                        ? ((rooms || []).find(r => r.id.toString() === externalForm.room?.toString())?.name || 'Select room')
-                        : 'No Room'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Room</SelectItem>
-                    {externalForm.section && externalForm.section !== 'none' ? (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Rooms under {((sections || []).find(s => s.id.toString() === externalForm.section?.toString())?.name || 'Selected Section')}
-                        </div>
-                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === externalForm.section?.toString()).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Unassigned Rooms
-                        </div>
-                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
-                <Zap className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Action Command Triggers
-              </Label>
-              <div className="flex flex-wrap gap-2">
-                {(actions || []).map((s) => {
-                  const aid = s.id;
-                  const isSelected = externalForm.actionIds?.includes(aid);
-                  return (
-                    <Badge 
-                      key={`edit-ext-act-${s.id}`}
-                      variant={isSelected ? 'default' : 'outline'}
-                      className="cursor-pointer"
-                      onClick={() => {
-                        const ids = externalForm.actionIds || [];
-                        if (isSelected) {
-                          setExternalForm(prev => ({ ...prev, actionIds: ids.filter(id => id !== aid) }));
-                        } else {
-                          setExternalForm(prev => ({ ...prev, actionIds: [...ids, aid] }));
-                        }
-                      }}
-                    >
-                      {s.actionName}
-                    </Badge>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button onClick={() => {
-              if (!externalForm.id || !externalForm.externalName) return;
-              requestAuth(async () => {
-                try {
-                  const payload = {
-                    id: Number(externalForm.id),
-                    roomId: (externalForm.roomId && externalForm.roomId !== 'none') ? parseInt(externalForm.roomId.toString()) : null,
-                    sectionId: resolveSectionId(externalForm.section || externalForm.sectionId, sections),
-                    isHidden: true,
-                    externalName: externalForm.externalName,
-                    isTriggered: externalForm.isTriggered || false,
-                    isActive: externalForm.isActive !== false,
-                    actionIds: (externalForm.actionIds || []).map(Number)
-                  };
-                  await apiFetch('/External/UpdateExternal', {
-                    method: 'PUT',
-                    body: JSON.stringify(payload)
-                  });
-                  setExternals(prev => prev.map(item => item.id === externalForm.id ? {
-                    ...item,
-                    externalName: externalForm.externalName || '',
-                    isActive: externalForm.isActive !== false,
-                    actionIds: externalForm.actionIds || [],
-                    roomId: externalForm.roomId,
-                    sectionId: resolveSectionId(externalForm.section || externalForm.sectionId, sections) || undefined,
-                    room: externalForm.room,
-                    section: externalForm.section
-                  } : item));
-                  setIsEditExternalOpen(false);
-                  toast.success('External device updated successfully!');
-                } catch (err: any) {
-                  toast.error(`Failed to update external device: ${err.message}`);
-                }
-              });
-            }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
-              <CheckCheck className="mr-2 h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Camera Feed Modal */}
-      <Dialog open={isCameraModalOpen} onOpenChange={(open) => {
-        setIsCameraModalOpen(open);
-        if (!open) {
-          setCameraPlaybackOffset(0);
-          setPlayingRecordingPath(null);
-        }
-      }}>
-        <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] sm:max-w-[92vw] md:max-w-6xl h-[85vh] p-0 overflow-hidden rounded-3xl border shadow-2xl bg-background text-foreground">
-          {(() => {
-            const rawCamId = selectedCamera ? getRawId(selectedCamera.id) : '';
-            const currentCameraDto = (cameras || []).find(c => c.id.toString() === rawCamId || c.cameraName === selectedCamera?.name);
-            const currentDevice = devices.find(d => d.id === selectedCamera?.id);
-            const isCurrentlyActive = currentDevice ? currentDevice.status === 'active' : (selectedCamera?.status === 'active');
-            const liveStreamUrl = currentCameraDto?.liveStreamUrl 
-              ? resolveCameraUrl(currentCameraDto.liveStreamUrl) 
-              : "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
-            const isLive = !playingRecordingPath;
-            const currentVideoUrl = playingRecordingPath ? resolveCameraUrl(playingRecordingPath) : liveStreamUrl;
-            const recordingsList = currentCameraDto?.recordings || [];
-            
-            return (
-              <div className="flex flex-col h-full bg-background relative overflow-hidden">
-                {/* Header Section */}
-                <div className="flex items-center justify-between p-5 border-b bg-muted/30 shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 rounded-lg text-primary">
-                      <Camera className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                        View {selectedCamera?.name || currentCameraDto?.cameraName || 'Camera'}
-                        <Badge variant="secondary" className={cn(
-                          "ml-2 text-[10px] py-0 px-2 font-mono uppercase tracking-wider border",
-                          isCurrentlyActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-zinc-100 text-zinc-600 border-zinc-200"
-                        )}>
-                          {isCurrentlyActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </h2>
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
-                        ID: {currentCameraDto?.cameraId || `CAM-${selectedCamera?.id}`} â€¢ 1080p Streamed â€¢ {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Main Hub'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-1 z-50">
-                    {isOwner && (
-                      <>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                          onClick={() => {
-                            if (selectedCamera) {
-                              handleEditDevice(selectedCamera.id, 'camera');
-                              setIsCameraModalOpen(false);
-                            }
-                          }}
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                          onClick={() => {
-                            if (selectedCamera) {
-                              handleDeleteDevice(selectedCamera.id, 'camera');
-                              setIsCameraModalOpen(false);
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                        <div className="h-4 w-px bg-border mx-1" />
-                      </>
-                    )}
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                      onClick={() => setIsCameraModalOpen(false)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Main Body Grid */}
-                <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden min-h-0 bg-background">
-                  {/* Left Column: Live/Playback video screen & info panel */}
-                  <div className="lg:col-span-7 flex flex-col p-6 gap-6 overflow-y-auto border-r h-full">
-                    {/* Video Stream Container */}
-                    <div ref={videoContainerRef} className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border shadow-2xl group flex flex-col justify-center shrink-0">
-                      {/* Video source overlay status */}
-                      <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-black/70 px-3 py-1.5 rounded-full border border-white/10 backdrop-blur-md">
-                        <div className={cn(
-                          "h-2 w-2 rounded-full",
-                          isLive ? "bg-red-500 animate-pulse" : "bg-cyan-400"
-                        )} />
-                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-white">
-                          {isLive ? 'LIVE HD FEED' : 'PLAYBACK: RECORDING'}
-                        </span>
-                      </div>
-
-                      {/* Video Player */}
-                      {(isCurrentlyActive || !isLive) ? (
-                        <HlsVideo
-                          ref={videoRef}
-                          key={currentVideoUrl}
-                          src={currentVideoUrl || undefined}
-                          className={cn(
-                            "h-full w-full object-cover select-none bg-black",
-                            isFullscreen ? "h-screen w-screen object-contain" : ""
-                          )}
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                        />
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center bg-black/90 p-12 text-center h-full">
-                          <VideoOff className="h-16 w-16 text-slate-500 dark:text-zinc-400/30 mb-4" />
-                          <h3 className="text-xl font-bold text-white mb-2">Camera Inactive</h3>
-                          <p className="text-slate-500 dark:text-zinc-400 text-sm max-w-xs">
-                            Please toggle active status to view live feed
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Overlap UI controls */}
-                      <div className="absolute bottom-4 left-4 right-4 z-30 flex justify-between items-center bg-black/60 p-3 rounded-xl border border-white/10 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <span className="text-xs font-mono text-white/90">
-                          {isLive ? 'Live RTSP Direct Stream' : 'Archive Backup Playback'}
-                        </span>
-                        
-                        <div className="flex items-center gap-3">
-                          <Button 
-                            size="sm" 
-                            variant="ghost"
-                            className="text-white hover:bg-white/10 h-8 w-8 p-0 rounded-lg transition-all active:scale-95"
-                            onClick={toggleCameraFullscreen}
-                            title="Fullscreen"
-                          >
-                            {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-                          </Button>
-                          
-                          {!isLive && (
-                            <Button 
-                              size="sm" 
-                              variant="default"
-                              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold py-1 px-3 h-8 text-[11px] rounded-lg tracking-wider font-mono shadow-lg transition-all active:scale-95"
-                              onClick={() => setPlayingRecordingPath(null)}
-                            >
-                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                              Return to Live
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Camera Info Detail Grid */}
-                    <div className="bg-muted/30 p-5 rounded-2xl border space-y-4 shrink-0">
-                      <div className="flex items-center justify-between border-b pb-2">
-                        <h3 className="text-sm font-bold text-foreground tracking-widest uppercase font-mono">Stream Configuration</h3>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-blue-600 border-slate-200 text-[10px]">CCTV CONNECTION</Badge>
-                          {selectedCamera && (
-                            <div className="flex items-center gap-1.5 ml-1 border-l pl-2 border-border">
-                              <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 uppercase">Power</span>
-                              <Switch
-                                id="camera-modal-power-toggle"
-                                checked={isCurrentlyActive}
-                                onCheckedChange={() => handleToggle(selectedCamera.id)}
-                              />
-                            </div>
-                          )}
-                          {currentCameraDto && (
-                            <Button
-                              id="restart-camera-btn"
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground transition-all active:scale-95"
-                              onClick={() => handleRestartCamera(currentCameraDto.id)}
-                              disabled={isRestartingCamera}
-                              title="Restart Camera"
-                            >
-                              <RefreshCw className={cn("h-3.5 w-3.5", isRestartingCamera && "animate-spin")} />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">IP Address</span>
-                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.ipAddress || '127.0.0.1'}</span>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Port Node</span>
-                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.port || '80'}</span>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Username</span>
-                          <span className="font-semibold text-foreground font-mono">{currentCameraDto?.username || 'N/A'}</span>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Stream Path</span>
-                          <span className="font-semibold text-foreground font-mono text-ellipsis overflow-hidden block">{currentCameraDto?.streamPath || '/'}</span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t">
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Room Name</span>
-                          <span className="font-semibold text-foreground">
-                            {selectedCamera?.room ? (rooms || []).find(r => r.id.toString() === selectedCamera.room?.toString())?.name : 'Unassigned Room'}
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-slate-500 dark:text-zinc-400 block font-mono uppercase text-[9px] tracking-wider">Section Name</span>
-                          <span className="font-semibold text-foreground">
-                            {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Advanced Operations: Move the Edit and Delete icons into the view modal */}
-                      <div className="grid grid-cols-2 gap-4 pt-2 border-t mt-4">
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                          <div className="font-medium">
-                            {currentCameraDto?.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
-                          <div className="font-medium">
-                            {currentCameraDto?.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                          <div className="font-medium">
-                            {resolveSectionName(selectedCamera, currentCameraDto, sections, rooms)}
-                          </div>
-                        </div>
-                        
-                        
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                          <div className="font-medium">{getUserNameById(currentCameraDto?.createdBy) || currentCameraDto?.createdByName || 'System'}</div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                          <div className="font-medium">{currentCameraDto?.createdOn ? format(new Date(currentCameraDto.createdOn), 'PPp') : 'N/A'}</div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                          <div className="font-medium">{getUserNameById(currentCameraDto?.lastModifiedBy) || currentCameraDto?.lastModifiedByName || 'System'}</div>
-                        </div>
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                          <div className="font-medium">{currentCameraDto?.lastModifiedOn ? format(new Date(currentCameraDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                        </div>
-                      </div>
-                  </div>
-
-                  {/* Right Column: List of recordings in table format */}
-                  <div className="lg:col-span-5 flex flex-col p-6 h-full overflow-hidden">
-                    <div className="flex items-center justify-between mb-4 shrink-0">
-                      <h3 className="text-sm font-bold text-foreground tracking-wider uppercase font-mono flex items-center gap-2">
-                        <Video className="h-4 w-4 text-primary" />
-                        History recordings
-                      </h3>
-                      <Badge variant="secondary" className="bg-primary/10 text-primary text-[10px] font-mono">
-                        {recordingsList.length} Saved
-                      </Badge>
-                    </div>
-
-                    {/* Scrollable Table View */}
-                    <div className="flex-1 overflow-y-auto pr-1">
-                      {recordingsList.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-48 rounded-xl border border-dashed text-center p-6">
-                          <EyeOff className="h-8 w-8 text-slate-500 dark:text-zinc-400/40 mb-2 animate-bounce" />
-                          <p className="text-xs text-slate-500 dark:text-zinc-400">No recent security backup files located for this camera.</p>
-                        </div>
-                      ) : (
-                        <div className="border rounded-xl overflow-hidden bg-muted/10">
-                          <table className="w-full text-xs text-left">
-                            <thead className="text-[10px] bg-muted/20 text-slate-500 dark:text-zinc-400 uppercase tracking-wider border-b font-mono">
-                              <tr>
-                                <th className="p-3">Interval / Time Frame</th>
-                                <th className="p-3 text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y font-mono">
-                              {(recordingsList || []).map((recording, idx) => {
-                                const isCurrentlyPlayingThis = playingRecordingPath === recording.filePath;
-                                return (
-                                  <tr key={idx} className={cn(
-                                    "transition-colors hover:bg-muted/50",
-                                    isCurrentlyPlayingThis ? "bg-primary/10 text-primary" : ""
-                                  )}>
-                                    <td className="p-3">
-                                      <div className="flex flex-col gap-1">
-                                        <span className="font-semibold text-foreground">
-                                          {format(new Date(recording.startTime), "MMM dd, HH:mm:ss")}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500 dark:text-zinc-400">
-                                          to {format(new Date(recording.endTime), "HH:mm:ss")}
-                                        </span>
-                                      </div>
-                                    </td>
-                                    <td className="p-3 text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className={cn(
-                                            "h-7 w-7 rounded-lg",
-                                            isCurrentlyPlayingThis ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                                          )}
-                                          onClick={() => setPlayingRecordingPath(recording.filePath)}
-                                          title="Play Recording Video"
-                                        >
-                                          <Play className="h-3 w-3" />
-                                        </Button>
-                                        
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-7 w-7 rounded-lg hover:bg-muted text-slate-500 dark:text-zinc-400 hover:text-foreground"
-                                          onClick={() => {
-                                            alert(`Initiating secure direct server download for ${recording.filePath.split('/').pop() || 'backup.mp4'}`);
-                                            addLogEntry("Camera Access", `Initiated download of backup recording clip for camera: ${currentCameraDto?.cameraName || selectedCamera?.name}`);
-                                          }}
-                                          title="Download Backup Clip"
-                                        >
-                                          <Download className="h-3 w-3" />
-                                        </Button>
-                                        
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-7 w-7 rounded-lg hover:bg-destructive/10 hover:text-destructive text-slate-500 dark:text-zinc-400"
-                                          onClick={() => {
-                                            // Handle record deletion
-                                            setCameras(prev => prev.map(c => {
-                                              if (c.id.toString() === getRawId(selectedCamera?.id)) {
-                                                return {
-                                                  ...c,
-                                                  recordings: c.recordings.filter(r => r.filePath !== recording.filePath)
-                                                };
-                                              }
-                                              return c;
-                                            }));
-                                            if (isCurrentlyPlayingThis) setPlayingRecordingPath(null);
-                                            addLogEntry("Camera Access", `Secured permanent deletion of backup clip starting at ${format(new Date(recording.startTime), "HH:mm:ss")} from ${currentCameraDto?.cameraName || selectedCamera?.name}`);
-                                          }}
-                                          title="Delete Backup Clip"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-      {/* Appliance View Modal */}
-      <Dialog open={isApplianceModalOpen} onOpenChange={setIsApplianceModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (selectedAppliance) {
-                      handleEditDevice(selectedAppliance.id, 'appliance');
-                      setIsApplianceModalOpen(false);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (selectedAppliance) {
-                      handleDeleteDevice(selectedAppliance.id, 'appliance');
-                      setIsApplianceModalOpen(false);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Power className="h-5 w-5 text-primary" />
-              View {selectedAppliance?.name || 'Appliance'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and configuration for {selectedAppliance?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedAppliance && (() => {
-            const rawAppId = getRawId(selectedAppliance.id);
-            const currentApplianceDto = (appliances || []).find(a => a.id.toString() === rawAppId || a.applianceName === selectedAppliance.name) as any;
-            return (
-            <div className="pt-[3px] pb-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
-                  <div className="flex items-center gap-2 font-medium">
-                    <div className={cn("h-2 w-2 rounded-full", selectedAppliance.status === 'on' ? 'bg-emerald-500' : 'bg-zinc-400')} />
-                    {selectedAppliance.status === 'on' ? 'Active' : 'Inactive'}
-                  </div>
-                </div>
-                
-                
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Device Type</span>
-                  <div className="font-medium capitalize">{selectedAppliance.type}</div>
-                </div>
-                {currentApplianceDto && (
-                  <>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                      <div className="font-medium">
-                        {currentApplianceDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
-                      <div className="font-medium">
-                        {currentApplianceDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                      <div className="font-medium">
-                        {resolveSectionName(selectedAppliance, currentApplianceDto, sections, rooms)}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
-                      <div className="font-medium">
-                        {selectedAppliance.room ? ((rooms || []).find(r => r.id.toString() === selectedAppliance.room?.toString())?.name || 'N/A') : (currentApplianceDto.roomId ? ((rooms || []).find(r => r.id.toString() === currentApplianceDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                      <div className="font-medium">{getUserNameById(currentApplianceDto.createdBy) || currentApplianceDto.createdByName || 'System'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                      <div className="font-medium">{currentApplianceDto.createdOn ? format(new Date(currentApplianceDto.createdOn), 'PPp') : 'N/A'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                      <div className="font-medium">{getUserNameById(currentApplianceDto.lastModifiedBy) || currentApplianceDto.lastModifiedByName || 'System'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                      <div className="font-medium">{currentApplianceDto.lastModifiedOn ? format(new Date(currentApplianceDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      {/* Door View Modal */}
-      <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (selectedDoor) {
-                      handleEditDevice(selectedDoor.id, 'door');
-                      setIsDoorModalOpen(false);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (selectedDoor) {
-                      handleDeleteDevice(selectedDoor.id, 'door');
-                      setIsDoorModalOpen(false);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Lock className="h-5 w-5 text-primary" />
-              View {selectedDoor?.name || 'Door'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and security controls for {selectedDoor?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedDoor && (() => {
-            const rawDoorId = getRawId(selectedDoor.id);
-            const currentDoorDto = (doors || []).find(d => d.id.toString() === rawDoorId || d.doorName === selectedDoor.name) as any;
-            return (
-            <div className="pt-[3px] pb-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
-                  <div className="flex items-center gap-2 font-medium">
-                    {selectedDoor.status === 'locked' ? (
-                      <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
-                    ) : (
-                      <Badge variant="destructive">Unlocked</Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Door Type</span>
-                  <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
-                </div>
-                
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                  <div className="font-medium">
-                    {resolveSectionName(selectedDoor, currentDoorDto, sections, rooms)}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
-                  <div className="font-medium">
-                    {selectedDoor.room ? ((rooms || []).find(r => r.id.toString() === selectedDoor.room?.toString())?.name || 'N/A') : (currentDoorDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentDoorDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
-                  </div>
-                </div>
-                {currentDoorDto && (
-                  <>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                      <div className="font-medium">
-                        {currentDoorDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
-                      <div className="font-medium">
-                        {currentDoorDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                      </div>
-                    </div>
-                    
-                    
-                    
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                      <div className="font-medium">{getUserNameById(currentDoorDto.createdBy) || currentDoorDto.createdByName || 'System'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                      <div className="font-medium">{currentDoorDto.createdOn ? format(new Date(currentDoorDto.createdOn), 'PPp') : 'N/A'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                      <div className="font-medium">{getUserNameById(currentDoorDto.lastModifiedBy) || currentDoorDto.lastModifiedByName || 'System'}</div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                      <div className="font-medium">{currentDoorDto.lastModifiedOn ? format(new Date(currentDoorDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-          })()}
-        </DialogContent>
-      </Dialog>
-      {/* Light View Modal */}
-      <Dialog open={isLightModalOpen} onOpenChange={setIsLightModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (selectedLight) {
-                      handleEditDevice(selectedLight.id, 'light');
-                      setIsLightModalOpen(false);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (selectedLight) {
-                      handleDeleteDevice(selectedLight.id, 'light');
-                      setIsLightModalOpen(false);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Lightbulb className="h-5 w-5 text-primary" />
-              View {selectedLight?.name || 'Light'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and configuration for {selectedLight?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedLight && (() => {
-            const rawLightId = getRawId(selectedLight.id);
-            const currentLightDto = (lights || []).find(l => l.lightName === selectedLight?.name || l.id.toString() === rawLightId) as any;
-            return (
-              <div className="pt-[3px] pb-4 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
-                    <div className="flex items-center gap-2 font-medium">
-                      <div className={cn("h-2 w-2 rounded-full", selectedLight.status === 'on' ? 'bg-amber-400' : 'bg-zinc-400')} />
-                      {selectedLight.status === 'on' ? 'On' : 'Off'}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Brightness</span>
-                    <div className="font-medium">{selectedLight.value || currentLightDto?.brightnessLevel || 0}%</div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
-                    <div className="font-medium">
-                      {selectedLight.room ? ((rooms || []).find(r => r.id.toString() === selectedLight.room?.toString())?.name || 'N/A') : (currentLightDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentLightDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
-                    </div>
-                  </div>
-                  {/* BaseDefaultDto Integration */}
-                  {currentLightDto && (
-                    <>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                        <div className="font-medium">
-                          {currentLightDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
-                        <div className="font-medium">
-                          {currentLightDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                        <div className="font-medium">
-                          {resolveSectionName(selectedLight, currentLightDto, sections, rooms)}
-                        </div>
-                      </div>
-                      
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{getUserNameById(currentLightDto.createdBy) || currentLightDto.createdByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                        <div className="font-medium">{currentLightDto.createdOn ? format(new Date(currentLightDto.createdOn), 'PPp') : 'N/A'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{getUserNameById(currentLightDto.lastModifiedBy) || currentLightDto.lastModifiedByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                        <div className="font-medium">{currentLightDto.lastModifiedOn ? format(new Date(currentLightDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-      {/* Section View Modal */}
-      <Dialog open={isViewSectionOpen} onOpenChange={setIsViewSectionOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            {isOwner && (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    if (viewingSection) {
-                      setEditingSection(viewingSection);
-                      setIsEditSectionOpen(true);
-                      setIsViewSectionOpen(false);
-                    }
-                  }}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                  onClick={() => {
-                    if (viewingSection) {
-                      requestAuth(async () => {
-                        try {
-                          await apiFetch(`/Section/DeleteSection?sectionId=${viewingSection.id}`, { method: 'PUT' });
-                          setSections((prev: any) => prev.filter((s: any) => s.id !== viewingSection.id));
-                          setIsViewSectionOpen(false);
-                          toast.success("Section deleted successfully");
-                        } catch (err: any) {
-                          console.error("Failed to delete section", err);
-                          toast.error(`Failed to delete section: ${err.message}`);
-                        }
-                      });
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div className="h-4 w-px bg-border mx-1" />
-              </>
-            )}
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
-              View {viewingSection?.name || 'Section'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and configuration for {viewingSection?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {viewingSection && (() => {
-            const currentSectionDto = (sections || []).find(s => s.id.toString() === viewingSection.id.toString() || (s as any).sectionId === viewingSection.id) as any;
-            return (
-              <div className="pt-[3px] pb-4 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                    <div className="font-medium text-lg">{currentSectionDto?.sectionName || viewingSection.name}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Name</span>
-                    <div className="font-medium text-lg">{viewingSection.name}</div>
-                  </div>
-                  {currentSectionDto && (
-                    <>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Hidden Status</span>
-                        <div className="font-medium text-sm">
-                          {currentSectionDto.isHidden ? <Badge variant="secondary">Hidden</Badge> : <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Visible</Badge>}
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                        <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'createdBy')) || getProp(currentSectionDto, 'createdByName') || 'System'}</div>
-                      </div>
-                      <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                        <div className="font-medium text-sm">
-                          {(() => {
-                            const dateVal = getProp(currentSectionDto, 'createdOn');
-                            if (!dateVal) return 'N/A';
-                            try {
-                              return format(new Date(dateVal), 'PPp');
-                            } catch {
-                              return 'N/A';
-                            }
-                          })()}
-                        </div>
-                      </div>
-                      <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium text-sm">{getUserNameById(getProp(currentSectionDto, 'lastModifiedBy')) || getProp(currentSectionDto, 'lastModifiedByName') || 'System'}</div>
-                      </div>
-                      <div className="col-span-2 space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                        <div className="font-medium text-sm">
-                          {(() => {
-                            const dateVal = getProp(currentSectionDto, 'lastModifiedOn') || getProp(currentSectionDto, 'lastModifiedTime');
-                            if (!dateVal) return 'Never';
-                            try {
-                              return format(new Date(dateVal), 'PPp');
-                            } catch {
-                              return 'Never';
-                            }
-                          })()}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      {/* Window View Modal */}
-      <Dialog open={isViewWindowOpen} onOpenChange={setIsViewWindowOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
-          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => {
-                if (selectedWindow) {
-                  handleEditDevice(selectedWindow.id, 'window');
-                  setIsViewWindowOpen(false);
-                }
-              }}
-            >
-              <Edit3 className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => {
-                if (selectedWindow) {
-                  handleDeleteDevice(selectedWindow.id, 'window');
-                  setIsViewWindowOpen(false);
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <div className="h-4 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-4 w-4" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="mb-0 pr-24">
-            <DialogTitle className="flex items-center gap-2">
-              <WindowIcon className="h-5 w-5 text-primary" />
-              View {selectedWindow?.name || 'Window'}
-            </DialogTitle>
-            <DialogDescription>
-              Detailed view and configuration for {selectedWindow?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedWindow && (() => {
-            const rawWinId = getRawId(selectedWindow.id);
-            const currentWindowDto = (windows || []).find(w => w.windowName === selectedWindow?.name || w.id.toString() === rawWinId) as any;
-            return (
-              <div className="pt-[3px] pb-4 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
-                    <div className="flex items-center gap-2 font-medium">
-                      {selectedWindow.status === 'locked' ? (
-                        <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600">Locked</Badge>
-                      ) : (
-                        <Badge variant="destructive">Unlocked</Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Open Status</span>
-                    <div className="flex items-center gap-2 font-medium">
-                      {currentWindowDto?.isOpen ? (
-                        <Badge variant="secondary" className="bg-amber-400">Open</Badge>
-                      ) : (
-                        <Badge variant="secondary">Closed</Badge>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
-                    <div className="font-medium text-sm">
-                      {selectedWindow.room ? ((rooms || []).find(r => r.id.toString() === selectedWindow.room?.toString())?.name || 'N/A') : (currentWindowDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentWindowDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
-                    </div>
-                  </div>
-                  {/* BaseDefaultDto Integration */}
-                  {currentWindowDto && (
-                    <>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
-                        <div className="font-medium">
-                          {currentWindowDto.isActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
-                        <div className="font-medium">
-                          {currentWindowDto.powerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
-                        <div className="font-medium text-sm">
-                          {resolveSectionName(selectedWindow, currentWindowDto, sections, rooms)}
-                        </div>
-                      </div>
-                      
-                      
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
-                        <div className="font-medium">{getUserNameById(currentWindowDto.createdBy) || currentWindowDto.createdByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
-                        <div className="font-medium">{currentWindowDto.createdOn ? format(new Date(currentWindowDto.createdOn), 'PPp') : 'N/A'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
-                        <div className="font-medium">{getUserNameById(currentWindowDto.lastModifiedBy) || currentWindowDto.lastModifiedByName || 'System'}</div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
-                        <div className="font-medium">{currentWindowDto.lastModifiedOn ? format(new Date(currentWindowDto.lastModifiedOn), 'PPp') : 'Never'}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800" showCloseButton={false}>
-          <div className="absolute right-6 top-6 flex items-center gap-2 z-50">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-10 w-10 rounded-full text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
-              onClick={() => { 
-                if (selectedAction) {
-                  setActionForm({
-                    actionName: selectedAction.actionName,
-                    description: selectedAction.actionDescription || '',
-                    isPrivate: !!selectedAction.isPrivate,
-                    isRecurring: !!selectedAction.isRecurring,
-                    time: formatTimeSpanForPayload(selectedAction.time || '00:00:00')
-                  });
-                }
-                setIsViewActionOpen(false); 
-                setIsEditActionOpen(true); 
-              }}
-            >
-              <Edit3 className="h-5 w-5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-10 w-10 rounded-full text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-              onClick={() => requestAuth(async () => { 
-                if (selectedAction) {
-                  try {
-                    await apiFetch(`/Action/DeleteAction?actionId=${selectedAction.id}`, { method: 'PUT' });
-                    setActions(prev => prev.filter(a => a.id !== selectedAction.id));
-                    setIsViewActionOpen(false);
-                    toast.success('Action deleted successfully!');
-                  } catch (err: any) {
-                    toast.error(`Error deleting action: ${err.message}`);
-                  }
-                }
-              })}
-            >
-              <Trash2 className="h-5 w-5" />
-            </Button>
-            <div className="h-5 w-px bg-border mx-1" />
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
-              <X className="h-5 w-5" />
-            </DialogClose>
-          </div>
-          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800 mb-0 shrink-0 pr-40 flex flex-col justify-center">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2 text-foreground dark:text-zinc-100">
-                <Zap className="h-6 w-6 text-primary shrink-0" />
-                {selectedAction?.actionName}
-              </DialogTitle>
-              <DialogDescription className="text-slate-500 dark:text-zinc-400 font-medium flex items-center gap-2 flex-wrap leading-none">
-                <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
-                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
-                {selectedAction?.actionActive ? 
-                  <span className="text-emerald-500 font-bold text-[11px] uppercase tracking-wider shrink-0">Active sequence</span> : 
-                  <span className="text-slate-400 font-bold text-[11px] uppercase tracking-wider shrink-0">Disabled</span>
-                }
-                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
-                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isPrivate ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800")}>
-                  {selectedAction?.isPrivate ? "Private" : "Public"}
-                </Badge>
-                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700")}>
-                  {selectedAction?.isRecurring ? "Recurring" : "One-time"}
-                </Badge>
-                {selectedAction?.time && (
-                  <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
-                    {formatTimeSpanDisplay(selectedAction.time)}
-                  </Badge>
-                )}
-              </DialogDescription>
-            </div>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-6 scrollbar-hide">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <Layers className="h-3 w-3" />
-                  Execution Sequence
-                </h4>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-primary font-bold hover:bg-primary/5 rounded-lg h-8 px-2"
-                  onClick={() => {
-                    setActionStepForm({
-                      actionId: selectedAction?.id || 0,
-                      facilityType: FacilityType.Appliance,
-                      facilityTypeId: 0,
-                      brightnessLevel: 0,
-                      isLocked: false,
-                      isOpen: false,
-                      isActive: false
-                    });
-                    setIsAddActionStepOpen(true);
-                  }}
-                >
-                  <PlusCircle className="h-4 w-4 mr-1.5" />
-                  Add Step
-                </Button>
-              </div>
-
-              <div className="space-y-3">
-                {(selectedAction?.getActionStepDtos || []).map((step, idx) => (
-                  <Card key={step.id} className="p-4 bg-white dark:bg-zinc-950 border-slate-200/60 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all group rounded-2xl">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-400 shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700 dark:text-zinc-100">
-                            {(() => {
-                              switch (step.facilityType) {
-                                case FacilityType.Appliance: return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
-                                case FacilityType.Camera: return (cameras || []).find(x => x.id === step.facilityTypeId)?.cameraName || 'Camera';
-                                case FacilityType.Door: return (doors || []).find(x => x.id === step.facilityTypeId)?.doorName || 'Door';
-                                case FacilityType.External: return (externals || []).find(x => x.id === step.facilityTypeId)?.externalName || 'External';
-                                case FacilityType.Light: return (lights || []).find(x => x.id === step.facilityTypeId)?.lightName || 'Light';
-                                case FacilityType.Window: return (windows || []).find(x => x.id === step.facilityTypeId)?.windowName || 'Window';
-                                default: return 'Device';
-                              }
-                            })()}
-                          </span>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md">
-                            {FacilityType[step.facilityType]}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 mt-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                          {step.facilityType === FacilityType.Light && step.brightnessLevel > 0 && (
-                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 rounded-lg">
-                              Brightness: {step.brightnessLevel}%
-                            </Badge>
-                          )}
-                          {step.facilityType === FacilityType.Door && (
-                            <Badge variant="outline" className={cn(
-                              "text-[10px] rounded-lg",
-                              step.isLocked ? "bg-slate-50 text-blue-600 border-slate-200" : "bg-slate-50 text-slate-500 border-slate-200"
-                            )}>
-                              {step.isLocked ? "Locked" : "Unlocked"}
-                            </Badge>
-                          )}
-                          {(step.facilityType === FacilityType.Door || step.facilityType === FacilityType.Window) && (
-                            <Badge variant="outline" className={cn(
-                              "text-[10px] rounded-lg",
-                              step.isOpen ? "bg-orange-50 text-orange-600 border-orange-200" : "bg-slate-50 text-slate-500 border-slate-200"
-                            )}>
-                              {step.isOpen ? "Open" : "Closed"}
-                            </Badge>
-                          )}
-                          <Badge variant="outline" className={cn(
-                            "text-[10px] rounded-lg",
-                            step.isActive ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"
-                          )}>
-                            {step.isActive ? "Run" : "Stop"}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-9 w-9 rounded-xl hover:bg-slate-50 hover:text-blue-600 text-slate-400" 
-                          title="Edit Step"
-                          onClick={() => {
-                            setSelectedActionStep(step);
-                            setActionStepForm({ ...step });
-                            setIsEditActionStepOpen(true);
-                          }}
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive text-slate-400" 
-                          title="Remove Step"
-                          onClick={() => requestAuth(async () => {
-                            if (selectedAction) {
-                              try {
-                                await apiFetch(`/Action/DeleteActionStep?actionId=${selectedAction.id}&actionStepId=${step.id}`, { method: 'PUT', body: '' });
-                                const updatedSteps = selectedAction.getActionStepDtos.filter(s => s.id !== step.id);
-                                const updatedAction = { ...selectedAction, getActionStepDtos: updatedSteps };
-                                setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
-                                setSelectedAction(updatedAction);
-                                toast.success('Action step deleted successfully!');
-                              } catch (err: any) {
-                                toast.error(`Error deleting action step: ${err.message}`);
-                              }
-                            }
-                          })}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-6 bg-primary/5 dark:bg-zinc-950 rounded-3xl border border-primary/10 dark:border-zinc-800">
-              <h4 className="text-sm font-bold text-primary uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Info className="h-4 w-4" />
-                Description
-              </h4>
-              <p className="text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
-                {selectedAction?.actionDescription}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Created By</span>
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
-                    <UserCircle className="h-5 w-5" />
-                  </div>
-                  <div className="font-bold text-slate-700 dark:text-zinc-100">
-                    {getProp(selectedAction, 'createdByName') || getUserNameById(getProp(selectedAction, 'createdBy') || getProp(selectedAction, 'personId')) || 'System'}
-                  </div>
-                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
-                    {(() => {
-                      const cOn = getProp(selectedAction, 'createdOn') || getProp(selectedAction, 'createdDate') || getProp(selectedAction, 'createdTime') || getProp(selectedAction, 'createdAt');
-                      return cOn ? format(new Date(cOn), 'PP') : 'N/A';
-                    })()}
-                  </div>
-                </div>
-              </div>
-              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Last Modified</span>
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
-                    <Settings2 className="h-5 w-5" />
-                  </div>
-                  <div className="font-bold text-slate-700 dark:text-zinc-100">
-                    {getProp(selectedAction, 'lastModifiedByName') || getUserNameById(getProp(selectedAction, 'lastModifiedBy') || getProp(selectedAction, 'personId')) || 'System'}
-                  </div>
-                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
-                    {(() => {
-                      const mOn = getProp(selectedAction, 'lastModifiedOn') || getProp(selectedAction, 'lastModifiedTime') || getProp(selectedAction, 'lastModifiedDate') || getProp(selectedAction, 'updatedAt');
-                      return mOn ? format(new Date(mOn), 'PP') : 'N/A';
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5 border-t bg-white dark:bg-zinc-950 shrink-0">
-             <div className="flex justify-end gap-3 text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-widest">
-               Step configuration for automated sequence
-             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
-          <DialogHeader className="mb-0">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Zap className="h-6 w-6 text-primary shrink-0" />
-                Add Action
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Define a new automated sequence</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="grid gap-2">
-              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Action Name
-              </Label>
-              <Input autoComplete="off" id="actionName" 
-                placeholder="e.g. Master Shutoff" 
-                value={actionForm.actionName}
-                onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Description
-              </Label>
-              <Input autoComplete="off" id="description" 
-                placeholder="Describe what this action does..." 
-                value={actionForm.description}
-                onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Scheduled Execution Time
-              </Label>
-              <Input autoComplete="off" id="actionTime" type="time"
-                value={formatTimeSpanForInput(actionForm.time)}
-                onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
-              <div className="flex items-center gap-2.5">
-                <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
-                <div>
-                  <Label htmlFor="isPrivate" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Private Action</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Restricted to current user</p>
-                </div>
-              </div>
-              <Switch
-                id="isPrivate"
-                checked={actionForm.isPrivate}
-                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isPrivate: checked }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
-              <div className="flex items-center gap-2.5">
-                <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
-                <div>
-                  <Label htmlFor="isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
-                </div>
-              </div>
-              <Switch
-                id="isRecurring"
-                checked={actionForm.isRecurring}
-                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isRecurring: checked }))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button 
-              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 px-4 font-medium flex items-center justify-center gap-2"
-              onClick={() => {
-                if (!actionForm.actionName) return;
-                requestAuth(async () => {
-                  try {
-                    const payload = { 
-                      ActionName: actionForm.actionName, 
-                      Description: actionForm.description || '',
-                      IsPrivate: actionForm.isPrivate,
-                      IsRecurring: actionForm.isRecurring,
-                      Time: formatTimeSpanForPayload(actionForm.time)
-                    };
-                    await apiFetch('/Action/CreateAction', { 
-                      method: 'POST', 
-                      body: JSON.stringify(payload) 
-                    });
-                    toast.success('Action created successfully!');
-                    setIsAddActionOpen(false);
-                    setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
-                  } catch (err: any) {
-                    toast.error(`Error creating action: ${err.message}`);
-                  }
-                });
-              }}
-            >
-              <PlusCircle className="h-5 w-5" />
-              Add Action
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
-          <DialogHeader className="mb-0">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Edit3 className="h-6 w-6 text-primary shrink-0" />
-                Edit Action
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Update action details</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Action Name
-              </Label>
-              <Input autoComplete="off" id="edit-actionName" 
-                placeholder="e.g. Master Shutoff" 
-                value={actionForm.actionName}
-                onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Description
-              </Label>
-              <Input autoComplete="off" id="edit-description" 
-                placeholder="Describe what this action does..." 
-                value={actionForm.description}
-                onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
-                Scheduled Execution Time
-              </Label>
-              <Input autoComplete="off" id="edit-actionTime" type="time"
-                value={formatTimeSpanForInput(actionForm.time)}
-                onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
-              <div className="flex items-center gap-2.5">
-                <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
-                <div>
-                  <Label htmlFor="edit-isPrivate" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Private Action</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Restricted to current user</p>
-                </div>
-              </div>
-              <Switch
-                id="edit-isPrivate"
-                checked={actionForm.isPrivate}
-                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isPrivate: checked }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
-              <div className="flex items-center gap-2.5">
-                <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
-                <div>
-                  <Label htmlFor="edit-isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
-                </div>
-              </div>
-              <Switch
-                id="edit-isRecurring"
-                checked={actionForm.isRecurring}
-                onCheckedChange={(checked) => setActionForm(prev => ({ ...prev, isRecurring: checked }))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button 
-              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 px-4 font-medium flex items-center justify-center gap-2"
-              onClick={() => {
-                if (selectedAction) {
-                  requestAuth(async () => {
-                    try {
-                      const payload = { 
-                        Id: Number(selectedAction.id), 
-                        ActionName: actionForm.actionName, 
-                        Description: actionForm.description || '',
-                        IsPrivate: actionForm.isPrivate,
-                        IsRecurring: actionForm.isRecurring,
-                        Time: formatTimeSpanForPayload(actionForm.time)
-                      };
-                      await apiFetch('/Action/UpdateAction', { 
-                        method: 'PUT', 
-                        body: JSON.stringify(payload) 
-                      });
-                      const updatedAction = {
-                        ...selectedAction,
-                        actionName: actionForm.actionName,
-                        actionDescription: actionForm.description,
-                        isPrivate: actionForm.isPrivate,
-                        isRecurring: actionForm.isRecurring,
-                        time: formatTimeSpanForPayload(actionForm.time),
-                        lastModifiedOn: new Date().toISOString()
-                      };
-                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
-                      setSelectedAction(updatedAction);
-                      setIsEditActionOpen(false);
-                      setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
-                      toast.success('Action updated successfully!');
-                    } catch (err: any) {
-                      toast.error(`Error updating action: ${err.message}`);
-                    }
-                  });
-                }
-              }}
-            >
-              <CheckCheck className="h-4 w-4" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Action Step Modal */}
-      {/* Add Action Step Modal */}
-      <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
-                <PlusCircle className="h-6 w-6 text-primary shrink-0" />
-                Add Sequence Step
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="space-y-6 pt-[3px] pb-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
-                <Select 
-                  value={actionStepForm.facilityType.toString()} 
-                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
-                >
-                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
-                    <SelectValue placeholder="Select type">
-                      {(appNamesDetailList?.facilityType || []).find(ft => ft.id.toString() === actionStepForm.facilityType.toString())?.name || "Select type"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    {(appNamesDetailList?.facilityType || []).map(ft => (
-                      <SelectItem key={ft.id} value={ft.id.toString()}>{ft.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Device / Target</Label>
-                <Select 
-                  value={actionStepForm.facilityTypeId.toString()} 
-                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
-                >
-                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
-                    <SelectValue placeholder="Select device">
-                      {(() => {
-                        const idStr = actionStepForm.facilityTypeId?.toString();
-                        if (!idStr || idStr === "0") return "Select device";
-                        let foundName = "";
-                        switch (actionStepForm.facilityType) {
-                          case FacilityType.Appliance:
-                            foundName = (appNamesDetailList?.applianceIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Camera:
-                            foundName = (appNamesDetailList?.cameraIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Door:
-                            foundName = (appNamesDetailList?.doorIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.External:
-                            foundName = (appNamesDetailList?.externalIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Light:
-                            foundName = (appNamesDetailList?.lightIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Window:
-                            foundName = (appNamesDetailList?.windowIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                        }
-                        return foundName || "Select device";
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    {(() => {
-                      switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
-                        default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
-                      }
-                    })()}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-50 dark:bg-zinc-900 rounded-[1.5rem] border border-slate-100 dark:border-zinc-800 space-y-5">
-              {actionStepForm.facilityType === FacilityType.Light && (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Brightness Level</Label>
-                    <Badge className="bg-primary/10 text-primary border-none font-bold">{actionStepForm.brightnessLevel}%</Badge>
-                  </div>
-                  <Slider 
-                    value={[actionStepForm.brightnessLevel]} 
-                    onValueChange={(vals) => setActionStepForm(prev => ({ ...prev, brightnessLevel: Array.isArray(vals) ? vals[0] : vals }))}
-                    max={100} 
-                    min={0}
-                    step={1} 
-                    className="py-2"
-                  />
-                </div>
-              )}
-
-              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
-                <div className="flex items-center justify-between p-1">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Engage physical lock</p>
-                  </div>
-                  <Switch 
-                    checked={actionStepForm.isLocked} 
-                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isLocked: checked }))}
-                  />
-                </div>
-              )}
-
-              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
-                <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Physical orientation</p>
-                  </div>
-                  <Switch 
-                    checked={actionStepForm.isOpen} 
-                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isOpen: checked }))}
-                  />
-                </div>
-              )}
-
-              <div className={cn(
-                "flex items-center justify-between p-1",
-                (actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window || actionStepForm.facilityType === FacilityType.Light) ? "pt-2 border-t border-slate-200/50" : ""
-              )}>
-                <div className="space-y-0.5">
-                  <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Overall operational state</p>
-                </div>
-                <Switch 
-                  checked={actionStepForm.isActive} 
-                  onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isActive: checked }))}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-3.5 flex items-center justify-center border-t border-slate-100 dark:border-zinc-800">
-            <Button 
-              className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
-              onClick={() => {
-                if (selectedAction) {
-                  requestAuth(async () => {
-                    try {
-                      const payload = [
-                        {
-                          actionId: selectedAction.id,
-                          facilityType: actionStepForm.facilityType,
-                          facilityTypeId: parseInt(actionStepForm.facilityTypeId.toString()) || 0,
-                          brightnessLevel: actionStepForm.brightnessLevel || 0,
-                          isLocked: actionStepForm.isLocked,
-                          isOpen: actionStepForm.isOpen,
-                          isActive: actionStepForm.isActive
-                        }
-                      ];
-                      
-                      const res: any = await apiFetch(`/Action/CreateActionStep`, { 
-                        method: 'PUT', 
-                        body: JSON.stringify(payload) 
-                      });
-                      
-                      const newStep: GetActionStepDto = {
-                        id: (res && res.data && res.data[0] && res.data[0].id) ? res.data[0].id : Math.max(0, ...(selectedAction?.getActionStepDtos || []).map(s => s.id)) + 1,
-                        actionId: selectedAction.id,
-                        facilityType: actionStepForm.facilityType,
-                        facilityTypeId: actionStepForm.facilityTypeId,
-                        brightnessLevel: actionStepForm.brightnessLevel,
-                        isLocked: actionStepForm.isLocked,
-                        isOpen: actionStepForm.isOpen,
-                        isActive: actionStepForm.isActive
-                      };
-                      
-                      const updatedAction = { ...selectedAction, getActionStepDtos: [...(selectedAction.getActionStepDtos || []), newStep] };
-                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
-                      setSelectedAction(updatedAction);
-                      setIsAddActionStepOpen(false);
-                      toast.success('Action step created successfully!');
-                    } catch (err: any) {
-                      toast.error(`Error creating action step: ${err.message}`);
-                    }
-                  });
-                }
-              }}
-            >
-              <PlusCircle className="h-5 w-5" />
-              Add Action Step
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Action Step Modal */}
-      <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
-                <Pencil className="h-6 w-6 text-primary shrink-0" />
-                Edit Sequence Step
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="space-y-6 pt-[3px] pb-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
-                <Select 
-                  value={actionStepForm.facilityType.toString()} 
-                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityType: parseInt(val), facilityTypeId: 0 }))}
-                >
-                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
-                    <SelectValue placeholder="Select type">
-                      {(appNamesDetailList?.facilityType || []).find(ft => ft.id.toString() === actionStepForm.facilityType.toString())?.name || "Select type"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    {(appNamesDetailList?.facilityType || []).map(ft => (
-                      <SelectItem key={ft.id} value={ft.id.toString()}>{ft.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Device / Target</Label>
-                <Select 
-                  value={actionStepForm.facilityTypeId.toString()} 
-                  onValueChange={(val) => setActionStepForm(prev => ({ ...prev, facilityTypeId: parseInt(val) }))}
-                >
-                  <SelectTrigger className="rounded-none bg-transparent text-slate-900 dark:text-zinc-100 border-slate-200 dark:border-zinc-800 h-11">
-                    <SelectValue placeholder="Select device">
-                      {(() => {
-                        const idStr = actionStepForm.facilityTypeId?.toString();
-                        if (!idStr || idStr === "0") return "Select device";
-                        let foundName = "";
-                        switch (actionStepForm.facilityType) {
-                          case FacilityType.Appliance:
-                            foundName = (appNamesDetailList?.applianceIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Camera:
-                            foundName = (appNamesDetailList?.cameraIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Door:
-                            foundName = (appNamesDetailList?.doorIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.External:
-                            foundName = (appNamesDetailList?.externalIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Light:
-                            foundName = (appNamesDetailList?.lightIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                          case FacilityType.Window:
-                            foundName = (appNamesDetailList?.windowIdNames || []).find(x => x.id.toString() === idStr)?.name;
-                            break;
-                        }
-                        return foundName || "Select device";
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border-slate-100 shadow-xl">
-                    {(() => {
-                      switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
-                        default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
-                      }
-                    })()}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-50 dark:bg-zinc-900 rounded-[1.5rem] border border-slate-100 dark:border-zinc-800 space-y-5">
-              {actionStepForm.facilityType === FacilityType.Light && (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Brightness Level</Label>
-                    <Badge className="bg-primary/10 text-primary border-none font-bold">{actionStepForm.brightnessLevel}%</Badge>
-                  </div>
-                  <Slider 
-                    value={[actionStepForm.brightnessLevel]} 
-                    onValueChange={(vals) => setActionStepForm(prev => ({ ...prev, brightnessLevel: Array.isArray(vals) ? vals[0] : vals }))}
-                    max={100} 
-                    min={0}
-                    step={1} 
-                    className="py-2"
-                  />
-                </div>
-              )}
-
-              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
-                <div className="flex items-center justify-between p-1">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Lock State</Label>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Engage physical lock</p>
-                  </div>
-                  <Switch 
-                    checked={actionStepForm.isLocked} 
-                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isLocked: checked }))}
-                  />
-                </div>
-              )}
-
-              {(actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window) && (
-                <div className="flex items-center justify-between p-1 pt-2 border-t border-slate-200/50">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Opening State</Label>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Physical orientation</p>
-                  </div>
-                  <Switch 
-                    checked={actionStepForm.isOpen} 
-                    onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isOpen: checked }))}
-                  />
-                </div>
-              )}
-
-              <div className={cn(
-                "flex items-center justify-between p-1",
-                (actionStepForm.facilityType === FacilityType.Door || actionStepForm.facilityType === FacilityType.Window || actionStepForm.facilityType === FacilityType.Light) ? "pt-2 border-t border-slate-200/50" : ""
-              )}>
-                <div className="space-y-0.5">
-                  <Label className="text-sm font-bold text-slate-600 dark:text-slate-300">Power Status</Label>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tighter">Overall operational state</p>
-                </div>
-                <Switch 
-                  checked={actionStepForm.isActive} 
-                  onCheckedChange={(checked) => setActionStepForm(prev => ({ ...prev, isActive: checked }))}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-3.5 flex items-center justify-center border-t border-slate-100 dark:border-zinc-800">
-            <Button 
-              className="flex items-center justify-center gap-2 px-4 font-medium bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800"
-              onClick={() => {
-                if (selectedAction && selectedActionStep) {
-                  requestAuth(async () => {
-                    try {
-                      const payload = [
-                        {
-                          id: selectedActionStep.id,
-                          actionId: selectedAction.id,
-                          facilityType: actionStepForm.facilityType,
-                          facilityTypeId: parseInt(actionStepForm.facilityTypeId.toString()) || 0,
-                          brightnessLevel: actionStepForm.brightnessLevel || 0,
-                          isLocked: actionStepForm.isLocked,
-                          isOpen: actionStepForm.isOpen,
-                          isActive: actionStepForm.isActive
-                        }
-                      ];
-                      
-                      await apiFetch(`/Action/UpdateActionStep`, { 
-                        method: 'PUT', 
-                        body: JSON.stringify(payload) 
-                      });
-                      
-                      const updatedStep: GetActionStepDto = {
-                        ...selectedActionStep,
-                        facilityType: actionStepForm.facilityType,
-                        facilityTypeId: actionStepForm.facilityTypeId,
-                        brightnessLevel: actionStepForm.brightnessLevel,
-                        isLocked: actionStepForm.isLocked,
-                        isOpen: actionStepForm.isOpen,
-                        isActive: actionStepForm.isActive
-                      };
-                      const updatedSteps = (selectedAction?.getActionStepDtos || []).map(s => s.id === updatedStep.id ? updatedStep : s);
-                      const updatedAction = { ...selectedAction, getActionStepDtos: updatedSteps };
-                      setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
-                      setSelectedAction(updatedAction);
-                      setIsEditActionStepOpen(false);
-                      toast.success('Action step updated successfully!');
-                    } catch (err: any) {
-                      toast.error(`Error updating action step: ${err.message}`);
-                    }
-                  });
-                }
-              }}
-            >
-              <CheckCheck className="h-5 w-5" />
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isChatModalOpen} onOpenChange={setIsChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-[95vw] w-[95vw] h-[92vh] sm:max-w-[95vw] p-0 gap-0 flex flex-row overflow-hidden rounded-[9px] border border-black dark:border-zinc-800 shadow-2xl bg-white dark:bg-zinc-950 dark:text-zinc-100">
-          {chats.length === 0 ? (
-            <div className="flex flex-row w-full h-full relative">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="absolute top-4 right-4 h-8 w-8 text-slate-500 hover:text-black dark:text-zinc-100 dark:hover:text-white z-50 rounded-full" 
-                onClick={() => setIsChatModalOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <div className="w-[40%] bg-slate-50 dark:bg-zinc-950 border-r-[1px] border-slate-200 dark:border-zinc-800 flex flex-col items-center justify-center p-8 text-center shrink-0 relative z-10">
-                <div className="mb-8 flex items-center justify-center">
-                  <MessageSquare className="h-24 w-24 text-slate-300 dark:text-zinc-700" />
-                </div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2 text-black dark:text-zinc-100 dark:text-white">The HanssonHub Chats</h2>
-                <p className="text-sm text-slate-500 dark:text-zinc-400 max-w-xs">Start connecting with your peers. Pick a contact to begin a conversation.</p>
-              </div>
-              
-              <div className="flex-1 flex items-center bg-white dark:bg-zinc-950 p-8 relative overflow-hidden">
-                <div className="w-full">
-                  <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                    {allUsers.filter(u => u.id !== userProfile.id).map(user => (
-                      <button 
-                        key={user.id}
-                        onClick={() => startDirectChat(user)}
-                        className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 dark:bg-zinc-950 rounded-3xl shadow-sm border border-slate-200 dark:border-zinc-800 hover:shadow-md hover:border-primary transition-all shrink-0 group"
-                      >
-                        <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white dark:border-zinc-800 overflow-hidden bg-slate-100 dark:bg-zinc-800 group-hover:scale-105 transition-transform">
-                          <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                        </div>
-                        <span className="font-semibold text-lg text-slate-800 dark:text-zinc-100">{user.getPersonDetailsDto.firstName}</span>
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* WhatsApp Style Sidebar - List View (30% width if call history collapsed, 25% if open) */}
-              <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", isChatCallHistoryOpen ? "w-[25%]" : "w-[30%]")}>
-            <div className="p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-slate-200 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300 shadow-inner overflow-hidden border-2 border-white dark:border-zinc-700 shrink-0">
-                    {userProfile?.getPersonDetailsDto?.imageUrl ? (
-                      <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="Me" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <UserIcon className="h-5 w-5 text-slate-500 dark:text-zinc-400" />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold tracking-tight text-[#111b21] dark:text-zinc-100">Chats</h2>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {/* Call Logs History Button */}
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-9 w-9 rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-800" 
-                    onClick={() => {
-                      fetchCallLogs(true);
-                      setIsCallLogsOpen(true);
-                    }}
-                    title="Call History"
-                  >
-                    <History className="h-5 w-5" />
-                  </Button>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-9 w-9 rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-800" 
-                        title="New Chat / Group"
-                      >
-                        <PlusCircle className="h-5 w-5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-xl border-slate-200 dark:border-zinc-800 dark:bg-zinc-950">
-                      <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}>
-                        <UserPlus className="mr-3 h-4 w-4 text-[#54656f] dark:text-zinc-400" />
-                        <span className="font-medium text-[#111b21] dark:text-zinc-100">Start a chat</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="py-3 cursor-pointer" onClick={() => { setIsGroupMode(true); setIsNewChatOpen(true); }}>
-                        <Users className="mr-3 h-4 w-4 text-[#54656f] dark:text-zinc-400" />
-                        <span className="font-medium text-[#111b21] dark:text-zinc-100">Create a group</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 dark:text-zinc-500" />
-                <Input autoComplete="off" placeholder="Search chats" 
-                  className="pl-10 h-10 bg-inherit border-none rounded-none text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black dark:text-zinc-100 dark:text-white"
-                  value={chatSearchQuery}
-                  onChange={(e) => setChatSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 bg-white dark:bg-zinc-950 overflow-y-auto no-scrollbar">
-              <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
-                <div className="w-full">
-                  {isChatsLoading || (!hasLoadedChats && chats.length === 0) ? (
-                    <div className="p-6">
-                      <ThreeDotsLoading label="Loading conversations..." />
-                    </div>
-                  ) : (
-                    (chats || [])
-                      .filter(c => !chatSearchQuery || (c.name || '').toLowerCase().includes(chatSearchQuery.toLowerCase()))
-                      .map((chat) => {
-                    const chatMsgs = chatMessages.filter(m => m.chatId === chat.id);
-                    const sortedChatMsgs = [...chatMsgs].sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime());
-                    const lastMsg = sortedChatMsgs.length > 0 ? sortedChatMsgs[sortedChatMsgs.length - 1] : chat.lastMessage;
-                    const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
-                    
-                    const activeChatTypers = typingUsers[chat.id] || {};
-                    const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
-                    const isTypingInChat = typers.length > 0;
-                    
-                    return (
-                      <button 
-                        key={chat.id}
-                        onClick={() => {
-                          setActiveChatId(chat.id);
-                          setChatSearchQuery("");
-                          setIsChatSearchVisible(false);
-                        }}
-                        className={cn(
-                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] dark:hover:bg-zinc-800/60 transition-all text-left group relative border-l-4 border-transparent",
-                          activeChatId === chat.id && "bg-[#f0f2f5] dark:bg-zinc-800/80 border-primary border-b-0"
-                        )}
-                      >
-                        <div className="relative shrink-0 flex items-center">
-                          <div className={cn(
-                            "h-12 w-12 rounded-full flex items-center justify-center shadow-sm overflow-hidden border border-slate-100 dark:border-zinc-800 text-lg font-bold text-slate-600 dark:text-zinc-300",
-                            activeChatId === chat.id ? "bg-primary/10 dark:bg-primary/20" : "bg-slate-50 dark:bg-zinc-950"
-                          )}>
-                            {(() => {
-                              const displayImageUrl = getChatDisplayImageUrl(chat);
-                              const displayInitial = getChatDisplayInitial(chat);
-                              
-                              if (displayImageUrl) {
-                                return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(chat)} className="h-full w-full object-cover" />;
-                              }
-                              return chat.isGroup ? <Users className="h-6 w-6 text-slate-400 dark:text-zinc-500" /> : <span>{displayInitial}</span>;
-                            })()}
-                          </div>
-                        </div>
-                        <div className={cn(
-                          "flex-1 min-w-0 flex flex-col justify-center h-full group-last:border-none",
-                          activeChatId === chat.id ? "border-b-0 border-transparent" : "border-b border-slate-100 dark:border-zinc-800/60"
-                        )}>
-                          <div className="flex justify-between items-center mb-0.5">
-                            <span className="font-semibold text-[16px] text-[#111b21] dark:text-zinc-100 truncate">{getChatDisplayName(chat)}</span>
-                            <span className={cn(
-                              "text-[11px] font-medium tracking-tight px-1",
-                              chat.unreadCount > 0 ? "text-[#25d366]" : "text-[#667781] dark:text-zinc-400"
-                            )}>
-                              {(() => {
-                                const timeStr = lastMsg?.sentAt || chat.createdAt;
-                                if (!timeStr) return '';
-                                const date = new Date(timeStr);
-                                if (isNaN(date.getTime())) return '';
-                                const diffMs = Date.now() - date.getTime();
-                                if (diffMs > 24 * 60 * 60 * 1000) {
-                                  return date.getFullYear() === new Date().getFullYear()
-                                    ? format(date, 'MMM d')
-                                    : format(date, 'MMM d, yyyy');
-                                }
-                                return format(date, 'HH:mm');
-                              })()}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1 min-w-0 w-full">
-                              {isTypingInChat ? (
-                                <p className="text-[14px] text-[#25d366] font-semibold truncate leading-relaxed animate-pulse">
-                                  {typers[0].name} {typers[0].action?.toLowerCase() === 'recording voice message' ? 'recording voice message...' : 'typing...'}
-                                </p>
-                              ) : (
-                                <p className="text-[14px] text-[#667781] dark:text-zinc-400 truncate leading-relaxed w-full">
-                                  {(() => {
-                                    if (!lastMsg) return 'No messages yet';
-                                    if (lastMsg.isDeleted) return 'This message was deleted';
-                                    
-                                    let msgContent = lastMsg.content || '';
-                                    if (!msgContent && lastMsg.attachments && lastMsg.attachments.length > 0) {
-                                      msgContent = formatLastMessageAttachmentsText(lastMsg.attachments);
-                                    }
-
-                                    let prefixStr = '';
-                                    if (lastMsg.senderPersonId === userProfile?.id) {
-                                      prefixStr = 'You: ';
-                                    } else if (chat.isGroup) {
-                                      const senderUser = (allUsers || []).find(u => u.id === lastMsg.senderPersonId);
-                                      const firstName = senderUser?.getPersonDetailsDto?.firstName || 'User';
-                                      prefixStr = `${firstName}: `;
-                                    }
-
-                                    const combined = prefixStr + msgContent;
-                                    return combined.length > 35 ? combined.substring(0, 35) + '...' : combined;
-                                  })()}
-                                </p>
-                              )}
-                            </div>
-                            {chat.unreadCount > 0 && (
-                              <div className="h-5 w-5 rounded-full bg-[#25d366] text-white flex items-center justify-center text-[11px] font-bold shadow-sm shrink-0">
-                                {chat.unreadCount}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-                </div>
-              </PullToRefresh>
-            </div>
-          </div>
-          <div className="flex flex-col bg-slate-50 dark:bg-[#0b141a] relative overflow-hidden flex-1 h-full transition-all duration-300">
-            {isCallLogsOpen ? (
-              /* Call History Panel replacing right side */
-              <div className="flex-1 flex flex-col bg-slate-50 dark:bg-zinc-950 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
-                {/* Header */}
-                <header className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px]">
-                  <div className="flex items-center gap-3 text-left">
-                    <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                      <History className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-none">Call History</h3>
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 font-normal mt-0.5">
-                        View call logs, filter status, and redial
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => fetchCallLogs(true)} 
-                      className="rounded-full h-9 w-9 text-slate-500 dark:text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
-                      title="Refresh Call History"
-                    >
-                      <RefreshCw className={cn("h-4 w-4", isCallLogsLoading && "animate-spin text-emerald-600")} />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => setIsCallLogsOpen(false)} 
-                      className="rounded-full h-9 w-9 text-slate-500 dark:text-zinc-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 group/close"
-                      title="Close Call History"
-                    >
-                      <XCircle className="h-5 w-5 group-hover/close:text-rose-600 transition-colors" />
-                    </Button>
-                  </div>
-                </header>
-
-                {/* Filter and Sort Control Bar */}
-                <div className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-3 shrink-0 z-10">
-                  {/* Filter Tabs / Pills */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-                    {[
-                      { id: 'all', label: 'All', count: callLogCounts.all },
-                      { id: 'missed', label: 'Missed', count: callLogCounts.missed },
-                      { id: 'received', label: 'Received', count: callLogCounts.received },
-                      { id: 'rejected', label: 'Rejected', count: callLogCounts.rejected },
-                      { id: 'outgoing', label: 'Outgoing', count: callLogCounts.outgoing },
-                    ].map(tab => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setCallLogFilter(tab.id as any)}
-                        className={cn(
-                          "px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 border",
-                          callLogFilter === tab.id
-                            ? "bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-slate-900 dark:border-zinc-100 shadow-xs"
-                            : "bg-slate-100/80 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:bg-slate-200/70 dark:hover:bg-zinc-700"
-                        )}
-                      >
-                        <span>{tab.label}</span>
-                        <span className={cn(
-                          "px-1.5 py-0.2 rounded-full text-[10px] font-bold",
-                          callLogFilter === tab.id
-                            ? "bg-white/20 dark:bg-black/20 text-white dark:text-zinc-900"
-                            : "bg-slate-200/80 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300"
-                        )}>
-                          {tab.count}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Sort Selector with Styled Dropdown */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 flex items-center gap-1">
-                      <ArrowDownUp className="h-3 w-3" /> Sort:
-                    </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-8 border-slate-200/90 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold rounded-lg px-2.5 flex items-center gap-1.5 shadow-2xs">
-                          <span>
-                            {callLogSort === 'newest' && 'Newest First'}
-                            {callLogSort === 'oldest' && 'Oldest First'}
-                            {callLogSort === 'duration' && 'Longest Duration'}
-                            {callLogSort === 'type_video' && 'Video Calls First'}
-                            {callLogSort === 'type_voice' && 'Voice Calls First'}
-                          </span>
-                          <ChevronDown className="h-3.5 w-3.5 text-slate-400 ml-0.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-52 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-md rounded-xl p-1 z-50">
-                        <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 py-1">Sort Options</DropdownMenuLabel>
-                        <DropdownMenuSeparator className="bg-slate-100 dark:bg-zinc-800" />
-                        <DropdownMenuRadioGroup value={callLogSort} onValueChange={(val) => setCallLogSort(val as any)}>
-                          <DropdownMenuRadioItem value="newest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
-                            Newest First
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="oldest" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
-                            Oldest First
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="duration" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 text-slate-700 dark:text-zinc-200">
-                            Longest Duration
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuSeparator className="bg-slate-100 dark:bg-zinc-800" />
-                          <DropdownMenuRadioItem value="type_video" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
-                            <Video className="h-3.5 w-3.5 text-emerald-600" />
-                            <span>Video Calls First</span>
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="type_voice" className="text-xs font-medium cursor-pointer rounded-lg py-1.5 flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
-                            <Phone className="h-3.5 w-3.5 text-blue-600" />
-                            <span>Voice Calls First</span>
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-
-                {/* Body Content with PullToRefresh */}
-                <div className="flex-1 overflow-y-auto no-scrollbar relative bg-slate-50 dark:bg-zinc-950" onScroll={handleCallLogsScroll}>
-                  <PullToRefresh
-                    onRefresh={() => fetchCallLogs(true)}
-                    pullingContent={
-                      <div className="text-center py-3 text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-1.5">
-                        <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Pull down to refresh call logs
-                      </div>
-                    }
-                    refreshingContent={
-                      <div className="text-center py-3 text-xs font-bold text-emerald-600 uppercase tracking-widest flex items-center justify-center gap-1.5">
-                        <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Refreshing call logs...
-                      </div>
-                    }
-                  >
-                    <div className="max-w-2xl mx-auto p-5 space-y-3 min-h-full">
-                      {isCallLogsLoading ? (
-                        <ThreeDotsLoading label="Loading Call Logs..." />
-                      ) : filteredAndSortedCallLogs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-3 bg-white dark:bg-zinc-950 rounded-2xl border border-slate-200/80 dark:border-zinc-800 p-8 shadow-xs text-center">
-                          <div className="h-14 w-14 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400">
-                            <Phone className="h-7 w-7" />
-                          </div>
-                          <span className="text-sm font-bold text-slate-700 dark:text-zinc-200">No Call Logs Found</span>
-                          <p className="text-xs text-slate-400 dark:text-zinc-400 max-w-xs">
-                            {callLogFilter === 'all'
-                              ? "Your voice and video call history will appear here."
-                              : `No ${callLogFilter} call logs match your current filter.`}
-                          </p>
-                          {callLogFilter !== 'all' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setCallLogFilter('all')}
-                              className="mt-2 text-xs"
-                            >
-                              Show All Call Logs
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {filteredAndSortedCallLogs.map((log, index) => {
-                            const logChat = chats.find(c => c.id === log.chatId);
-                            const userStatus = getUserCallStatus(log, userProfile?.id);
-
-                            return (
-                              <div 
-                                key={log.id ? `call-log-${log.id}` : `call-log-${log.callId || index}-${log.startedAt}-${index}`} 
-                                className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:border-emerald-200 dark:hover:border-emerald-800 transition-all shadow-xs hover:shadow-md group text-left"
-                              >
-                                <div className="flex items-center gap-3.5">
-                                  {/* Chat Avatar */}
-                                  <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200/60 dark:border-zinc-700 flex items-center justify-center text-slate-600 dark:text-zinc-300 font-bold overflow-hidden shadow-xs shrink-0">
-                                    {logChat ? (
-                                      (() => {
-                                        const displayImageUrl = getChatDisplayImageUrl(logChat);
-                                        const displayInitial = getChatDisplayInitial(logChat);
-                                        if (displayImageUrl) {
-                                          return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(logChat)} className="h-full w-full object-cover" />;
-                                        }
-                                        return logChat.isGroup ? <Users className="h-6 w-6 text-slate-400" /> : <span>{displayInitial}</span>;
-                                      })()
-                                    ) : (
-                                      <UserIcon className="h-5 w-5 text-slate-400" />
-                                    )}
-                                  </div>
-
-                                  {/* Log Details */}
-                                  <div className="flex flex-col">
-                                    <h4 className="font-bold text-sm text-slate-900 dark:text-zinc-100">
-                                      {logChat ? getChatDisplayName(logChat) : `Call log #${log.id}`}
-                                    </h4>
-                                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-0.5 flex-wrap">
-                                      {userStatus === 'ringing' ? (
-                                        <span className="text-emerald-500 font-bold flex items-center gap-1 animate-pulse">
-                                          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0 animate-ping" /> Active (Ringing)
-                                        </span>
-                                      ) : userStatus === 'connected' ? (
-                                        <span className="text-emerald-500 font-bold flex items-center gap-1">
-                                          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" /> Active (Connected)
-                                        </span>
-                                      ) : userStatus === 'missed' ? (
-                                        <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1 bg-rose-50 dark:bg-rose-950/50 px-1.5 py-0.5 rounded-sm border border-rose-100 dark:border-rose-900">
-                                          <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
-                                        </span>
-                                      ) : userStatus === 'rejected' ? (
-                                        <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1 bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 rounded-sm border border-amber-100 dark:border-amber-900">
-                                          <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
-                                        </span>
-                                      ) : userStatus === 'received' ? (
-                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                                          <PhoneIncoming className="h-3 w-3 text-emerald-500" /> Received
-                                        </span>
-                                      ) : (
-                                        <span className="text-blue-600 dark:text-zinc-300 font-medium flex items-center gap-1">
-                                          <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
-                                        </span>
-                                      )}
-                                      
-                                      <span className="text-slate-300 dark:text-zinc-700">â€¢</span>
-                                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-zinc-400">
-                                        <CalendarDays className="h-3 w-3 text-slate-400" />
-                                        {formatRelativeTime(log.startedAt)}
-                                      </span>
-
-                                      <span className="text-slate-300 dark:text-zinc-700">â€¢</span>
-                                      <span className="flex items-center gap-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.2 rounded-sm border border-emerald-100 dark:border-emerald-800 font-bold" title="Duration">
-                                        <Clock className="h-3 w-3 text-emerald-600" />
-                                        {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
-                                          ? "0s"
-                                          : (((log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && !log.endedAt)
-                                            ? formatCallDuration(log.startedAt, new Date(liveTimestamp), log.answeredAt)
-                                            : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
-                                      </span>
-                                    </div>
-                                    {(() => {
-                                      const isGroup = !!logChat?.isGroup || !!(log as any).isGroupCall || !!(log as any).IsGroupCall || ((log.participants || []).length > 2);
-                                      const rawCallerId = log.callerPersonId ?? (log as any).CallerPersonId;
-                                      const rawIsIncoming = log.isIncoming ?? (log as any).IsIncoming;
-                                      const isCaller = (rawCallerId !== undefined && rawCallerId !== null && Number(rawCallerId) === Number(userProfile?.id)) || rawIsIncoming === false;
-
-                                      if (isGroup && isCaller && log.participants && log.participants.length > 0) {
-                                        const otherParticipants = log.participants.filter((p: any) => Number(p.personId ?? p.PersonId) !== Number(userProfile?.id));
-                                        if (otherParticipants.length === 0) return null;
-                                        return (
-                                          <div className="mt-2 text-[10px] text-slate-500 dark:text-zinc-400 font-medium flex flex-wrap gap-1.5">
-                                            {otherParticipants.map((p: any, pIdx: number) => {
-                                              const pStatus = p.status ?? p.Status;
-                                              let statusColor = "text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700";
-                                              let statusText = "Ringing";
-                                              if (pStatus === CallParticipantStatus.Connected || pStatus === 1 || pStatus === '1' || pStatus === 'Connected') {
-                                                statusColor = "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800";
-                                                statusText = "Joined";
-                                              } else if (pStatus === CallParticipantStatus.Declined || pStatus === 2 || pStatus === '2' || pStatus === 'Declined') {
-                                                statusColor = "text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800";
-                                                statusText = "Declined";
-                                              } else if (pStatus === CallParticipantStatus.Left || pStatus === 3 || pStatus === '3' || pStatus === 'Left') {
-                                                statusColor = "text-slate-600 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700";
-                                                statusText = "Left";
-                                              } else if (pStatus === CallParticipantStatus.Missed || pStatus === 4 || pStatus === '4' || pStatus === 'Missed') {
-                                                statusColor = "text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800";
-                                                statusText = "Missed";
-                                              }
-                                              const pid = p.personId ?? p.PersonId;
-                                              const matchedUser = allUsers.find(u => Number(u.id) === Number(pid));
-                                              const pName = p.fullName || p.name || (matchedUser?.getPersonDetailsDto?.firstName ? `${matchedUser.getPersonDetailsDto.firstName} ${matchedUser.getPersonDetailsDto.lastName || ''}`.trim() : null) || 'Participant';
-
-                                              return (
-                                                <span key={pid ? `part-${pid}` : `part-${pIdx}`} className="flex items-center gap-1 border rounded-md px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 shadow-2xs">
-                                                  <span className="font-semibold text-slate-800 dark:text-zinc-200">{pName}</span>
-                                                  <span className={cn("text-[9px] px-1 py-0.2 rounded-sm border font-bold", statusColor)}>{statusText}</span>
-                                                </span>
-                                              );
-                                            })}
-                                          </div>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                  </div>
-                                </div>
-
-                                {/* Call Type and Redial button */}
-                                <div className="flex items-center gap-3">
-                                  <Badge className={cn(
-                                    "border text-[10px] font-extrabold uppercase tracking-wider py-0.5 px-2 rounded-md",
-                                    log.type === CallType.Video ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800" : "bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-800"
-                                  )}>
-                                    {log.type === CallType.Video ? "Video" : "Voice"}
-                                  </Badge>
-                                  
-                                  {(log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && userStatus !== 'missed' ? (
-                                    <Button
-                                      onClick={() => {
-                                        handleAcceptCall(log.callId, log.chatId);
-                                      }}
-                                      className="h-9 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 shrink-0"
-                                      title="Join Active Call"
-                                    >
-                                      <Phone className="h-3 w-3 fill-current text-white shrink-0" />
-                                      <span>Join</span>
-                                    </Button>
-                                  ) : (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => {
-                                        handleStartCall(log.chatId, log.type);
-                                      }}
-                                      className="h-9 w-9 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 text-slate-600 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors shadow-xs shrink-0"
-                                      title="Redial"
-                                    >
-                                      {log.type === CallType.Video ? <Video className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {isFetchingMoreCallLogs && (
-                            <div className="flex items-center justify-center py-4 text-xs font-semibold text-slate-500 gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
-                              <span>Loading more call logs...</span>
-                            </div>
-                          )}
-                          {!isFetchingMoreCallLogs && hasMoreCallLogs && (
-                            <div ref={callLogsLoaderRef} className="h-4 w-full" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </PullToRefresh>
-                </div>
-              </div>
-            ) : activeChatId ? (
-              <>
-                {(() => {
-                  const chat = (chats || []).find(c => c.id === activeChatId);
-                  if (!chat) return null;
-                  const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
-
-                  return (
-                    <header className="px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
-                      <div 
-                        className={cn(
-                          "flex items-center gap-3",
-                          chat.isGroup && "cursor-pointer hover:opacity-85 select-none transition-all duration-150"
-                        )}
-                        onClick={() => {
-                          if (chat.isGroup) {
-                            setEditingGroupId(chat.id);
-                            setNewGroupName(chat.name || "");
-                            setNewGroupDescription(chat.description || "");
-                            setNewGroupImageUrl(chat.imageUrl || "");
-                            setNewGroupRoom(chat.roomId?.toString() || "none");
-                            setNewGroupSection(chat.sectionId?.toString() || "");
-                            setSelectedParticipants((chat.participants || []).map(p => p.personId).filter(id => id !== userProfile.id));
-                            setIsViewGroupOpen(true);
-                          }
-                        }}
-                      >
-                        <div className="relative">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-inner overflow-hidden border border-slate-200 dark:border-zinc-700 text-lg font-bold">
-                            {(() => {
-                              const displayImageUrl = getChatDisplayImageUrl(chat);
-                              const displayInitial = getChatDisplayInitial(chat);
-                              
-                              if (displayImageUrl) {
-                                return <img src={getFullImageUrl(displayImageUrl)} alt={getChatDisplayName(chat)} className="h-full w-full object-cover" />;
-                              }
-                              return chat.isGroup ? <Users className="h-5 w-5" /> : <span>{displayInitial}</span>;
-                            })()}
-                          </div>
-                        </div>
-                        <div>
-                          <h3 className="text-[16px] font-bold text-[#111b21] dark:text-zinc-100 truncate max-w-[200px] hover:underline decoration-[#111b21] dark:decoration-zinc-100">
-                            {getChatDisplayName(chat)}
-                          </h3>
-                          <div className="flex items-center gap-1.5 ">
-                            {(() => {
-                              const activeChatTypers = typingUsers[chat.id] || {};
-                              const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
-                              if (typers.length > 0) {
-                                const actionText = typers[0].action?.toLowerCase() === 'recording voice message' 
-                                  ? 'is recording a voice message...' 
-                                  : 'is typing...';
-                                return (
-                                  <span className="text-[12px] text-emerald-600 dark:text-emerald-400 font-bold leading-none flex items-center gap-1 animate-pulse">
-                                    <span className="relative flex h-1.5 w-1.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                                    </span>
-                                    {typers[0].name} {actionText}
-                                  </span>
-                                );
-                              }
-                              if (chat.isGroup) {
-                                const memberNames = getGroupMemberNames(chat);
-                                return (
-                                  <span className="text-[12px] text-[#667781] dark:text-zinc-400 font-medium leading-none truncate max-w-[280px]">
-                                    {memberNames || 'No members'}
-                                  </span>
-                                );
-                              }
-                              return (
-                                <span className="text-[12px] text-[#667781] dark:text-zinc-400 font-medium leading-none">
-                                  {isOnline ? 'Online â€¢ Active now' : 'Offline'}
-                                </span>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {/* Toggle Chat Call History Panel Button */}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn(
-                            "rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors",
-                            isChatCallHistoryOpen && "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400"
-                          )}
-                          onClick={() => setIsChatCallHistoryOpen(prev => !prev)}
-                          title={isChatCallHistoryOpen ? "Collapse Chat Call History" : "Show Chat Call History"}
-                        >
-                          <History className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                        </Button>
-
-                        {/* Video Call Button */}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80"
-                          onClick={() => handleStartCall(chat.id, CallType.Video)}
-                          title="Start Video Call"
-                        >
-                          <Video className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                        </Button>
-
-                        {/* Voice Call Button */}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="rounded-full h-10 w-10 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80"
-                          onClick={() => handleStartCall(chat.id, CallType.Audio)}
-                          title="Start Voice Call"
-                        >
-                          <Phone className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                        </Button>
-                        {isChatSearchVisible && (
-                          <motion.div 
-                            initial={{ width: 0, opacity: 0 }}
-                            animate={{ width: 220, opacity: 1 }}
-                            className="mr-2 relative"
-                          >
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                            <Input autoComplete="off" placeholder="Search messages..." 
-                              className="h-8 pl-8 text-xs bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none w-full"
-                              value={messageSearchQuery}
-                              onChange={(e) => setMessageSearchQuery(e.target.value)}
-                            />
-                          </motion.div>
-                        )}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn("rounded-full h-10 w-10 text-[#54656f] hover:bg-slate-200/50", isChatSearchVisible && "bg-slate-200 text-primary")}
-                          onClick={() => {
-                            setIsChatSearchVisible(!isChatSearchVisible);
-                            if (isChatSearchVisible) {
-                              setMessageSearchQuery("");
-                            }
-                          }}
-                        >
-                          <Search className="h-5 w-5" />
-                        </Button>
-                        <Separator orientation="vertical" className="h-5 mx-2 bg-[#d1d7db]" />
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          onClick={() => setIsChatModalOpen(false)} 
-                          className="rounded-full h-10 w-10 hover:bg-destructive/10 hover:text-destructive group/close"
-                          title="Close Chat"
-                        >
-                          <XCircle className="h-6 w-6 text-[#54656f] group-hover/close:text-destructive transition-colors" />
-                        </Button>
-                      </div>
-                    </header>
-                  );
-                })()}
-
-                <div className="flex-1 flex flex-row h-full min-h-0 overflow-hidden relative">
-                  {/* CENTER: Conversation Area */}
-                  <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
-                    {/* Active Group Call Banner inside Chat View */}
-                {(() => {
-                  const currentChat = chats.find(c => c.id === activeChatId);
-                  if (!currentChat || !currentChat.isGroup) return null;
-
-                  const activeLog = callLogs.find(l => l.chatId === currentChat.id && (l.status === CallStatus.Ringing || l.status === CallStatus.Connected) && !l.endedAt && getUserCallStatus(l as any, userProfile?.id) !== 'missed') || (activeCall?.chatId === currentChat.id && activeCall.status !== CallStatus.Ended && !activeCall.endedAt && getUserCallStatus(activeCall as any, userProfile?.id) !== 'missed' ? activeCall : null);
-                  if (!activeLog) return null;
-                  const isUserInCall = activeCall?.chatId === currentChat.id && isCallModalOpen;
-                  const isCallActive = activeLog.status === CallStatus.Connected || !!activeLog.answeredAt;
-                  const isLogEnded = activeLog.status === CallStatus.Ended || activeLog.status === CallStatus.Rejected || activeLog.status === CallStatus.Missed || activeLog.status === CallStatus.TimedOut || !!activeLog.endedAt;
-                  const startMs = parseTimestamp(activeLog.answeredAt || activeLog.startedAt);
-                  const endMs = isLogEnded ? parseTimestamp(activeLog.endedAt || activeLog.answeredAt || activeLog.startedAt) : liveTimestamp;
-                  const currentDurationSecs = Math.max(0, Math.floor((endMs - startMs) / 1000));
-
-                  return (
-                    <div className="bg-emerald-900 text-white px-5 py-2.5 flex items-center justify-between border-b border-emerald-800 shadow-md z-30 shrink-0">
-                      <div className="flex items-center gap-3">
-                        <span className="relative flex h-3.5 w-3.5 shrink-0">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-400"></span>
-                        </span>
-                        <div className="flex flex-col text-left">
-                          <span className="text-xs font-bold tracking-wide text-white flex items-center gap-1.5">
-                            <Users className="h-4 w-4 text-emerald-300" /> Active Group Call in Progress
-                          </span>
-                          <span className="text-[11px] text-emerald-200 font-mono font-semibold">
-                            {isCallActive ? `Duration: ${formatCallTimer(currentDurationSecs)}` : "Status: Ringing..."}
-                          </span>
-                        </div>
-                      </div>
-                      {!isUserInCall ? (
-                        <Button
-                          onClick={() => handleAcceptCall((activeLog as any).callId || (activeLog as any).id, currentChat.id)}
-                          className="h-8 px-4 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-xs shadow-md flex items-center gap-1.5 transition-transform hover:scale-105 shrink-0"
-                        >
-                          <Phone className="h-3.5 w-3.5 fill-current" />
-                          <span>Join Call</span>
-                        </Button>
-                      ) : (
-                        <Button
-                          onClick={() => setIsCallModalOpen(true)}
-                          className="h-8 px-3.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs shadow-xs flex items-center gap-1 shrink-0"
-                        >
-                          <span>Open Call Window</span>
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                <div ref={chatBoxMessagesContainerRef} className="flex-1 relative overflow-hidden bg-[#efeae2] dark:bg-[#0b141a]">
-                  {/* WhatsApp background pattern */}
-                  <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat z-0" />
-                  
-                  {/* Sticky Floating Date Label (WhatsApp style) */}
-                  {activeFloatingDate && (
-                    <div className="absolute top-4 left-0 right-0 flex justify-center z-30 pointer-events-none transition-all duration-200">
-                      <span className="bg-white shadow-[0_1.5px_2px_rgba(0,0,0,0.15)] px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider border border-slate-200/50">
-                        {activeFloatingDate}
-                      </span>
-                    </div>
-                  )}
-
-                  <div 
-                    ref={chatScrollRef}
-                    onScroll={handleChatScroll}
-                    className="h-full w-full overflow-y-auto chat-scroll-viewport relative no-scrollbar"
-                  >
-                    <div className="p-6 md:px-12 xl:px-24 relative z-10 flex flex-col min-h-full">
-                      {selectedMessageId !== null && (
-                        <div 
-                          className="absolute inset-0 bg-black/40 backdrop-blur-[1.5px] z-30 rounded-3xl transition-all cursor-pointer"
-                          onClick={() => setSelectedMessageId(null)}
-                        />
-                      )}
-                      <div className="flex justify-center mb-8 relative z-20 pt-2">
-                        <div className="bg-[#fff9c2] border border-[#e8df8a] shadow-sm px-4 py-1.5 rounded-lg flex items-center gap-2 max-w-[80%] mx-auto">
-                          <Lock className="h-3 w-3 text-[#54656f]" />
-                          <span className="text-[11px] font-medium text-[#54656f] leading-relaxed text-center">Messages are end-to-end encrypted. No one outside of this chat can read or listen to them. Click to learn more.</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 flex-1">
-                        {(() => {
-                           const chat = (chats || []).find(c => c.id === activeChatId);
-                           const currentMessages = chatMessages.filter(m => 
-                            m.chatId === activeChatId && 
-                            (!messageSearchQuery || m.content?.toLowerCase().includes(messageSearchQuery.toLowerCase()))).sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime()
-                          );
-
-                          const unreadStartIndex = currentMessages.length - activeChatUnreadCount;
-                          const unreadBoundaryMessageId = (activeChatUnreadCount > 0 && unreadStartIndex >= 0 && unreadStartIndex < currentMessages.length) 
-                            ? currentMessages[unreadStartIndex].id 
-                            : null;
-
-                          if (isPagingLoading && currentMessages.length === 0) {
-                            return (
-                              <div className="py-12">
-                                <ThreeDotsLoading label="Loading messages..." />
-                              </div>
-                            );
-                          }
-
-                          if (currentMessages.length === 0) {
-                            return (
-                              <div className="flex flex-col items-center justify-center py-20 text-[#667781] dark:text-zinc-400">
-                                <p className="text-sm font-medium">No messages found.</p>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <>
-                              <PullToRefresh onRefresh={async () => { await loadMoreMessages(); }} pullingContent={<div className="text-center p-4 text-xs font-bold text-[#54656f] uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull to load older messages</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Loading...</div>}>
-
-                              {(() => {
-                                const groupedMessages: { label: string; messages: MessageDto[] }[] = [];
-                                (currentMessages || []).forEach(msg => {
-                                  const label = getMessageDateLabel(new Date(msg.sentAt));
-                                  const lastGroup = groupedMessages[groupedMessages.length - 1];
-                                  if (lastGroup && lastGroup.label === label) {
-                                    lastGroup.messages.push(msg);
-                                  } else {
-                                    groupedMessages.push({ label, messages: [msg] });
-                                  }
-                                });
-
-                                return groupedMessages.map((group) => (
-                                  <div key={group.label} data-date-group={group.label} className="w-full space-y-4">
-                                    <div className="flex justify-center my-6">
-                                      <span className="bg-[#fff] shadow-sm px-3 py-1 rounded-lg text-[11px] font-bold text-[#54656f] uppercase tracking-wider">{group.label}</span>
-                                    </div>
-                                    {group.messages.map((msg, idx) => {
-                                      const isMe = msg.senderPersonId?.toString() === userProfile?.id?.toString();
-                                      const isTextType = msg.type === MessageType.Text || String(msg.type) === "0" || String(msg.type).toLowerCase() === "text" || !msg.attachments || msg.attachments.length === 0;
-                                      const isImageType = (msg.type === MessageType.Image || String(msg.type) === "1" || String(msg.type).toLowerCase() === "image") && msg.attachments && msg.attachments.length > 0;
-                                      const isFileType = (msg.type === MessageType.File || String(msg.type) === "4" || String(msg.type).toLowerCase() === "file") && msg.attachments && msg.attachments.length > 0;
-                                      const isVideoType = (msg.type === MessageType.Video || String(msg.type) === "2" || String(msg.type).toLowerCase() === "video") && msg.attachments && msg.attachments.length > 0;
-                                      const isAudioType = (msg.type === MessageType.Audio || String(msg.type) === "3" || String(msg.type).toLowerCase() === "audio") && msg.attachments && msg.attachments.length > 0;
-                                      const showUnreadDivider = msg.id === unreadBoundaryMessageId;
-                                      return (
-                                        <React.Fragment key={msg.id || idx}>
-                                          {showUnreadDivider && (
-                                            <div className="flex items-center justify-center my-6 relative w-full col-span-full py-2 px-4 select-none">
-                                              <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                                <div className="w-full border-t border-[#c0e0fc]" />
-                                              </div>
-                                              <div className="relative flex justify-center z-10">
-                                                <span className="bg-[#e1f3ff] text-[#007bfc] px-4 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest shadow-sm border border-[#b2dbff] flex items-center gap-1.5">
-                                                  {activeChatUnreadCount} Unread Message{activeChatUnreadCount > 1 ? 's' : ''}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          )}
-                                          <motion.div 
-                                          initial={{ opacity: 0, y: 15, scale: 0.95 }}
-                                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                                          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1], delay: Math.min(idx * 0.01, 0.2) }}
-                                          drag="x"
-                                          dragConstraints={{ left: 0, right: 0 }}
-                                          dragElastic={{ left: isMe ? 0.6 : 0, right: isMe ? 0 : 0.6 }}
-                                          onDragEnd={(_, info) => {
-                                            if (isMe && info.offset.x < -50) {
-                                              setReplyingTo(msg);
-                                            } else if (!isMe && info.offset.x > 50) {
-                                              setReplyingTo(msg);
-                                            }
-                                          }}
-                                          key={msg.id || idx} 
-                                          id={`msg-${msg.id}`}
-                                          className={cn("flex w-full mb-1", isMe ? "justify-end" : "justify-start", selectedMessageId === msg.id ? "z-50 relative" : "")}
-                                        >
-                                          <div 
-                                            className={cn(
-                                              "group/msg relative max-w-[85%] lg:max-w-[70%] xl:max-w-[60%] p-2 rounded-xl shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] transition-all duration-300",
-                                              highlightedMessageId === msg.id 
-                                                ? "bg-[#fff59d] dark:bg-[#025143] ring-2 ring-amber-400 scale-[1.03] shadow-md rounded-xl ml-6 mr-6 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]" 
-                                                : (isMe ? "bg-[#d9fdd3] dark:bg-[#005c4b] rounded-tr-none ml-12 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]" : "bg-white dark:bg-[#202c33] rounded-tl-none mr-12 text-[#111b21] dark:text-zinc-100 dark:text-[#e9edef]"),
-                                              selectedMessageId === msg.id ? "shadow-2xl scale-[1.02]" : ""
-                                            )}
-                                            onTouchStart={(e) => {
-                                              const target = e.currentTarget;
-                                              longPressTimeout.current = setTimeout(() => {
-                                                handleLongPress(target);
-                                                setSelectedMessageId(msg.id);
-                                              }, 600);
-                                            }}
-                                            onTouchEnd={() => clearTimeout(longPressTimeout.current)}
-                                            onTouchMove={() => clearTimeout(longPressTimeout.current)}
-                                            onMouseDown={(e) => {
-                                              const target = e.currentTarget;
-                                              longPressTimeout.current = setTimeout(() => {
-                                                handleLongPress(target);
-                                                setSelectedMessageId(msg.id);
-                                              }, 600);
-                                            }}
-                                            onMouseUp={() => clearTimeout(longPressTimeout.current)}
-                                            onMouseLeave={() => clearTimeout(longPressTimeout.current)}
-                                          >
-                                            {!isMe && (
-                                              <div className="px-1 mb-1">
-                                                <span className="text-xs font-bold text-primary tracking-tight">{getMessageSenderName(msg)}</span>
-                                              </div>
-                                            )}
-
-                                            <div className="px-1 py-0.5">
-                                              {msg.isDeleted ? (
-                                                <div className="flex items-center gap-2 text-slate-400/80 italic text-[14px] py-1.5 select-none min-w-[175px]">
-                                                  <Ban className="h-4 w-4 text-slate-400/50 shrink-0" />
-                                                  <span>This message was deleted</span>
-                                                </div>
-                                              ) : (
-                                                <>
-                                                  {(() => {
-                                                    const hasReply = !!(msg.replyToId || msg.replyTo);
-                                                    if (!hasReply) return null;
-                                                    const replyId = msg.replyToId || msg.replyTo?.id;
-                                                    const repliedMsg = (chatMessages || []).find(m => m.id?.toString() === replyId?.toString()) || 
-                                                                       allMessagesMapRef.current.get(replyId?.toString() || "") || 
-                                                                       msg.replyTo;
-                                                    return (
-                                                      <div 
-                                                        className="mb-1 rounded-[4px] border-l-[3px] border-[#1fa855] bg-black/5 overflow-hidden cursor-pointer hover:bg-black/10 transition-colors select-none"
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          if (replyId) {
-                                                            const targetId = `msg-${replyId}`;
-                                                            const target = document.getElementById(targetId);
-                                                            if (target) {
-                                                              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                                              const numId = Number(replyId);
-                                                              setHighlightedMessageId(isNaN(numId) ? (replyId as any) : numId);
-                                                              setTimeout(() => {
-                                                                setHighlightedMessageId(null);
-                                                              }, 2000);
-                                                            } else {
-                                                              toast.error("Referenced message not loaded in view");
-                                                            }
-                                                          }
-                                                        }}
-                                                      >
-                                                        <div className="px-2 py-1 bg-white/30 flex flex-col justify-center min-h-[36px]">
-                                                          {repliedMsg ? (
-                                                            <>
-                                                              <p className="font-semibold text-[#1fa855] text-[12px] leading-tight mb-0.5">
-                                                                {getMessageSenderName(repliedMsg)}
-                                                              </p>
-                                                              <p className="truncate text-slate-500 text-[12px] leading-tight opacity-90">
-                                                                {repliedMsg.type === MessageType.Text ? repliedMsg.content : `[${MessageType[repliedMsg.type] || 'Attachment'}]`}
-                                                              </p>
-                                                            </>
-                                                          ) : (
-                                                            <p className="text-slate-400 italic text-[11px]">Original message reference</p>
-                                                          )}
-                                                        </div>
-                                                      </div>
-                                                    );
-                                                  })()}
-                                                  {/* Message text content */}
-                                                  {/* Dynamic attachments list based on individual attachment type */}
-                                                  {msg.attachments && msg.attachments.length > 0 && (() => {
-                                                    const mediaAttachments = msg.attachments.filter(att => {
-                                                      const isImg = att.type === MessageType.Image || att.contentType?.startsWith('image/') || att.filePath?.startsWith('data:image');
-                                                      const isVid = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.startsWith('data:video');
-                                                      return isImg || isVid;
-                                                    });
-                                                    const otherAttachments = msg.attachments.filter(att => {
-                                                      const isImg = att.type === MessageType.Image || att.contentType?.startsWith('image/') || att.filePath?.startsWith('data:image');
-                                                      const isVid = att.type === MessageType.Video || att.contentType?.startsWith('video/') || att.filePath?.startsWith('data:video');
-                                                      return !isImg && !isVid;
-                                                    });
-
-                                                    return (
-                                                      <div className="mt-1 space-y-2">
-                                                        {mediaAttachments.length > 0 && (
-                                                          <div className="relative rounded-xl overflow-hidden">
-                                                            <WhatsAppMediaGrid 
-                                                              media={mediaAttachments} 
-                                                              onMediaClick={(url) => {
-                                                                const idx = mediaAttachments.findIndex(att => {
-                                                                  const fullUrl = getFullImageUrl(att.filePath);
-                                                                  return fullUrl === url;
-                                                                });
-                                                                setGalleryMedia(mediaAttachments);
-                                                                setGalleryIndex(idx !== -1 ? idx : 0);
-                                                                setSlideDirection(1);
-                                                                setIsPreviewModalOpen(true);
-                                                              }}
-                                                            />
-                                                            {(msg as any).status === 'sending' && (
-                                                              <div className="absolute inset-0 bg-black/30 backdrop-blur-xs flex items-center justify-center z-10">
-                                                                <div className="bg-white/95 p-2 rounded-full shadow-lg">
-                                                                  <CircularProgress progress={uploadProgress[msg.id] || 0} />
-                                                                </div>
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        )}
-                                                        {otherAttachments.map((att, idx) => {
-                                                          const fullUrl = getFullImageUrl(att.filePath);
-                                                          const isAudio = att.type === MessageType.Audio || att.contentType?.startsWith('audio/') || att.filePath?.startsWith('data:audio');
-                                                          if (isAudio) {
-                                                            return (
-                                                              <div key={idx} className="mb-1">
-                                                                <CustomAudioPlayer 
-                                                                  src={fullUrl || undefined}
-                                                                  fileName={att.fileName || "Audio Message"} 
-                                                                  initialText={msg.content}
-                                                                  isSending={(msg as any).status === 'sending'}
-                                                                  progress={uploadProgress[msg.id] || 0}
-                                                                />
-                                                              </div>
-                                                            );
-                                                          }
-                                                          // Default / File type (Ensure transparent background to match bubble)
-                                                          return (
-                                                            <div 
-                                                              key={idx} 
-                                                              className="flex items-center gap-3 bg-transparent p-2 rounded-xl min-w-[280px] hover:bg-black/[0.03] transition-colors cursor-pointer group/file border border-black/5"
-                                                              onClick={(e) => { if (fullUrl) handleDownloadFile(e, fullUrl, att.fileName || 'download'); }}
-                                                            >
-                                                              <div className="h-12 w-12 rounded-lg bg-orange-500 flex items-center justify-center shadow-sm shrink-0">
-                                                                <FileText className="h-7 w-7 text-white" />
-                                                              </div>
-                                                              <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-bold truncate text-[#111b21] dark:text-zinc-100">{att.fileName}</p>
-                                                                <p className="text-[10px] text-[#667781] dark:text-zinc-400 uppercase font-bold tracking-tight">
-                                                                  {att.contentType?.split('/')[1]?.toUpperCase() || att.fileName?.split('.').pop()?.toUpperCase() || 'FILE'} â€¢ {(att.fileSize ? (att.fileSize / 1024 / 1024).toFixed(1) : '0.0')} MB
-                                                                </p>
-                                                              </div>
-                                                              {(msg as any).status === 'sending' ? (
-                                                                <CircularProgress progress={uploadProgress[msg.id] || 0} />
-                                                              ) : (
-                                                                <Button variant="ghost" size="icon" className="h-9 w-9 bg-black/5 hover:bg-black/10 shrink-0 rounded-full" onClick={(e) => { if (fullUrl) handleDownloadFile(e, fullUrl, att.fileName || 'download'); }}>
-                                                                  <Download className="h-4 w-4" />
-                                                                </Button>
-                                                              )}
-                                                            </div>
-                                                          );
-                                                        })}
-                                                      </div>
-                                                    );
-                                                  })()}
-
-                                                  {/* Message text content */}
-                                                  {msg.content && (
-                                                    <p className={cn(
-                                                      "text-[14.5px] leading-[1.4] text-[#111b21] dark:text-zinc-100 whitespace-pre-wrap",
-                                                      msg.attachments && msg.attachments.length > 0 ? "mt-2" : "mt-0"
-                                                    )}>
-                                                      {msg.content}
-                                                    </p>
-                                                  )}
-                                                </>
-                                              )}
-                                              
-                                              <div className="flex items-center justify-end gap-1 mt-1 shrink-0 select-none whitespace-nowrap">
-                                                <span className="text-[10px] text-[#667781] dark:text-zinc-400 font-medium uppercase tracking-tighter whitespace-nowrap shrink-0">
-                                                  {format(new Date(msg.sentAt), 'HH:mm')}
-                                                </span>
-                                                {isMe && (() => {
-                                                  if ((msg as any).status === 'failed') {
-                                                    return <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0 animate-pulse" />;
-                                                  }
-                                                  if ((msg as any).status === 'sending') {
-                                                    return <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0 animate-pulse" />;
-                                                  }
-                                                  const tickStatus = getMessageTickStatus(msg, chat);
-                                                  if (tickStatus === 'blue') {
-                                                    return <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb] shrink-0" />;
-                                                  }
-                                                  if (tickStatus === 'single') {
-                                                    return <Check className="h-3.5 w-3.5 text-slate-400 shrink-0" />;
-                                                  }
-                                                  return <CheckCheck className="h-3.5 w-3.5 text-slate-400 shrink-0" />;
-                                                })()}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </motion.div>
-                                      </React.Fragment>
-                                      );
-                                    })}
-                                  </div>
-                                ));
-                              })()}
-
-                              {/* Active Typers Bubble inside Chat Box, pushing the last message upward */}
-                              {(() => {
-                                const activeChatTypers = typingUsers[activeChatId!] || {};
-                                const typers = (Object.values(activeChatTypers) as { name: string; isTyping: boolean; action: string }[]).filter(t => t.isTyping);
-                                return typers.map((typer, tIdx) => {
-                                  const isRecording = typer.action?.toLowerCase() === 'recording voice message';
-                                  return (
-                                    <motion.div
-                                      key={`typer-bubble-${tIdx}`}
-                                      initial={{ opacity: 0, y: 15, scale: 0.95 }}
-                                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                                      className="flex w-full mb-1 justify-start"
-                                    >
-                                      <div className="bg-white rounded-xl rounded-tl-none mr-12 p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] max-w-[80%] flex flex-col">
-                                        <span className="text-xs font-bold text-primary mb-1">{typer.name}</span>
-                                        <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-sm">
-                                          <span>{isRecording ? "recording" : "typing"}</span>
-                                          <span className="flex gap-0.5 items-end h-3 pl-1">
-                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-bounce" />
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </motion.div>
-                                  );
-                                });
-                              })()}
-
-                              </PullToRefresh>
-                            </>
-                          );
-                        })()}
-                        <div ref={chatEndRef} />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Bottom Scroll Mask */}
-                  {selectedMessageId === null && (
-                    <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-[#efeae2]/80 dark:from-zinc-950/80 to-transparent z-10 pointer-events-none" />
-                  )}
-
-                  {/* Floating Scroll to Bottom Button with Triple Down Chevron Icon */}
-                  <AnimatePresence>
-                    {showScrollToBottom && (
-                      <motion.button
-                        initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.8, y: 10 }}
-                        onClick={() => {
-                          if (chatEndRef.current) {
-                            chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-                          }
-                        }}
-                        className="absolute bottom-6 right-6 h-11 w-11 rounded-full bg-white dark:bg-zinc-900 text-[#54656f] dark:text-zinc-200 hover:text-[#111b21] dark:hover:text-white flex items-center justify-center shadow-md dark:shadow-none border border-slate-200/50 dark:border-zinc-800 transition-all active:scale-95 hover:bg-slate-50 dark:hover:bg-zinc-800 z-20 cursor-pointer"
-                        title="Scroll to bottom"
-                      >
-                        <div className="flex flex-col items-center -space-y-1.5 select-none pointer-events-none">
-                          <ChevronDown className="h-4 w-4 stroke-[2.5]" />
-                          <ChevronDown className="h-4 w-4 stroke-[2.5] opacity-85" />
-                          <ChevronDown className="h-4 w-4 stroke-[2.5] opacity-65" />
-                        </div>
-                      </motion.button>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Restrictive Context Menu Dropdown & Backdrop */}
-                  {selectedMessageId !== null && selectedMessageRect && (() => {
-                    const msg = chatMessages.find(m => m.id === selectedMessageId);
-                    if (!msg) return null;
-                    
-                    const isMe = msg.senderPersonId === userProfile.id;
-                    const isFailed = (msg as any).status === 'failed';
-                    
-                    const containerRect = chatBoxMessagesContainerRef.current?.getBoundingClientRect();
-                    if (!containerRect) return null;
-                    
-                    // Convert message bounding box coordinates to container relative coords
-                    const relativeLeft = selectedMessageRect.left - containerRect.left;
-                    const relativeTop = selectedMessageRect.top - containerRect.top;
-                    
-                    const dropdownWidth = 224; // w-56 is 224px
-                    const dropdownHeight = isFailed ? 150 : (isMe && msg.type === MessageType.Text ? 245 : 210);
-                    
-                    const spaceBelow = containerRect.height - (relativeTop + selectedMessageRect.height);
-                    const spaceAbove = relativeTop;
-                    
-                    const positionY = (spaceBelow >= dropdownHeight || spaceBelow > spaceAbove) ? 'below' : 'above';
-                    
-                    let targetTop = positionY === 'below' 
-                      ? relativeTop + selectedMessageRect.height + 8
-                      : relativeTop - dropdownHeight - 8;
-                      
-                    const isVoiceNote = msg.type === MessageType.Audio || (msg.content && msg.content.includes('/api/voice'));
-                    const isShortMsg = msg.type === MessageType.Text && (msg.content || "").length < 60 && selectedMessageRect.width < containerRect.width * 0.75;
-                    const shouldForceAlign = isVoiceNote || isShortMsg;
-
-                    let targetLeft = isMe 
-                      ? relativeLeft + selectedMessageRect.width - dropdownWidth 
-                      : relativeLeft;
-                      
-                    if (!shouldForceAlign) {
-                      // Keep horizontally bound inside messages area with safe padding
-                      targetLeft = Math.max(16, Math.min(containerRect.width - dropdownWidth - 16, targetLeft));
-                    } else {
-                      // Still keep it bound within the container boundaries to prevent viewport overflow, but try to preserve alignment
-                      targetLeft = Math.max(8, Math.min(containerRect.width - dropdownWidth - 8, targetLeft));
-                    }
-                    
-                    return (
-                      <>
-                        {/* Backdrop overlay restrictive to the container */}
-                        <div 
-                          className="absolute inset-0 bg-transparent z-[9998] transition-all"
-                          onClick={() => setSelectedMessageId(null)}
-                        />
-                        
-                        {/* Dropdown Options container */}
-                        <div 
-                          style={{
-                            position: 'absolute',
-                            top: `${targetTop}px`,
-                            left: `${targetLeft}px`,
-                            width: `${dropdownWidth}px`,
-                          }}
-                          className="bg-[#fcfcfc] border border-slate-200/80 rounded-2xl flex flex-col overflow-hidden shadow-2xl z-[9999] animate-in fade-in-50 zoom-in-95 duration-100"
-                        >
-                          {isFailed ? (
-                            <>
-                              <button 
-                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-bold text-emerald-600 animate-pulse" 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  setSelectedMessageId(null);
-                                  const resendDto: SendMessageDto = {
-                                    chatId: msg.chatId,
-                                    content: msg.content || "",
-                                    type: msg.type,
-                                    attachments: msg.attachments || [],
-                                  };
-                                  handleSendMessage(resendDto, msg.id);
-                                }}
-                              >
-                                <span>Resend</span> <RefreshCw className="h-4.5 w-4.5 text-emerald-600 animate-spin" />
-                              </button>
-                              
-                              {msg.content && (
-                                <button 
-                                  className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
-                                  onClick={(e) => { 
-                                    e.stopPropagation();
-                                    navigator.clipboard.writeText(msg.content!); 
-                                    toast.success('Copied to clipboard');
-                                    setSelectedMessageId(null); 
-                                  }}
-                                >
-                                  <span>Copy</span> <Copy className="h-4.5 w-4.5 opacity-70 text-slate-500" />
-                                </button>
-                              )}
-                              
-                              <button 
-                                className="flex items-center justify-between p-3.5 text-red-500 hover:bg-red-500/5 transition-colors text-sm font-bold" 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  setSelectedMessageId(null);
-                                  setChatMessages(prev => prev.filter(m => m.id !== msg.id));
-                                }}
-                              >
-                                <span>Delete</span> <Trash2 className="h-4.5 w-4.5" />
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button 
-                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  setReplyingTo(msg); 
-                                  setSelectedMessageId(null); 
-                                }}
-                              >
-                                <span>Reply</span> <Reply className="h-4.5 w-4.5 opacity-70 text-slate-500" />
-                              </button>
-                              
-                              <button 
-                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  setForwardingMessage(msg);
-                                  setIsForwardModalOpen(true);
-                                  setSelectedMessageId(null); 
-                                }}
-                              >
-                                <span>Forward</span> <Forward className="h-4.5 w-4.5 opacity-70 text-slate-500" />
-                              </button>
-                              
-                              <button 
-                                className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
-                                onClick={(e) => { 
-                                  e.stopPropagation();
-                                  if (msg.content) {
-                                    navigator.clipboard.writeText(msg.content); 
-                                    toast.success('Copied to clipboard');
-                                  }
-                                  setSelectedMessageId(null); 
-                                }}
-                              >
-                                <span>Copy</span> <Copy className="h-4.5 w-4.5 opacity-70 text-slate-500" />
-                              </button>
-                              
-                              {isMe && msg.type === MessageType.Text && (
-                                <button 
-                                  className="flex items-center justify-between p-3.5 border-b border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-800" 
-                                  onClick={(e) => { 
-                                    e.stopPropagation(); 
-                                    setMessageToEdit(msg);
-                                    setEditMessageContent(msg.content || "");
-                                    setSelectedMessageId(null); 
-                                  }}
-                                >
-                                  <span>Edit</span> <Edit2 className="h-4.5 w-4.5 opacity-70 text-slate-500" />
-                                </button>
-                              )}
-                              
-                              <button 
-                                className={cn(
-                                  "flex items-center justify-between p-3.5 transition-colors text-sm font-bold",
-                                  isMe ? "text-red-500 hover:bg-red-500/5" : "text-slate-400 cursor-not-allowed"
-                                )} 
-                                disabled={!isMe}
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  setSelectedMessageId(null);
-                                  if (isMe) {
-                                    setMessageToDelete(msg); 
-                                  } else {
-                                    toast.error("You cannot delete a message sent by another participant.");
-                                  }
-                                }}
-                              >
-                                <span>Delete</span> <Trash2 className="h-4.5 w-4.5" />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <footer className="p-3.5 bg-[#f0f2f5] dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 shrink-0 z-50">
-                  <div className="flex flex-col gap-2 relative">
-
-                    <div className="flex items-center gap-2 max-w-[95%] mx-auto relative w-full">
-                      <div className="flex items-center shrink-0">
-                        <Popover>
-                          <PopoverTrigger 
-                            render={
-                              <Button variant="ghost" size="icon" className="rounded-full h-11 w-11 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80" />
-                            }
-                          >
-                            <Smile className="h-7 w-7" />
-                          </PopoverTrigger>
-                          <PopoverContent side="top" align="start" className="w-[320px] p-2 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-xl bg-white dark:bg-zinc-950 mb-2">
-                             <div className="grid grid-cols-6 gap-1 p-2">
-                                {['ðŸ˜€', 'ðŸ˜‚', 'ðŸ˜', 'ðŸ‘', 'ðŸ™', 'ðŸ”¥', 'âœ¨', 'ðŸ’¯', 'ðŸ ', 'ðŸ”‘', 'ðŸš¨', 'ðŸ› ï¸'].map(emoji => (
-                                   <button 
-                                      key={emoji} 
-                                      className="h-10 w-10 flex items-center justify-center text-2xl hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                                      onClick={() => setChatInput(prev => prev + emoji)}
-                                   >
-                                      {emoji}
-                                   </button>
-                                ))}
-                             </div>
-                             <div className="p-2 border-t border-slate-100 dark:border-zinc-800 text-[11px] text-center text-slate-500 dark:text-zinc-400 uppercase font-bold tracking-widest text-[#111b21] dark:text-zinc-100">Emoji Panel</div>
-                          </PopoverContent>
-                        </Popover>
-                        
-                        <label htmlFor="file-upload" className="cursor-pointer">
-                          <input type="file" id="file-upload" className="hidden" multiple onChange={(e) => handleFileUpload(e, 'file')} />
-                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors">
-                            <Paperclip className="h-6 w-6" />
-                          </div>
-                        </label>
-
-                        <label htmlFor="image-upload" className="cursor-pointer">
-                          <input type="file" id="image-upload" className="hidden" accept="image/*,video/*" multiple onChange={(e) => handleFileUpload(e, 'image')} />
-                          <div className="h-11 w-11 flex items-center justify-center rounded-full text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-colors">
-                            <ImageIcon className="h-6 w-6" />
-                          </div>
-                        </label>
-                      </div>
-
-              <div className="flex flex-col flex-1 relative gap-1 min-w-0">
-                {replyingTo && (
-                  <div className="mx-2 p-2 bg-slate-100 dark:bg-zinc-900 rounded-none border-l-4 border-primary flex items-center justify-between animate-in slide-in-from-bottom-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-primary truncate leading-tight uppercase tracking-widest">{replyingTo.senderName}</p>
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 truncate italic">
-                        {replyingTo.type === MessageType.Text ? replyingTo.content : `[${MessageType[replyingTo.type]}]`}
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setReplyingTo(null)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
-                <div className="relative bg-transparent rounded-none border-0 border-none shadow-none overflow-hidden">
-                  {recordingState !== 'inactive' ? (
-                        <div className="flex-1 h-12 flex items-center px-4 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none shadow-none border-0 border-none animate-in fade-in slide-in-from-bottom-2">
-                          <div className="flex items-center gap-3 w-full">
-                            
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="text-destructive shrink-0 h-8 w-8 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
-                              onClick={() => {
-                                if (mediaRecorderRef.current) {
-                                  (mediaRecorderRef.current as any).isCancelled = true;
-                                  if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
-                                    mediaRecorderRef.current.stop();
-                                  }
-                                }
-                                setIsRecording(false);
-                                setRecordingState('inactive');
-                                setRecordingTime(0);
-                                setActiveStream(null);
-                                setSwipeX(0);
-                                if (playbackAudioRef.current) {
-                                  playbackAudioRef.current.pause();
-                                  playbackAudioRef.current.src = "";
-                                }
-                                setPlaybackPreviewUrl(null);
-                                setPlaybackPreviewPlaying(false);
-                              }}
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </Button>
-
-                            {recordingState === 'recording' ? (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 shrink-0 animate-in fade-in"
-                                  onClick={() => {
-                                     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                                       (mediaRecorderRef.current as any).isPauseStop = true;
-                                       mediaRecorderRef.current.stop();
-                                       setRecordingState('paused');
-                                     }
-                                  }}
-                                >
-                                  <Pause className="h-5 w-5" />
-                                </Button>
-
-                                <motion.div
-                                  drag="x"
-                                  dragConstraints={{ left: -140, right: 0 }}
-                                  dragElastic={{ left: 0.1, right: 0 }}
-                                  onDrag={(_, info) => {
-                                    setSwipeX(info.offset.x);
-                                  }}
-                                  onDragEnd={(_, info) => {
-                                    if (info.offset.x < -90) {
-                                      if (mediaRecorderRef.current) {
-                                        (mediaRecorderRef.current as any).isCancelled = true;
-                                        if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
-                                          mediaRecorderRef.current.stop();
-                                        }
-                                      }
-                                      setIsRecording(false);
-                                      setRecordingState('inactive');
-                                      setRecordingTime(0);
-                                      setActiveStream(null);
-                                      setSwipeX(0);
-                                      if (playbackAudioRef.current) {
-                                        playbackAudioRef.current.pause();
-                                        playbackAudioRef.current.src = "";
-                                      }
-                                      setPlaybackPreviewUrl(null);
-                                      setPlaybackPreviewPlaying(false);
-                                      require('react-hot-toast').toast.success("Recording discarded");
-                                    } else {
-                                      setSwipeX(0);
-                                    }
-                                  }}
-                                  style={{ x: swipeX }}
-                                  className="flex-1 flex items-center justify-between px-3 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-full cursor-grab active:cursor-grabbing select-none"
-                                >
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-xs font-bold font-mono text-[#111b21] dark:text-zinc-100 min-w-[36px]">
-                                      {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
-                                    </span>
-                                  </div>
-
-                                  {/* Waveform Visualization */}
-                                  <RecordingWaveform stream={activeStream} />
-
-                                  <div className="flex items-center gap-1 text-[#54656f] dark:text-zinc-300 shrink-0">
-                                    <motion.span
-                                      animate={{ x: [0, -4, 0] }}
-                                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                                      className="text-xs font-medium tracking-tight whitespace-nowrap"
-                                    >
-                                      {swipeX < -40 ? "Release to cancel" : "Slide left to cancel âŸ¨âŸ¨"}
-                                    </motion.span>
-                                  </div>
-                                </motion.div>
-                              </>
-                            ) : (
-                              /* Paused state preview layout */
-                              <>
-                                <div className="flex-1 flex items-center justify-center gap-4 h-8">
-                                   <div className="flex items-center gap-4">
-                                     <Button
-                                       variant="ghost"
-                                       size="icon"
-                                       className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
-                                       onClick={async () => {
-                                          if (!playbackPreviewUrl) {
-                                             const mime = voiceNotePartsRef.current[0]?.type || getSupportedAudioMimeType();
-                                             const mergedBlob = new Blob(voiceNotePartsRef.current, { type: mime });
-                                             const url = URL.createObjectURL(mergedBlob);
-                                             setPlaybackPreviewUrl(url);
-                                             if (!playbackAudioRef.current) {
-                                               playbackAudioRef.current = new Audio();
-                                             }
-                                             playbackAudioRef.current.onended = () => {
-                                               setPlaybackPreviewPlaying(false);
-                                             };
-                                             playbackAudioRef.current.src = url;
-                                             playbackAudioRef.current.play();
-                                             setPlaybackPreviewPlaying(true);
-                                          } else if (playbackAudioRef.current) {
-                                             if (playbackPreviewPlaying) {
-                                               playbackAudioRef.current.pause();
-                                               setPlaybackPreviewPlaying(false);
-                                             } else {
-                                               playbackAudioRef.current.play();
-                                               setPlaybackPreviewPlaying(true);
-                                             }
-                                          }
-                                       }}
-                                     >
-                                       {playbackPreviewPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-                                     </Button>
-
-                                     <Button
-                                       variant="ghost"
-                                       size="icon"
-                                       className="h-8 w-8 text-[#54656f] dark:text-zinc-200 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
-                                       onClick={async () => {
-                                          try {
-                                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                                            setRecordingState('recording');
-                                            setActiveStream(stream);
-                                            if (playbackAudioRef.current) {
-                                              playbackAudioRef.current.pause();
-                                              setPlaybackPreviewPlaying(false);
-                                            }
-
-                                            (window as any).lastTypingSentTime = Date.now();
-                                            apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
-
-                                            const recMime = getSupportedAudioMimeType();
-                                            const recorder = new MediaRecorder(stream, { mimeType: recMime });
-                                            mediaRecorderRef.current = recorder;
-                                            audioChunksRef.current = [];
-
-                                            recorder.ondataavailable = (e) => {
-                                              if (e.data && e.data.size > 0) {
-                                                audioChunksRef.current.push(e.data);
-                                              }
-                                            };
-
-                                            recorder.onstop = () => {
-                                              stream.getTracks().forEach(track => track.stop());
-                                              setActiveStream(null);
-
-                                              if ((recorder as any).isCancelled) {
-                                                setIsRecording(false);
-                                                setRecordingState('inactive');
-                                                voiceNotePartsRef.current = [];
-                                                return;
-                                              }
-
-                                              if (audioChunksRef.current.length > 0) {
-                                                const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
-                                                voiceNotePartsRef.current.push(segmentBlob);
-                                                audioChunksRef.current = [];
-                                              }
-
-                                              if ((recorder as any).isPauseStop) {
-                                                return;
-                                              }
-
-                                              sendVoiceNote();
-                                            };
-
-                                            recorder.start();
-                                          } catch (err) {
-                                            console.error("Microphone permission denied:", err);
-                                            require('react-hot-toast').toast.error("Could not access microphone");
-                                          }
-                                       }}
-                                     >
-                                       <Mic className="h-5 w-5 text-red-500 animate-pulse" />
-                                     </Button>
-                                   </div>
-                                </div>
-                                <span className="text-sm font-bold text-[#111b21] dark:text-zinc-100 min-w-[45px] shrink-0 text-right">
-                                  {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <Input placeholder="Type a message" 
-                          className="py-6 px-4 rounded-none border-0 border-none outline-none focus:outline-none focus:ring-0 focus-visible:ring-0 shadow-none text-[16px] placeholder:text-[#667781] dark:text-zinc-400 dark:placeholder:text-zinc-500 text-black dark:text-zinc-100"
-                          value={chatInput}
-                          autoComplete="off"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          onChange={(e) => {
-                            setChatInput(e.target.value);
-                            const now = Date.now();
-                            if (now - (window as any).lastTypingSentTime > 5000 || !(window as any).lastTypingSentTime) {
-                              (window as any).lastTypingSentTime = now;
-                              apiFetch(`/Message/Typing?chatId=${activeChatId}&action=typing`, { method: 'POST' }).catch(() => {});
-                            }
-                          }}
-                          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                <div className="flex items-center shrink-0">
-                      {recordingState !== 'inactive' ? (
-                        <Button 
-                          onClick={() => {
-                            if (recordingState === 'recording') {
-                              if (mediaRecorderRef.current) {
-                                (mediaRecorderRef.current as any).isPauseStop = false;
-                                mediaRecorderRef.current.stop();
-                              }
-                            } else if (recordingState === 'paused') {
-                              sendVoiceNote();
-                            } else {
-                              setIsRecording(false);
-                              setRecordingState('inactive');
-                            }
-                          }}
-                          className="rounded-full h-11 w-11 bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-[#1fa855] border border-slate-200 dark:border-zinc-800 shadow-md flex items-center justify-center p-0 animate-in zoom-in"
-                        >
-                          <Send className="h-6 w-6 fill-current text-[#1fa855]" />
-                        </Button>
-                      ) : chatInput.trim() ? (
-                        <Button 
-                          onClick={() => handleSendMessage()}
-                          className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
-                        >
-                          <Send className="h-7 w-7 fill-current" />
-                        </Button>
-                      ) : (
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn(
-                            "rounded-full h-11 w-11 text-[#54656f] dark:text-zinc-400 hover:bg-slate-200/50 dark:hover:bg-zinc-800/80 transition-all relative overflow-hidden",
-                            recordingState !== 'inactive' && "bg-destructive text-white scale-110 shadow-lg"
-                          )}
-                          onClick={async () => {
-                            try {
-                              const startTime = Date.now();
-                              const stream = await navigator.mediaDevices.getUserMedia({
-                                audio: {
-                                  echoCancellation: true,
-                                  noiseSuppression: true,
-                                  autoGainControl: true,
-                                  channelCount: 1,
-                                  sampleRate: 48000
-                                }
-                              });
-                              setIsRecording(true);
-                              setRecordingState('recording');
-                              setActiveStream(stream);
-                              setRecordingTime(0);
-                              setPlaybackPreviewUrl(null);
-                              setPlaybackPreviewPlaying(false);
-                              
-                              (window as any).lastTypingSentTime = Date.now();
-                              apiFetch(`/Message/Typing?chatId=${activeChatId}&action=${encodeURIComponent('recording voice message')}`, { method: 'POST' }).catch(() => {});
-                              
-                              const recMime = getSupportedAudioMimeType();
-                              const recorder = new MediaRecorder(stream, { mimeType: recMime });
-                              mediaRecorderRef.current = recorder;
-                              audioChunksRef.current = [];
-                              voiceNotePartsRef.current = [];
-                              
-                              recorder.ondataavailable = (e) => {
-                                if (e.data.size > 0) {
-                                  audioChunksRef.current.push(e.data);
-                                }
-                              };
-                              
-                              recorder.onstop = () => {
-                                stream.getTracks().forEach(track => track.stop());
-                                setActiveStream(null);
-
-                                if ((recorder as any).isCancelled) {
-                                  setIsRecording(false);
-                                  setRecordingState('inactive');
-                                  voiceNotePartsRef.current = [];
-                                  return;
-                                }
-
-                                if (audioChunksRef.current.length > 0) {
-                                  const segmentBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || recMime });
-                                  voiceNotePartsRef.current.push(segmentBlob);
-                                  audioChunksRef.current = [];
-                                }
-
-                                if ((recorder as any).isPauseStop) {
-                                  return;
-                                }
-
-                                sendVoiceNote();
-                              };
-                              
-                              recorder.start();
-                            } catch (err) {
-                              console.error("Microphone permission denied:", err);
-                              toast.error("Could not access microphone");
-                            }
-                          }}
-                        >
-                          <Mic className="h-6 w-6" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </footer>
-                  </div>
-
-                  {/* RIGHT: Collapsible Call History Side Panel for Selected Chat */}
-                  <AnimatePresence initial={false}>
-                    {isChatCallHistoryOpen && (
-                      <motion.div
-                        initial={{ width: 0, opacity: 0 }}
-                        animate={{ width: 320, opacity: 1 }}
-                        exit={{ width: 0, opacity: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="w-[320px] shrink-0 border-l border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full overflow-hidden shadow-xs relative z-20"
-                      >
-                        {/* Header */}
-                        <div className="px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px]">
-                          <div className="flex items-center gap-2.5 text-left min-w-0">
-                            <div className="h-9 w-9 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 shadow-xs">
-                              <History className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
-                            </div>
-                            <div className="min-w-0">
-                              <h4 className="text-xs font-bold text-slate-900 dark:text-zinc-100 truncate leading-tight">Chat Call History</h4>
-                              <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium truncate">Logs for this conversation</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 rounded-full text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800"
-                              onClick={() => setIsChatCallHistoryOpen(false)}
-                              title="Collapse Call History Panel"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Logs List */}
-                        <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-2.5 bg-slate-50/50 dark:bg-zinc-950" onScroll={handleCallLogsScroll}>
-                          {(() => {
-                            const chatCallLogs = callLogs.filter(l => l.chatId === activeChatId);
-                            const sortedLogs = [...chatCallLogs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-
-                            if (isCallLogsLoading && sortedLogs.length === 0) {
-                              return (
-                                <ThreeDotsLoading label="Loading call logs..." />
-                              );
-                            }
-
-                            if (sortedLogs.length === 0) {
-                              return (
-                                <div className="flex flex-col items-center justify-center py-12 px-4 text-center bg-white dark:bg-zinc-950 rounded-2xl border border-slate-200/80 dark:border-zinc-800 p-6 shadow-2xs">
-                                  <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400 dark:text-zinc-500 mb-2">
-                                    <Phone className="h-5 w-5" />
-                                  </div>
-                                  <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">No Call History</p>
-                                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 mb-3">Calls made in this chat will appear here.</p>
-                                  <Button
-                                    size="sm"
-                                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 font-semibold shadow-2xs flex items-center gap-1.5"
-                                    onClick={() => handleStartCall(activeChatId, CallType.Audio)}
-                                  >
-                                    <Phone className="h-3 w-3" /> Start Voice Call
-                                  </Button>
-                                </div>
-                              );
-                            }
-
-                            return sortedLogs.map((log, idx) => {
-                              const userStatus = getUserCallStatus(log, userProfile?.id);
-                              return (
-                                <div key={log.id ? `side-log-${log.id}` : `side-log-${log.callId || idx}-${log.startedAt}-${idx}`} className="p-3 bg-white dark:bg-zinc-950 rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-2xs hover:border-emerald-300 dark:hover:border-emerald-700 transition-all text-left space-y-2">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <Badge className={cn(
-                                        "text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-md border shrink-0",
-                                        log.type === CallType.Video ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800" : "bg-slate-50 text-slate-700 border-slate-200 dark:bg-zinc-950 dark:text-zinc-300 dark:border-zinc-800"
-                                      )}>
-                                        {log.type === CallType.Video ? "Video" : "Voice"}
-                                      </Badge>
-
-                                      {userStatus === 'ringing' || userStatus === 'connected' ? (
-                                        <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 animate-pulse">
-                                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" /> Active
-                                        </span>
-                                      ) : userStatus === 'missed' ? (
-                                        <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.2 rounded-sm border border-rose-100 dark:border-rose-900/40 flex items-center gap-1">
-                                          <PhoneOff className="h-3 w-3 text-rose-500" /> Missed
-                                        </span>
-                                      ) : userStatus === 'rejected' ? (
-                                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.2 rounded-sm border border-amber-100 dark:border-amber-900/40 flex items-center gap-1">
-                                          <PhoneOff className="h-3 w-3 text-amber-500" /> Rejected
-                                        </span>
-                                      ) : userStatus === 'received' ? (
-                                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.2 rounded-sm border border-emerald-100 dark:border-emerald-900/40 flex items-center gap-1">
-                                          <PhoneIncoming className="h-3 w-3 text-emerald-600" /> Received
-                                        </span>
-                                      ) : (
-                                        <span className="text-[10px] font-bold text-slate-700 dark:text-zinc-300 bg-slate-50 dark:bg-zinc-950 px-1.5 py-0.2 rounded-sm border border-slate-200 dark:border-zinc-800 flex items-center gap-1">
-                                          <PhoneOutgoing className="h-3 w-3 text-blue-500" /> Outgoing
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-zinc-400 shrink-0">
-                                      {(userStatus === 'missed' || userStatus === 'rejected' || log.status === CallStatus.Missed)
-                                        ? "0s"
-                                        : (((log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && !log.endedAt)
-                                          ? formatCallDuration(log.startedAt, new Date(liveTimestamp), log.answeredAt)
-                                          : (log.duration || formatCallDuration(log.startedAt, log.endedAt || log.startedAt, log.answeredAt)))}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400 pt-1.5 border-t border-slate-100 dark:border-zinc-800">
-                                    <span className="font-mono text-slate-400 dark:text-zinc-500">
-                                      {formatRelativeTime(log.startedAt)}
-                                    </span>
-
-                                    {(log.status === CallStatus.Ringing || log.status === CallStatus.Connected) && userStatus !== 'missed' ? (
-                                      <Button
-                                        size="sm"
-                                        onClick={() => handleAcceptCall(log.callId, log.chatId)}
-                                        className="h-6 px-2 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-md shadow-2xs"
-                                      >
-                                        Join
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => handleStartCall(log.chatId, log.type)}
-                                        className="h-6 w-6 text-slate-600 dark:text-zinc-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-700 dark:hover:text-emerald-400 rounded-md shrink-0 transition-colors"
-                                        title="Redial"
-                                      >
-                                        {log.type === CallType.Video ? <Video className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            });
-                          })()}
-                          {isFetchingMoreCallLogs && (
-                            <div className="flex justify-center py-2">
-                              <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
-                            </div>
-                          )}
-                          {!isFetchingMoreCallLogs && hasMoreCallLogs && (
-                            <div ref={sideCallLogsLoaderRef} className="h-4 w-full" />
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto bg-[#f0f2f5] dark:bg-zinc-950 text-[#667781] dark:text-zinc-400 p-6 sm:p-12 text-center min-h-0">
-                <div className="max-w-md w-full space-y-8 animate-in fade-in zoom-in duration-500">
-                  <div className="flex justify-center">
-                    <div className="h-48 w-48 rounded-full bg-white dark:bg-zinc-950 flex items-center justify-center shadow-xl relative">
-                      <div className="absolute inset-0 rounded-full border-4 border-primary/10 border-dashed animate-[spin_20s_linear_infinite]" />
-                      <MessageSquare className="h-24 w-24 text-primary/20" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-black text-slate-800 dark:text-zinc-100 tracking-tight">HanssonHub Connect</h2>
-                    <p className="text-sm text-[#667781] dark:text-zinc-400 font-medium leading-relaxed">
-                      Select a contact from your sidebar to view history or start a new conversation.
-                    </p>
-                  </div>
-                  
-                  <div className="pt-4 space-y-4">
-                    <div className="flex items-center gap-2 justify-center">
-                      <div className="h-px w-8 bg-slate-300 dark:bg-zinc-800" />
-                      <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-300 uppercase tracking-widest">Active Members</span>
-                      <div className="h-px w-8 bg-slate-300 dark:bg-zinc-800" />
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {allUsers.filter(u => u.id !== userProfile.id).slice(0, 4).map(user => (
-                        <button 
-                          key={user.id}
-                          onClick={() => startDirectChat(user)}
-                          className="bg-white dark:bg-zinc-900 p-2 rounded-2xl border border-slate-100 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group flex flex-col items-center gap-2 w-24"
-                        >
-                          <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-50 dark:border-zinc-800 flex items-center justify-center bg-primary/10 text-primary font-bold">
-                            {user.getPersonDetailsDto.imageUrl ? (
-                              <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                            ) : (
-                              <span className="text-sm uppercase">{user.getPersonDetailsDto.firstName ? user.getPersonDetailsDto.firstName[0] : '?'}</span>
-                            )}
-                          </div>
-                          <span className="text-[10px] font-bold text-slate-700 dark:text-zinc-200 group-hover:text-primary transition-colors truncate w-full text-center">
-                            {user.getPersonDetailsDto.firstName}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="pt-8">
-                    <Button 
-                      variant="outline" 
-                      className="rounded-full bg-white dark:bg-zinc-900 border-2 border-slate-100 dark:border-zinc-800 text-[#54656f] dark:text-zinc-200 font-bold h-12 px-8 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all hover:scale-105 active:scale-95"
-                      onClick={() => { setIsGroupMode(false); setIsNewChatOpen(true); }}
-                    >
-                      <PlusCircle className="mr-2 h-5 w-5" />
-                      New Conversation
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-                      </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-            <Dialog open={isViewGroupOpen} onOpenChange={setIsViewGroupOpen}>
-        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col">
-          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 -mt-4 -mx-4 mb-0">
-            <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
-              <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
-                  <Info className="h-5 w-5" />
-                </div>
-                <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
-                    {(() => {
-                      const currentChat = chats.find(c => c.id === activeChatId || c.id === editingGroupId);
-                      return currentChat?.isGroup ? "Group Details" : "Chat Details";
-                    })()}
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-slate-500 dark:text-zinc-400 font-normal leading-none mt-1">
-                    View description and members
-                  </DialogDescription>
-                </div>
-              </div>
-              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
-                <X className="h-5 w-5" />
-              </DialogClose>
-            </div>
-          </DialogHeader>
-
-          {/* Scrollable Container split 40:60 */}
-          <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Left Column (40%) */}
-            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900">
-              <div className="space-y-4">
-                <div className="flex justify-center">
-                  <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm shrink-0">
-                    {newGroupImageUrl ? (
-                      <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
-                    ) : (
-                      <Users className="h-10 w-10 text-slate-300" />
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2 text-center">
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-zinc-100 leading-tight">{newGroupName}</h3>
-                  {newGroupDescription ? (
-                    <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">{newGroupDescription}</p>
-                  ) : (
-                    <p className="text-xs italic text-slate-400">No description provided</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Edit and Delete Buttons */}
-              <div className="flex flex-row gap-2 mt-auto">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex-1 h-10 gap-1.5 rounded-xl border border-black bg-white text-black dark:text-zinc-100 hover:bg-slate-50 font-bold"
-                  onClick={() => {
-                    setIsViewGroupOpen(false);
-                    setIsEditGroupOpen(true);
-                  }}
-                >
-                  <Edit2 className="h-4 w-4 text-black dark:text-zinc-100" />
-                  <span>Edit</span>
-                </Button>
-                <Button 
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 h-10 gap-1.5 rounded-xl border border-red-500 bg-white text-red-500 hover:bg-red-50 font-bold" 
-                  onClick={() => {
-                    setIsViewGroupOpen(false);
-                    setIsDeleteChatModalOpen(true);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                  <span>Delete Chat</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Right Column (60%) */}
-            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
-              <ScrollArea className="flex-1 no-scrollbar [&>[data-radix-scroll-area-viewport]]:no-scrollbar">
-                <div className="p-6">
-                  {(() => {
-                    const currentChat = chats.find(c => c.id === activeChatId || c.id === editingGroupId);
-                    const participants = currentChat?.participants || [];
-                    const personIdNames = appNamesDetailList?.personIdNames || [];
-                    
-                    let mappedParticipants = participants.map(p => {
-                      const matchedName = personIdNames.find((pn: any) => pn.id === p.personId);
-                      const matchedUser = allUsers.find(u => u.id === p.personId);
-                      const isOnline = matchedName?.isOnline ?? matchedUser?.isOnline ?? p.isOnline;
-                      const role = matchedUser?.getUserDto?.roleName || 'Member';
-                      
-                      return {
-                        id: p.personId,
-                        name: matchedName?.name || p.fullName || (matchedUser?.getPersonDetailsDto?.firstName ? `${matchedUser?.getPersonDetailsDto?.firstName} ${matchedUser?.getPersonDetailsDto?.lastName}` : 'Group Member'),
-                        imageUrl: matchedName?.imageUrl || p.profileImageUrl || matchedUser?.getPersonDetailsDto?.imageUrl || '',
-                        isOnline,
-                        role,
-                        isAdmin: p.isAdmin,
-                        isMe: p.personId === userProfile?.id
-                      };
-                    });
-
-                    const isMeInGroup = participants.some(p => p.personId === userProfile?.id);
-                    if (isMeInGroup && !mappedParticipants.some(m => m.id === userProfile?.id) && userProfile) {
-                      mappedParticipants.unshift({
-                        id: userProfile.id,
-                        name: userProfile.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
-                        imageUrl: userProfile.getPersonDetailsDto?.imageUrl || '',
-                        isOnline: true,
-                        role: userProfile.getUserDto?.roleName || 'Owner',
-                        isAdmin: true,
-                        isMe: true
-                      });
-                    }
-
-                    mappedParticipants.sort((a, b) => {
-                      if (a.isMe) return -1;
-                      if (b.isMe) return 1;
-                      return (b.isAdmin ? 1 : 0) - (a.isAdmin ? 1 : 0);
-                    });
-
-                    return (
-                      <>
-                        <div className="flex items-center justify-between mb-4">
-                          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Members</h4>
-                          <Badge variant="secondary" className="rounded-full bg-primary/10 text-primary border-none font-bold">
-                            {mappedParticipants.length} members
-                          </Badge>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          {mappedParticipants.map((member) => (
-                            <div 
-                              key={member.id} 
-                              onClick={() => {
-                                if (member.id !== userProfile?.id) {
-                                  startDirectChat({ id: member.id } as any);
-                                  setIsViewGroupOpen(false);
-                                }
-                              }}
-                              className={cn(
-                                "p-4 flex flex-col items-center text-center bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl shadow-sm hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all relative gap-2",
-                                member.id !== userProfile?.id ? "cursor-pointer" : ""
-                              )}
-                            >
-                              {member.isAdmin && (
-                                <div className="absolute top-2.5 right-2.5">
-                                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 py-0 px-1.5 font-bold h-4 rounded-md shrink-0">
-                                    Admin
-                                  </Badge>
-                                </div>
-                              )}
-
-                              <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 relative shadow-inner">
-                                {member.imageUrl ? (
-                                  <img src={getFullImageUrl(member.imageUrl)} alt={member.name} className="h-full w-full object-cover" />
-                                ) : (
-                                  <UserIcon className="h-6 w-6 text-slate-400" />
-                                )}
-                              </div>
-
-                              <div className="flex-1 min-w-0">
-                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate px-1">
-                                  {member.id === userProfile?.id ? "You" : member.name}
-                                </h4>
-                                <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
-                                  {member.isOnline ? (
-                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                      Online
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400 dark:text-zinc-400 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
-                                      Offline
-                                    </span>
-                                  )}
-                                  <span className="text-slate-400 dark:text-zinc-500 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{member.role}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              </ScrollArea>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <GlobalRemoteAudioFeeds remoteStreams={remoteStreams} />
-
-      {/* Call Dialog (WhatsApp style overlay) */}
-      <Dialog open={isCallModalOpen} onOpenChange={(open) => {
-        setIsCallModalOpen(open);
-      }}>
-        <DialogContent 
-          showCloseButton={false} 
-          className="max-w-[500px] w-[95vw] h-[650px] p-0 overflow-hidden rounded-3xl border border-black/40 shadow-2xl bg-[#111b21] text-white flex flex-col justify-between"
-        >
-          {/* Custom style for keyframe animations (sound waves and pulsing) */}
-          <style dangerouslySetInnerHTML={{__html: `
-            @keyframes soundwave {
-              0%, 100% { height: 8px; }
-              50% { height: 42px; }
-            }
-            @keyframes minisoundwave {
-              0%, 100% { height: 4px; }
-              50% { height: 16px; }
-            }
-            .mini-bar {
-              animation: minisoundwave infinite ease-in-out alternate;
-            }
-            @keyframes callripple {
-              0% { transform: scale(0.95); opacity: 0.5; }
-              50% { transform: scale(1.15); opacity: 0.2; }
-              100% { transform: scale(1.3); opacity: 0; }
-            }
-          `}} />
-
-          {activeCall ? (
-            <>
-              {/* Call Header */}
-              <div className="pt-5 px-6 shrink-0 flex flex-col items-center gap-1 z-10 relative">
-                {/* Minimize Button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsCallModalOpen(false)}
-                  className="absolute top-2 right-4 rounded-full h-8 w-8 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
-                  title="Minimize Call"
-                >
-                  <Minimize className="h-5 w-5" />
-                </Button>
-
-                <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold uppercase tracking-[0.15em]">
-                  <Lock className="h-3 w-3 text-emerald-500" />
-                  <span>End-to-End Encrypted</span>
-                </div>
-                <h3 className="text-xl font-black tracking-tight text-white mt-1">
-                  {(() => {
-                    const callChat = chats.find(c => c.id === activeCall.chatId);
-                    return callChat ? getChatDisplayName(callChat) : "HanssonHub Call";
-                  })()}
-                </h3>
-                <span className="text-xs text-slate-400 font-medium tracking-wide">
-                  <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    {activeCall.status === CallStatus.Ringing ? (
-                      <span>Ringing...</span>
-                    ) : (
-                      <>
-                        <span>In progress</span>
-                        <span className="text-slate-500">â€¢</span>
-                        <span className="font-mono text-xs">{formatCallTimer(callDurationSeconds)}</span>
-                      </>
-                    )}
-                  </span>
-                </span>
-              </div>
-
-              {/* Call Body */}
-              <div className="flex-1 flex flex-col items-center justify-center p-4 relative z-10 w-full overflow-hidden">
-                {(() => {
-                  const callChat = chats.find(c => c.id === activeCall.chatId);
-                  const isGroupCall = callChat?.isGroup ?? false;
-                  const otherPersonFromChat = callChat?.participants?.find(p => p.personId !== userProfile?.id);
-                  const chatDisplayName = callChat ? getChatDisplayName(callChat) : "User";
-                  const chatDisplayImage = callChat ? getChatDisplayImageUrl(callChat) : null;
-
-                  let rawParticipants = activeCall.participants.filter(p => {
-                    if (p.personId === userProfile?.id) return false;
-                    if (isGroupCall) {
-                      return p.status === CallParticipantStatus.Connected;
-                    }
-                    return true;
-                  });
-
-                  if (!isGroupCall && rawParticipants.length === 0) {
-                    rawParticipants = [{
-                      personId: otherPersonFromChat?.personId || 0,
-                      fullName: otherPersonFromChat?.fullName || chatDisplayName,
-                      profileImage: otherPersonFromChat?.imageUrl || chatDisplayImage || undefined,
-                      status: activeCall.status === CallStatus.Connected ? CallParticipantStatus.Connected : CallParticipantStatus.Ringing,
-                      isMuted: false,
-                      isCameraEnabled: activeCall.type === CallType.Video,
-                      isSharing: false
-                    }];
-                  }
-
-                  const displayParticipants = rawParticipants.map(p => ({
-                    ...p,
-                    fullName: p.fullName || (otherPersonFromChat?.personId === p.personId || !isGroupCall ? (otherPersonFromChat?.fullName || chatDisplayName) : undefined) || chatDisplayName,
-                    profileImage: p.profileImage || (otherPersonFromChat?.personId === p.personId || !isGroupCall ? (otherPersonFromChat?.imageUrl || chatDisplayImage || undefined) : undefined)
-                  }));
-
-                  if (activeCall.status === CallStatus.Ringing && !isGroupCall) {
-                    /* Single 1-on-1 Ringing State */
-                    return (activeCall.type === CallType.Video && !isIncomingCall) ? (
-                      <div className="flex flex-col items-center justify-center gap-6">
-                        <div className="relative w-64 h-48 md:w-80 md:h-60 bg-zinc-950 border-2 border-emerald-500/30 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
-                          {isCallCameraEnabled ? (
-                            <LocalVideoFeed />
-                          ) : (
-                            <div className="flex flex-col items-center gap-2">
-                              <VideoOff className="h-8 w-8 text-slate-500 animate-pulse" />
-                              <span className="text-xs text-slate-400">Camera is off</span>
-                            </div>
-                          )}
-                          
-                          <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/5 text-[10px] font-bold text-emerald-400 z-20">
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                            </span>
-                            <span>LIVE PREVIEW</span>
-                          </div>
-
-                          <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/5 z-20">
-                            <div className="h-6 w-6 rounded-full bg-slate-800 overflow-hidden flex items-center justify-center text-[10px] font-black text-slate-300">
-                              {(() => {
-                                const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
-                                const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
-                                if (displayImageUrl) {
-                                  return <img src={getFullImageUrl(displayImageUrl)} alt="Target" className="h-full w-full object-cover" />;
-                                }
-                                return <span>{displayInitial}</span>;
-                              })()}
-                            </div>
-                            <span className="text-[10px] font-bold text-slate-300 truncate max-w-[100px]">
-                              {callChat ? getChatDisplayName(callChat) : "Calling..."}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 px-4 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-emerald-400 shadow-sm">
-                          <Video className="h-3.5 w-3.5 animate-pulse" />
-                          <span>Outgoing Video Call...</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-8">
-                        <div className="relative">
-                          <div className="absolute inset-0 bg-emerald-500 rounded-full animate-pulse opacity-25" style={{ animation: 'callripple 2s infinite' }} />
-                          <div className="absolute inset-0 bg-emerald-500 rounded-full animate-pulse opacity-15" style={{ animation: 'callripple 2s infinite 0.7s' }} />
-                          
-                          <div className="h-32 w-32 rounded-full bg-slate-800 border-4 border-slate-700/80 overflow-hidden shadow-2xl relative z-10 flex items-center justify-center text-4xl font-bold">
-                            {(() => {
-                              const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
-                              const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
-                              if (displayImageUrl) {
-                                return <img src={getFullImageUrl(displayImageUrl)} alt="Caller" className="h-full w-full object-cover" />;
-                              }
-                              return <span>{displayInitial}</span>;
-                            })()}
-                          </div>
-                        </div>
-                        
-                        {activeCall.type === CallType.Video && (
-                          <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 px-4 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-emerald-400 shadow-sm">
-                            <Video className="h-3.5 w-3.5 animate-pulse" />
-                            <span>Camera requested</span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-
-                  /* Connected Call State or Group Call Ringing State */
-                  return (
-                    <div className="h-full w-full flex flex-col justify-center items-center gap-4">
-                      {activeCall.type === CallType.Video ? (
-                        /* Video Grid Layout */
-                        <div className={cn(
-                          "grid gap-3 w-full h-full max-h-[380px] overflow-y-auto custom-scrollbar p-1",
-                          (displayParticipants.length + 1) === 1 ? "grid-cols-1" :
-                          (displayParticipants.length + 1) <= 4 ? "grid-cols-2" :
-                          "grid-cols-3"
-                        )}>
-                          {/* Current User Card */}
-                          <div className="relative bg-zinc-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px]">
-                            {isCallScreenSharing ? (
-                              <LocalVideoFeed stream={screenStreamRef.current} />
-                            ) : isCallCameraEnabled ? (
-                              <LocalVideoFeed stream={localStreamRef.current} />
-                            ) : (
-                              <div className="flex flex-col items-center gap-2">
-                                <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 font-bold text-lg">
-                                  {userProfile?.getPersonDetailsDto?.imageUrl ? (
-                                    <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="You" className="h-full w-full object-cover" />
-                                  ) : (
-                                    <span>{userProfile?.getPersonDetailsDto?.firstName ? userProfile.getPersonDetailsDto.firstName[0] : "Y"}</span>
-                                  )}
-                                </div>
-                                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Your Camera Off</span>
-                              </div>
-                            )}
-                            <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-wide text-white border border-white/10 flex items-center gap-1">
-                              <span>{isCallScreenSharing ? "You (Sharing Screen)" : "You"}</span>
-                              {isCallMuted && <MicOff className="h-3 w-3 text-rose-400" />}
-                            </div>
-                          </div>
-
-                          {/* Other Participants Cards */}
-                          {displayParticipants.map(p => {
-                            const pStatus = p.status ?? CallParticipantStatus.Ringing;
-                            const isConnected = pStatus === CallParticipantStatus.Connected;
-                            const isDeclined = pStatus === CallParticipantStatus.Declined;
-                            const isLeft = pStatus === CallParticipantStatus.Left;
-                            const remoteStream = remoteStreams[p.personId];
-                            const hasVideoTrack = remoteStream && remoteStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live');
-
-                            return (
-                              <div key={p.personId} className={cn(
-                                "relative bg-zinc-950 border rounded-2xl overflow-hidden shadow-lg flex items-center justify-center group min-h-[120px] transition-all",
-                                isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/40 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
-                              )}>
-                                {remoteStream && <RemoteAudioFeed stream={remoteStream} />}
-
-                                {(remoteStream && hasVideoTrack) ? (
-                                  <RemoteVideoFeed stream={remoteStream} />
-                                ) : p.isCameraEnabled && isConnected ? (
-                                  <div className="absolute inset-0 bg-slate-950 flex items-center justify-center overflow-hidden">
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
-                                    <div className="h-14 w-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-500 text-lg font-bold animate-pulse">
-                                      {p.profileImage ? (
-                                        <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
-                                      ) : (
-                                        <span>{p.fullName ? p.fullName[0] : "P"}</span>
-                                      )}
-                                    </div>
-                                    <div className="absolute inset-0 flex flex-col justify-center items-center bg-black/40 gap-1.5">
-                                      <div className="relative flex h-2.5 w-2.5">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                                      </div>
-                                      <span className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">Connecting Video...</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col items-center gap-2 p-2">
-                                    <div className="h-14 w-14 rounded-full bg-slate-800 border border-slate-700/60 overflow-hidden flex items-center justify-center text-lg font-bold text-slate-300 shadow-md">
-                                      {p.profileImage ? (
-                                        <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
-                                      ) : (
-                                        <span>{p.fullName ? p.fullName[0] : "P"}</span>
-                                      )}
-                                    </div>
-                                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 truncate max-w-[100px]">
-                                      {p.fullName || "User"}
-                                    </span>
-                                  </div>
-                                )}
-
-                                {/* Participant Status Pill Overlay */}
-                                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold text-white border border-white/10 z-20">
-                                  <span className="truncate max-w-[100px]">{p.fullName || "User"}</span>
-                                  {isGroupCall && (
-                                    isConnected ? (
-                                      <span className="text-[9px] text-emerald-400 font-extrabold flex items-center gap-1">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" /> Joined
-                                      </span>
-                                    ) : isDeclined ? (
-                                      <span className="text-[9px] text-rose-400 font-extrabold">Declined</span>
-                                    ) : isLeft ? (
-                                      <span className="text-[9px] text-slate-400 font-extrabold">Left</span>
-                                    ) : (
-                                      <span className="text-[9px] text-amber-400 font-extrabold flex items-center gap-1">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" /> Ringing...
-                                      </span>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        /* Audio Call Grid */
-                        <div className="w-full flex flex-col items-center justify-start gap-4 py-2 overflow-y-auto custom-scrollbar max-h-[380px]">
-                          <div className="flex flex-wrap justify-center gap-4 items-center w-full px-2">
-                            {/* Local participant card */}
-                            <div className={cn(
-                              "relative bg-[#1f2c34] border border-[#2a3942] rounded-2xl p-4 flex flex-col items-center gap-2 shadow-lg min-w-[130px]",
-                              !isCallMuted && "ring-2 ring-emerald-500/40"
-                            )}>
-                              <div className="h-16 w-16 rounded-full bg-emerald-500/10 border-2 border-emerald-500/20 overflow-hidden flex items-center justify-center text-emerald-400 font-extrabold text-xl relative shadow-inner">
-                                {userProfile?.getPersonDetailsDto?.imageUrl ? (
-                                  <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl)} alt="You" className="h-full w-full object-cover" />
-                                ) : (
-                                  <span>{userProfile?.getPersonDetailsDto?.firstName ? userProfile.getPersonDetailsDto.firstName[0] : "Y"}</span>
-                                )}
-                              </div>
-                              <span className="text-xs font-bold text-white">You</span>
-                              <LocalCallSoundwave isMuted={isCallMuted} />
-                            </div>
-
-                            {/* Remote participants cards with status badges */}
-                            {displayParticipants.map(p => {
-                              const pStatus = p.status ?? CallParticipantStatus.Ringing;
-                              const isConnected = pStatus === CallParticipantStatus.Connected;
-                              const isDeclined = pStatus === CallParticipantStatus.Declined;
-                              const isLeft = pStatus === CallParticipantStatus.Left;
-                              const remoteStream = remoteStreams[p.personId];
-
-                              return (
-                                <div key={p.personId} className={cn(
-                                  "relative bg-[#1f2c34] border rounded-2xl p-4 flex flex-col items-center gap-2 shadow-lg min-w-[130px] transition-all",
-                                  isConnected ? "border-emerald-500/40" : isDeclined ? "border-rose-500/30 opacity-70" : isLeft ? "border-slate-800 opacity-60" : "border-amber-500/40"
-                                )}>
-                                  {remoteStream && <RemoteAudioFeed stream={remoteStream} />}
-
-                                  <div className="h-16 w-16 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center text-xl font-extrabold text-slate-300 relative shadow-inner">
-                                    {p.profileImage ? (
-                                      <img src={getFullImageUrl(p.profileImage)} alt={p.fullName} className="h-full w-full object-cover" />
-                                    ) : (
-                                      <span>{p.fullName ? p.fullName[0] : "P"}</span>
-                                    )}
-                                  </div>
-                                  <span className="text-xs font-bold text-white truncate max-w-[100px]">{p.fullName || "User"}</span>
-                                  
-                                  {isConnected ? (
-                                    <RemoteCallSoundwave isMuted={p.isMuted} />
-                                  ) : isGroupCall ? (
-                                    <span className={cn(
-                                      "text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/5",
-                                      isDeclined ? "bg-rose-500/20 text-rose-400" : isLeft ? "bg-slate-800 text-slate-400" : "bg-amber-500/20 text-amber-400 animate-pulse"
-                                    )}>
-                                      {isDeclined ? "Declined" : isLeft ? "Left" : "Ringing..."}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Call Controls Toolbar Footer */}
-              <div className="pb-10 pt-4 px-6 shrink-0 flex items-center justify-center gap-6 bg-gradient-to-t from-black/60 to-transparent z-10">
-                {activeCall.status === CallStatus.Connected ? (
-                  /* Call Controls */
-                  <>
-                    {/* Speaker Toggle */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleToggleCallSpeaker}
-                      className={cn(
-                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
-                        isCallSpeakerEnabled 
-                          ? "bg-slate-800 text-emerald-400 hover:bg-slate-700/80" 
-                          : "bg-slate-800 text-white hover:bg-slate-700/80"
-                      )}
-                      title={isCallSpeakerEnabled ? "Speaker On" : "Speaker Off"}
-                    >
-                      {isCallSpeakerEnabled ? <Volume2 className="h-5 w-5" /> : <Volume1 className="h-5 w-5 text-slate-400" />}
-                    </Button>
-
-                    {/* Microphone Toggle */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleToggleCallMicrophone}
-                      className={cn(
-                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
-                        isCallMuted 
-                          ? "bg-rose-500 text-white hover:bg-rose-600" 
-                          : "bg-slate-800 text-white hover:bg-slate-700/80"
-                      )}
-                      title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
-                    >
-                      {isCallMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                    </Button>
-
-                    {/* Camera Toggle */}
-                    {activeCall.type === CallType.Video && (
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={handleToggleCallCamera}
-                        className={cn(
-                          "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
-                          !isCallCameraEnabled 
-                            ? "bg-rose-500 text-white hover:bg-rose-600" 
-                            : "bg-slate-800 text-white hover:bg-slate-700/80"
-                        )}
-                        title={isCallCameraEnabled ? "Disable Camera" : "Enable Camera"}
-                      >
-                        {isCallCameraEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-                      </Button>
-                    )}
-
-                    {/* Screen Sharing Toggle */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleToggleCallScreenShare}
-                      className={cn(
-                        "h-12 w-12 rounded-full border-none shadow-md backdrop-blur-md transition-all",
-                        isCallScreenSharing 
-                          ? "bg-emerald-500 text-white hover:bg-emerald-600" 
-                          : "bg-slate-800 text-white hover:bg-slate-700/80"
-                      )}
-                      title={isCallScreenSharing ? "Stop Screen Share" : "Share Screen"}
-                    >
-                      <LayoutGrid className="h-5 w-5" />
-                    </Button>
-
-                    {/* Red Call termination button */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleTerminateCall}
-                      className="h-14 w-14 rounded-full border-none bg-rose-600 hover:bg-rose-700 text-white shadow-lg flex items-center justify-center transition-all hover:scale-105"
-                      title="End Call"
-                    >
-                      <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
-                    </Button>
-                  </>
-                ) : (
-                  /* Ringing State Actions */
-                  (isIncomingCall && activeCall.callerPersonId !== userProfile.id) ? (
-                    /* Incoming Call Options */
-                    <div className="flex items-center gap-12">
-                      {/* Accept Button */}
-                      <Button
-                        onClick={() => handleAcceptCall(activeCall.id, activeCall.chatId)}
-                        className="h-14 w-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
-                        title="Accept Call"
-                      >
-                        <Phone className="h-6 w-6 fill-current text-white" />
-                      </Button>
-
-                      {/* Reject Button */}
-                      <Button
-                        onClick={() => handleRejectCall(activeCall.id, activeCall.chatId)}
-                        className="h-14 w-14 rounded-full bg-rose-600 hover:bg-rose-700 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
-                        title="Decline Call"
-                      >
-                        <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
-                      </Button>
-                    </div>
-                  ) : (
-                    /* Outgoing Call Options */
-                    <Button
-                      onClick={handleTerminateCall}
-                      className="h-14 w-14 rounded-full bg-rose-600 hover:bg-rose-700 text-white border-none shadow-lg flex items-center justify-center transition-all hover:scale-105"
-                      title="End Call"
-                    >
-                      <Phone className="h-6 w-6 fill-current text-white rotate-[135deg]" />
-                    </Button>
-                  )
-                )}
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
-
-
-<Dialog open={isEditGroupOpen} onOpenChange={(open) => {
-        setIsEditGroupOpen(open);
-        if (!open) {
-          setEditingGroupId(null);
-          setSelectedParticipants([]);
-          setNewGroupName("");
-          setNewGroupDescription("");
-          setNewGroupImageUrl("");
-        }
-      }}>
-        <DialogContent showCloseButton={false} className="max-w-4xl w-[90vw] p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col">
-          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 -mt-4 -mx-4 mb-0">
-            <div className="pt-7 px-7 pb-5 flex flex-row items-center justify-between w-full">
-              <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
-                  <Settings className="h-5 w-5" />
-                </div>
-                <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
-                    Edit Group Details
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-slate-500 font-normal leading-none mt-1">
-                    Update group settings and members
-                  </DialogDescription>
-                </div>
-              </div>
-              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0" />}>
-                <X className="h-5 w-5" />
-              </DialogClose>
-            </div>
-          </DialogHeader>
-
-          {/* Scrollable Container split 40:60 */}
-          <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Left Column (40%) */}
-            <div className="w-[40%] p-6 flex flex-col justify-between space-y-6 text-left border-r border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 overflow-y-auto no-scrollbar shrink-0">
-              <div className="space-y-4">
-                {/* Group Image Photo Selector */}
-                <div className="flex flex-col items-center gap-4">
-                  <div 
-                    className="relative group cursor-pointer"
-                    onClick={() => groupImageInputRef.current?.click()}
-                  >
-                    <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors relative">
-                      {newGroupImageUrl ? (
-                        <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
-                          <Camera className="h-8 w-8 mb-1" />
-                          <span className="text-[9px] font-bold uppercase tracking-widest">Add Photo</span>
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-full">
-                        <Camera className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="w-full space-y-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Group Name</Label>
-                      <Input autoComplete="off" placeholder="e.g., Family Hub" 
-                        value={newGroupName}
-                        onChange={(e) => setNewGroupName(e.target.value)}
-                        className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">Description (Optional)</Label>
-                  <Input autoComplete="off" placeholder="What is this group about?" 
-                    value={newGroupDescription}
-                    onChange={(e) => setNewGroupDescription(e.target.value)}
-                    className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column (60%) */}
-            <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
-              <div className="flex-1 overflow-y-auto no-scrollbar">
-                <div className="p-6 space-y-6">
-                  {/* Manage Members */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Manage Members</Label>
-                      <Badge variant="secondary" className="rounded-full bg-primary/10 text-primary border-none font-bold">
-                        {selectedParticipants.length} members
-                      </Badge>
-                    </div>
-
-                    {/* Current Members list with Delete Icon */}
-                    <div className="space-y-2.5">
-                      {(() => {
-                        const currentChat = chats.find(c => c.id === editingGroupId);
-                        const isMeInGroup = currentChat?.participants?.some(p => p.personId === userProfile?.id) ?? true;
-                        
-                        const currentMembers = allUsers.filter(u => selectedParticipants.includes(u.id));
-                        const listToRender: any[] = [];
-                        
-                        if (isMeInGroup && userProfile) {
-                          listToRender.push({
-                            id: userProfile.id,
-                            firstName: userProfile.getPersonDetailsDto?.firstName || 'You',
-                            lastName: userProfile.getPersonDetailsDto?.lastName || '',
-                            imageUrl: userProfile.getPersonDetailsDto?.imageUrl || '',
-                            isOnline: true,
-                            roleName: userProfile.getUserDto?.roleName || 'Owner',
-                            isMe: true
-                          });
-                        }
-                        
-                        currentMembers.forEach(user => {
-                          const pInfo = currentChat?.participants?.find(p => p.personId === user.id);
-                          const isOnline = pInfo?.isOnline ?? user.isOnline;
-                          listToRender.push({
-                            id: user.id,
-                            firstName: user.getPersonDetailsDto?.firstName,
-                            lastName: user.getPersonDetailsDto?.lastName,
-                            imageUrl: user.getPersonDetailsDto?.imageUrl,
-                            isOnline,
-                            roleName: user.getUserDto?.roleName || 'Member',
-                            isMe: false
-                          });
-                        });
-
-                        if (listToRender.length === 0) {
-                          return <p className="text-xs text-slate-400 italic py-2 text-center">No other members in this group</p>;
-                        }
-
-                        return listToRender.map((member) => {
-                          return (
-                            <div 
-                              key={member.id} 
-                              className="w-full p-3 flex items-center gap-4 bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl shadow-sm hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
-                            >
-                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
-                                {member.imageUrl ? (
-                                  <img src={getFullImageUrl(member.imageUrl)} alt={member.firstName} className="h-full w-full object-cover" />
-                                ) : (
-                                  <UserIcon className="h-5 w-5 text-slate-400" />
-                                )}
-                              </div>
-                              <div className="flex-1 text-left min-w-0">
-                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate">
-                                  {member.isMe ? "You" : `${member.firstName} ${member.lastName}`}
-                                </h4>
-                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
-                                  {member.isOnline ? (
-                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                      Online
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
-                                      Offline
-                                    </span>
-                                  )}
-                                  <span className="text-slate-300 dark:text-zinc-600">â€¢</span>
-                                  <span className="text-slate-400 dark:text-zinc-400 font-semibold">{member.roleName || 'Member'}</span>
-                                </div>
-                              </div>
-                              {!member.isMe && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-8 w-8 text-destructive hover:bg-destructive/10 rounded-full shrink-0"
-                                  onClick={async () => {
-                                    try {
-                                      await apiFetch<any>(`/Chat/RemoveParticipant?chatId=${editingGroupId}&recipientId=${member.id}`, { 
-                                        method: 'PUT'
-                                      });
-                                      setSelectedParticipants(prev => prev.filter(id => id !== member.id));
-                                      await loadMyChats(true);
-                                      toast.success(`${member.firstName} removed from group`);
-                                    } catch (err: any) {
-                                      toast.error(`Failed to remove: ${err.message}`);
-                                    }
-                                  }}
-                                  title="Remove member"
-                                >
-                                  <UserMinus className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Add Members Section */}
-                  <div className="pt-4 border-t border-slate-100 space-y-4">
-                    <Label className="text-sm font-bold text-slate-800 uppercase tracking-wider">Add Members</Label>
-                    <div className="space-y-2.5">
-                      {(() => {
-                        const addableUsers = allUsers.filter(u => u.id !== userProfile.id && !selectedParticipants.includes(u.id));
-                        
-                        if (addableUsers.length === 0) {
-                          return <p className="text-xs text-slate-400 italic py-2 text-center">All contacts are already members</p>;
-                        }
-
-                        return addableUsers.map((user) => {
-                          const currentChat = chats.find(c => c.id === editingGroupId);
-                          const pInfo = currentChat?.participants?.find(p => p.personId === user.id);
-                          const isOnline = user.id === userProfile.id ? true : pInfo?.isOnline;
-                          
-                          return (
-                            <div 
-                              key={user.id} 
-                              className="w-full p-3 flex items-center gap-4 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-100 dark:border-zinc-800 rounded-2xl transition-all shadow-sm"
-                            >
-                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 flex items-center justify-center bg-slate-100 shrink-0 relative">
-                                {user.getPersonDetailsDto.imageUrl ? (
-                                  <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                                ) : (
-                                  <UserIcon className="h-5 w-5 text-slate-400" />
-                                )}
-                              </div>
-                              <div className="flex-1 text-left min-w-0">
-                                <h4 className="font-bold text-sm text-slate-800 truncate">
-                                  {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                                </h4>
-                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
-                                  {isOnline ? (
-                                    <span className="text-emerald-600 font-bold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                      Online
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 rounded-full" />
-                                      Offline
-                                    </span>
-                                  )}
-                                  <span className="text-slate-300">â€¢</span>
-                                  <span className="text-slate-400 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
-                                </div>
-                              </div>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-8 w-8 text-primary hover:bg-primary/10 rounded-full shrink-0"
-                                onClick={async () => {
-                                  try {
-                                    const addDto = { personIds: [user.id] };
-                                    await apiFetch<any>(`/Chat/AddParticipants?chatId=${editingGroupId}`, {
-                                      method: 'POST',
-                                      body: JSON.stringify(addDto),
-                                      headers: { 'Content-Type': 'application/json' }
-                                    }).catch(() => {
-                                      return apiFetch<any>(`/Chat/AddParticipant?chatId=${editingGroupId}&recipientId=${user.id}`, { 
-                                        method: 'PUT' 
-                                      });
-                                    });
-                                    setSelectedParticipants(prev => [...prev, user.id]);
-                                    await loadMyChats(true);
-                                    toast.success(`${user.getPersonDetailsDto.firstName} added to group`);
-                                  } catch (err: any) {
-                                    toast.error(`Failed to add: ${err.message}`);
-                                  }
-                                }}
-                                title="Add member"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 flex justify-end">
-             <Button 
-              className="bg-primary text-primary-foreground font-bold rounded-xl h-11 px-6 shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all" 
-              onClick={handleUpdateGroup}
-              disabled={!newGroupName.trim()}
-             >
-               <CheckCheck className="mr-2 h-4 w-4" />
-               Save Changes
-             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isDeleteChatModalOpen} onOpenChange={setIsDeleteChatModalOpen}>
-        <DialogContent showCloseButton={false} className="max-w-md p-6 overflow-hidden rounded-2xl border border-black dark:border-zinc-800 shadow-2xl bg-white dark:bg-zinc-950 flex flex-col gap-5">
-          <DialogHeader className="p-0 border-none bg-transparent -mt-0 -mx-0 mb-0 flex flex-col items-center text-center">
-            <div className="h-12 w-12 rounded-full bg-red-50 dark:bg-red-950/50 border border-red-100 dark:border-red-900 flex items-center justify-center text-red-600 shrink-0 mb-4 shadow-sm">
-              <Trash2 className="h-6 w-6" />
-            </div>
-            <DialogTitle className="text-lg font-bold text-slate-900 dark:text-zinc-100 leading-tight">
-              Delete "{newGroupName}"?
-            </DialogTitle>
-            <DialogDescription className="text-sm text-slate-500 dark:text-zinc-400 mt-2 leading-relaxed font-sans">
-              Are you sure you want to delete this chat? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="p-0 border-none bg-transparent -mb-0 -mx-0 flex flex-row items-center justify-end gap-3 shrink-0 sm:justify-end mt-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setIsDeleteChatModalOpen(false)}
-              className="px-5 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 font-semibold"
-            >
-              Cancel
-            </Button>
-            <Button 
-              variant="outline" 
-              onClick={handleDeleteChat}
-              className="px-5 h-10 rounded-xl font-semibold shadow-sm bg-slate-100 hover:bg-slate-200 text-black dark:text-zinc-100 border border-slate-300 active:scale-95 transition-all"
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isForwardModalOpen} onOpenChange={(open) => {
-        setIsForwardModalOpen(open);
-        if (!open) {
-          setForwardingMessage(null);
-          setForwardSearchQuery("");
-        }
-      }}>
-        <DialogContent className="max-w-md p-0 overflow-hidden rounded-[9px] border border-black shadow-2xl bg-white dark:bg-zinc-950">
-          <DialogHeader className="p-6 pb-2 mb-0">
-            <div className="flex items-center gap-2">
-              <Forward className="h-5 w-5 text-primary animate-pulse" />
-              <DialogTitle className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-[3px]">
-                Forward Message
-              </DialogTitle>
-            </div>
-            <DialogDescription className="pl-7 text-[13px] leading-tight">
-              Select a chat to forward this message to.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="px-6 py-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input autoComplete="off" placeholder="Search chats..." 
-                className="pl-10 h-10 bg-slate-50 dark:bg-zinc-950 border-none rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0 text-black dark:text-zinc-100"
-                value={forwardSearchQuery}
-                onChange={(e) => setForwardSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <ScrollArea className="h-[280px] bg-white dark:bg-zinc-950 border-t border-slate-100 dark:border-zinc-800 mt-4">
-            <div className="p-4 space-y-2">
-              {(() => {
-                const filtered = (chats || [])
-                  .filter(c => c.id !== activeChatId)
-                  .filter(c => !forwardSearchQuery || (c.name || '').toLowerCase().includes(forwardSearchQuery.toLowerCase()));
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="text-center py-8 text-slate-400 text-sm">
-                      No other chats available.
-                    </div>
-                  );
-                }
-
-                return filtered.map((chat) => {
-                  const otherParticipant = !chat.isGroup ? chat.participants.find(p => p.personId !== userProfile.id) : null;
-                  const displayImageUrl = chat.isGroup ? chat.imageUrl : (otherParticipant?.profileImageUrl || chat.imageUrl);
-                  const displayInitial = chat.name ? chat.name.charAt(0).toUpperCase() : (otherParticipant?.fullName ? otherParticipant.fullName.charAt(0).toUpperCase() : 'U');
-
-                  return (
-                    <button
-                      key={chat.id}
-                      onClick={() => handleForwardMessage(chat.id)}
-                      className="w-full p-3 flex items-center gap-4 rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-900 transition-all text-left group border border-transparent hover:border-slate-100 dark:hover:border-zinc-800"
-                    >
-                      <div className="h-10 w-10 rounded-full overflow-hidden border border-slate-100 dark:border-zinc-800 flex items-center justify-center bg-slate-50 dark:bg-zinc-950 shrink-0 text-slate-600 dark:text-zinc-300 font-bold">
-                        {displayImageUrl ? (
-                          <img src={getFullImageUrl(displayImageUrl)} alt={chat.name} className="h-full w-full object-cover" />
-                        ) : (
-                          chat.isGroup ? <Users className="h-5 w-5 text-slate-400" /> : <span>{displayInitial}</span>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate group-hover:text-primary transition-colors">
-                          {chat.name || 'Private Chat'}
-                        </h4>
-                        <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
-                          {chat.isGroup ? 'Group Chat' : 'Direct Message'}
-                        </p>
-                      </div>
-                      <Button size="sm" className="rounded-full px-4 h-8 text-xs font-bold shadow-sm">
-                        Send
-                      </Button>
-                    </button>
-                  );
-                });
-              })()}
-            </div>
-          </ScrollArea>
-          
-          <div className="p-4 bg-slate-50 dark:bg-zinc-950 border-t border-slate-100 dark:border-zinc-800 flex justify-end">
-            <Button variant="outline" className="rounded-full px-6 text-xs font-bold" onClick={() => setIsForwardModalOpen(false)}>
-              Cancel
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <input 
-        type="file" 
-        ref={groupImageInputRef}
-        className="hidden" 
-        accept="image/*"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            setTempGroupImageUrl(URL.createObjectURL(file));
-            setIsGroupImageCropperOpen(true);
-            e.target.value = '';
-          }
-        }}
-      />
-
-      <Dialog open={isNewChatOpen} onOpenChange={(open) => {
-        setIsNewChatOpen(open);
-        if (!open) {
-          setSelectedParticipants([]);
-          setNewGroupName("");
-          setNewGroupDescription("");
-          setHomeMemberSearchQuery("");
-        }
-      }}>
-        <DialogContent 
-          showCloseButton={false} 
-          className={cn(
-            "p-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl bg-slate-50 dark:bg-zinc-900 max-h-[90vh] flex flex-col", 
-            isGroupMode 
-              ? "max-w-4xl w-[90vw] duration-0 transition-none animate-none data-open:animate-none data-closed:animate-none data-open:transition-none data-closed:transition-none" 
-              : "max-w-md w-[90vw] transition-all duration-300"
-          )}
-        >
-          <DialogHeader className="p-0 border-b border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 mb-0">
-            <div className={cn(
-              "flex flex-row items-center justify-between w-full",
-              isGroupMode ? "pt-7 px-7 pb-5" : "pt-8 pl-8 pr-5 pb-5"
-            )}>
-              <div className="flex items-center gap-3 text-left">
-                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 shrink-0">
-                  {isGroupMode ? <Users className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
-                </div>
-                <div>
-                  <DialogTitle className="text-base font-bold text-slate-900 dark:text-zinc-100 leading-tight">
-                    {isGroupMode ? "Create New Group" : "Start New Chat"}
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-slate-500 dark:text-zinc-300 font-normal leading-none mt-1">
-                    {isGroupMode ? "Add members to the group" : "Select a person to start a chat"}
-                  </DialogDescription>
-                </div>
-              </div>
-              <DialogClose render={<Button variant="ghost" className="h-9 w-9 rounded-full p-0 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 dark:text-zinc-300 hover:text-slate-600 dark:hover:text-zinc-100 transition-colors shrink-0" />}>
-                <X className="h-5 w-5" />
-              </DialogClose>
-            </div>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-hidden flex min-h-0">
-            {isGroupMode ? (
-              <div className="flex flex-1 overflow-hidden min-h-0 w-full">
-                {/* Left Side: 40% */}
-                <div className="w-[40%] flex flex-col border-r border-slate-100 dark:border-zinc-800 p-6 space-y-4 bg-slate-50 dark:bg-zinc-900 overflow-y-auto no-scrollbar text-left shrink-0">
-                  <div className="flex flex-col items-center gap-4">
-                    <div 
-                      className="relative group cursor-pointer"
-                      onClick={() => groupImageInputRef.current?.click()}
-                    >
-                      <div className="h-24 w-24 rounded-full bg-slate-50 dark:bg-zinc-900 border-2 border-slate-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shadow-sm group-hover:border-primary transition-colors">
-                        {newGroupImageUrl ? (
-                          <img src={getFullImageUrl(newGroupImageUrl)} alt="Group" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center text-slate-400 dark:text-zinc-400 group-hover:text-primary transition-colors">
-                            <Camera className="h-8 w-8 mb-1" />
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-300">Add Photo</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="w-full space-y-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest pl-1 flex items-center gap-1.5">
-                          <Tag className="h-3.5 w-3.5 text-primary" />
-                          Group Name
-                        </Label>
-                        <Input autoComplete="off" placeholder="e.g., Family Hub" 
-                          value={newGroupName}
-                          onChange={(e) => setNewGroupName(e.target.value)}
-                          className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest pl-1 flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5 text-primary" />
-                      Description (Optional)
-                    </Label>
-                    <Input autoComplete="off" placeholder="What is this group about?" 
-                      value={newGroupDescription}
-                      onChange={(e) => setNewGroupDescription(e.target.value)}
-                      className="bg-slate-50/50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 rounded-none h-10 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
-                    />
-                  </div>
-                </div>
-
-                {/* Right Side: 60% */}
-                <div className="w-[60%] flex flex-col overflow-hidden bg-slate-50/50 dark:bg-zinc-900">
-                  <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
-                    <div className="p-6">
-                      <h3 className="text-xs font-bold text-slate-500 dark:text-zinc-300 uppercase tracking-widest mb-4 pl-1 flex items-center gap-1.5">
-                        <Users className="h-4 w-4 text-emerald-600" />
-                        Select Members
-                      </h3>
-                      
-                      {/* Search bar with search icon for group members selection */}
-                      <div className="mb-4 relative flex items-center">
-                        <Search className="absolute left-3.5 h-4 w-4 text-slate-400 dark:text-zinc-400 z-10 pointer-events-none" />
-                        <Input autoComplete="off" placeholder="Search members to add..." 
-                          value={homeMemberSearchQuery}
-                          onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                          className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 dark:border-zinc-800 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400/70 dark:placeholder:text-zinc-400 transition-all w-full"
-                        />
-                        {homeMemberSearchQuery && (
-                          <button
-                            type="button"
-                            onClick={() => setHomeMemberSearchQuery("")}
-                            className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition-colors"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        {(() => {
-                          const loggedInMember = {
-                            id: userProfile?.id,
-                            name: `${userProfile?.getPersonDetailsDto?.firstName} ${userProfile?.getPersonDetailsDto?.lastName} (You)`,
-                            imageUrl: userProfile?.getPersonDetailsDto?.imageUrl || '',
-                            isOnline: true,
-                            role: userProfile?.getUserDto?.roleName || 'Owner'
-                          };
-
-                          const otherMembers = (appNamesDetailList?.personIdNames || [])
-                            .filter((item: any) => item.id !== userProfile?.id)
-                            .map((item: any) => {
-                              const u = (allUsers || []).find(user => user.id === item.id);
-                              return {
-                                id: item.id,
-                                name: item.name,
-                                imageUrl: item.imageUrl,
-                                isOnline: !!(u?.isOnline),
-                                role: u?.getUserDto?.roleName || 'Member'
-                              };
-                            })
-                            .filter((item: any) => {
-                              if (!homeMemberSearchQuery.trim()) return true;
-                              return item.name.toLowerCase().includes(homeMemberSearchQuery.toLowerCase());
-                            });
-
-                          const allCreatableMembers = [loggedInMember, ...otherMembers];
-
-                          return allCreatableMembers.map((item: any) => {
-                            const isMe = item.id === userProfile?.id;
-                            const isSelected = isMe || selectedParticipants.includes(item.id);
-                            
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                disabled={isMe}
-                                onClick={() => {
-                                  setSelectedParticipants(prev => 
-                                    isSelected ? prev.filter(id => id !== item.id) : [...prev, item.id]
-                                  );
-                                }}
-                                className={cn(
-                                  "flex flex-col items-center text-center p-4 rounded-2xl border transition-all bg-white dark:bg-zinc-950 shadow-sm relative gap-2 cursor-pointer w-full",
-                                  isMe ? "cursor-default border-emerald-500 bg-emerald-50/25 dark:bg-emerald-950/25 ring-2 ring-emerald-500/10 dark:ring-emerald-500/20" : "hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-slate-50/50 dark:hover:bg-zinc-900/50",
-                                  (!isMe && isSelected) ? "border-emerald-500 bg-emerald-50/25 dark:bg-emerald-950/25 ring-2 ring-emerald-500/10 dark:ring-emerald-500/20" : (!isMe ? "border-slate-100 dark:border-zinc-800" : "")
-                                )}
-                              >
-                                {/* Checkbox badge on top-right */}
-                                <div className="absolute top-2.5 right-2.5">
-                                  <div className={cn(
-                                    "h-5 w-5 rounded-full border flex items-center justify-center transition-all",
-                                    isSelected 
-                                      ? "bg-emerald-600 border-emerald-600 text-white" 
-                                      : "border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950"
-                                  )}>
-                                    {isSelected && <Check className="h-3 w-3 stroke-[3.5]" />}
-                                  </div>
-                                </div>
-
-                                {/* Profile Picture */}
-                                <div className="h-14 w-14 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 relative shadow-inner">
-                                  {item.imageUrl ? (
-                                    <img src={getFullImageUrl(item.imageUrl)} alt={item.name} className="h-full w-full object-cover" />
-                                  ) : (
-                                    <UserIcon className="h-6 w-6 text-slate-400 dark:text-zinc-400" />
-                                  )}
-                                </div>
-
-                                {/* Name & Status */}
-                                <div className="flex-1 min-w-0">
-                                  <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate px-1">
-                                    {item.name}
-                                  </h4>
-                                  <div className="text-[10px] font-medium mt-1 flex flex-col items-center gap-0.5">
-                                    {item.isOnline ? (
-                                      <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                                        <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                        Online
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-400 dark:text-zinc-300 font-semibold flex items-center gap-1">
-                                        <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
-                                        Offline
-                                      </span>
-                                    )}
-                                    <span className="text-slate-400 dark:text-zinc-300 font-normal mt-0.5 text-[9px] uppercase tracking-wider">{item.role}</span>
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          });
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0 w-full bg-slate-50 dark:bg-zinc-900">
-                <div className="px-4 py-2.5 bg-slate-50 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 shrink-0">
-                  <div className="relative flex items-center">
-                    <Search className="absolute left-3.5 h-4 w-4 text-slate-400 dark:text-zinc-400 z-10 pointer-events-none" />
-                    <Input autoComplete="off" placeholder="Search home members..." 
-                      value={homeMemberSearchQuery}
-                      onChange={(e) => setHomeMemberSearchQuery(e.target.value)}
-                      className="pl-10 pr-10 h-10 bg-transparent hover:bg-transparent border-0 border-b border-slate-200 dark:border-zinc-800 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm text-slate-900 dark:text-zinc-100 placeholder:text-slate-400/70 dark:placeholder:text-zinc-400 transition-all w-full"
-                    />
-                    {homeMemberSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setHomeMemberSearchQuery("")}
-                        className="absolute right-3.5 h-7 w-7 rounded-full flex items-center justify-center text-slate-400 dark:text-zinc-400 hover:text-slate-600 dark:hover:text-zinc-100 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
-                  <div className="p-4">
-                    <div className="space-y-3">
-                      {(() => {
-                        if (isViewLoading('manage-users') || isViewLoading('all-users')) {
-                          return <ThreeDotsLoading label="Loading members..." />;
-                        }
-                        const filteredUsers = allUsers.filter(u => {
-                          if (u.id === userProfile.id) return false;
-                          if (!homeMemberSearchQuery.trim()) return true;
-                          const fullName = `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`.toLowerCase();
-                          const username = (u.getUserDto?.userName || "").toLowerCase();
-                          const search = homeMemberSearchQuery.toLowerCase();
-                          return fullName.includes(search) || username.includes(search);
-                        });
-                        
-                        return filteredUsers.map((user) => {
-                          const isOnline = !!user.isOnline;
-                          return (
-                            <button
-                              key={user.id}
-                              onClick={() => startDirectChat(user)}
-                              className="w-full p-3.5 flex items-center gap-4 rounded-2xl transition-all border border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-slate-50 dark:hover:bg-zinc-900 text-left shadow-sm group"
-                            >
-                              <div className="h-12 w-12 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-slate-100 dark:bg-zinc-900 shrink-0 relative shadow-inner">
-                                {user.getPersonDetailsDto.imageUrl ? (
-                                  <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" />
-                                ) : (
-                                  <UserIcon className="h-5 w-5 text-slate-400 dark:text-zinc-400" />
-                                )}
-                              </div>
-
-                              <div className="flex-1 min-w-0 text-left">
-                                <h4 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate">
-                                  {user.getPersonDetailsDto.firstName} {user.getPersonDetailsDto.lastName}
-                                </h4>
-                                <div className="text-[11px] font-medium mt-0.5 flex items-center gap-2">
-                                  {isOnline ? (
-                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                      Online
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400 dark:text-zinc-300 font-semibold flex items-center gap-1">
-                                      <span className="h-1.5 w-1.5 bg-slate-300 dark:bg-zinc-600 rounded-full" />
-                                      Offline
-                                    </span>
-                                  )}
-                                  <span className="text-slate-300 dark:text-zinc-600">â€¢</span>
-                                  <span className="text-slate-400 dark:text-zinc-300 font-semibold">{user.getUserDto.roleName || 'Member'}</span>
-                                </div>
-                              </div>
-
-                              <div className="h-8 w-8 rounded-full flex items-center justify-center group-hover:bg-primary/10 group-hover:text-primary transition-all ml-auto">
-                                <ChevronRight className="h-5 w-5 text-slate-400 dark:text-zinc-400" />
-                              </div>
-                            </button>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {isGroupMode && (
-            <div className="p-4 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end shrink-0">
-               <Button 
-                 className="px-4 rounded-xl h-10 font-bold shadow-sm flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" 
-                 onClick={handleCreateGroup}
-                 disabled={!newGroupName.trim()}
-               >
-                 <Plus className="h-4 w-4" />
-                 Create Group ({selectedParticipants.length + 1})
-               </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Upload Preview Dialog */}
-      <Dialog open={isUploadPreviewOpen} onOpenChange={setIsUploadPreviewOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-[440px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-b border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 shadow-2xl rounded-[9px] flex flex-col h-[85vh]">
-          <DialogHeader className="pl-8 pt-8 pb-5 pr-5 border-b border-slate-200 dark:border-zinc-800 flex flex-row items-center justify-between select-none">
-            <div className="flex flex-col gap-0.5 text-left">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="h-6 w-6 text-primary shrink-0" />
-                <DialogTitle className="text-xl font-bold tracking-tight">Send file(s)</DialogTitle>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-semibold uppercase tracking-wider ml-1">Preview and add captions</p>
-            </div>
-            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full flex items-center justify-center shrink-0" onClick={() => setIsUploadPreviewOpen(false)}>
-              <X className="h-6 w-6" />
-            </Button>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50 dark:bg-zinc-950">
-            {uploadPreviewFiles.length > 0 ? (
-               <div className="flex-1 w-full relative flex flex-col items-center justify-center -translate-y-8">
-                 <div className="flex-1 w-full flex items-center justify-center p-6 relative">
-                   {uploadPreviewActiveIndex > 0 && (
-                     <Button variant="ghost" className="absolute left-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i - 1)}>
-                       <ChevronLeft className="h-6 w-6" />
-                     </Button>
-                   )}
-                   {uploadPreviewActiveIndex < uploadPreviewFiles.length - 1 && (
-                     <Button variant="ghost" className="absolute right-4 top-1/2 -translate-y-1/2 z-20 rounded-full h-10 w-10 p-0 bg-white/50 hover:bg-white/80" onClick={() => setUploadPreviewActiveIndex(i => i + 1)}>
-                       <ChevronRight className="h-6 w-6" />
-                     </Button>
-                   )}
-                   {(() => {
-                     const file = uploadPreviewFiles[uploadPreviewActiveIndex];
-                     if (!file) return null;
-                     const isImage = file.type?.startsWith('image/');
-                     const isVideo = file.type?.startsWith('video/');
-                     if (isImage) {
-                       const url = URL.createObjectURL(file);
-                       return (
-                         <img src={url || undefined} alt="Preview" className="object-contain rounded-lg shadow-sm" style={{ maxHeight: "350px", maxWidth: "100%" }} />
-                       );
-                     } else if (isVideo) {
-                       const url = URL.createObjectURL(file);
-                       return (
-                         <video src={url || undefined} controls className="object-contain rounded-lg shadow-sm" style={{ maxHeight: "350px", maxWidth: "100%" }} />
-                       );
-                     } else {
-                       return (
-                         <div className="flex flex-col items-center justify-center p-8 bg-white border border-slate-200 rounded-[12px] shadow-sm gap-3 max-w-sm text-center">
-                           <Paperclip className="h-8 w-8 text-[#54656f]" />
-                           <div className="space-y-1">
-                             <p className="font-bold text-slate-800 text-sm truncate max-w-[240px] px-2">{file.name}</p>
-                             <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">{file.type || 'Unknown Type'}</p>
-                           </div>
-                         </div>
-                       );
-                     }
-                   })()}
-                 </div>
-                 
-                 {/* Overlay thumbnail div */}
-                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 px-4 py-2 overflow-x-auto items-center justify-center shrink-0 max-w-[90%] bg-black/20 backdrop-blur-md rounded-2xl border border-white/20">
-                   {(uploadPreviewFiles || []).map((file, idx) => {
-                     const isImage = file.type?.startsWith('image/');
-                     const isVideo = file.type?.startsWith('video/');
-                     const url = (isImage || isVideo) ? URL.createObjectURL(file) : '';
-                     return (
-                       <div key={idx} className={`relative shrink-0 w-12 h-12 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${idx === uploadPreviewActiveIndex ? 'border-primary ring-2 ring-primary/20 scale-110' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'} flex items-center justify-center bg-white`} onClick={() => setUploadPreviewActiveIndex(idx)}>
-                         {isImage ? (
-                           <img src={url || undefined} className="w-full h-full object-cover" />
-                         ) : isVideo ? (
-                           <div className="relative w-full h-full bg-slate-100 flex items-center justify-center">
-                             <video src={url || undefined} className="w-full h-full object-cover" />
-                             <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                               <Play className="h-4 w-4 text-white fill-white" />
-                             </div>
-                           </div>
-                         ) : (
-                           <Paperclip className="h-5 w-5 text-slate-500" />
-                         )}
-                         <button 
-                           className="absolute top-0 right-0 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 scale-75 transition-colors"
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             const newFiles = [...uploadPreviewFiles];
-                             newFiles.splice(idx, 1);
-                             if (newFiles.length === 0) {
-                               setIsUploadPreviewOpen(false);
-                             } else {
-                               setUploadPreviewFiles(newFiles);
-                               if (idx <= uploadPreviewActiveIndex && uploadPreviewActiveIndex > 0) {
-                                 setUploadPreviewActiveIndex(uploadPreviewActiveIndex - 1);
-                               } else if (idx === uploadPreviewActiveIndex && uploadPreviewActiveIndex === newFiles.length) {
-                                 setUploadPreviewActiveIndex(newFiles.length - 1);
-                               }
-                             }
-                           }}
-                         >
-                           <X className="h-3 w-3" />
-                         </button>
-                       </div>
-                     );
-                   })}
-                 </div>
-               </div>
-            ) : (
-               <div className="w-full h-full flex flex-col items-center justify-center bg-transparent p-6 gap-4">
-                  <div className="h-16 w-16 rounded-full bg-white shadow-sm flex items-center justify-center">
-                    <ImageIcon className="h-8 w-8 text-slate-500" />
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-bold truncate max-w-[200px] text-slate-800">No images selected</p>
-                  </div>
-               </div>
-            )}
-          </div>
-
-          {uploadPreviewFiles.length > 0 && (() => {
-            const file = uploadPreviewFiles[uploadPreviewActiveIndex];
-            if (!file) return null;
-            let mappedType = MessageType.File;
-            if (file.type.startsWith('image/')) mappedType = MessageType.Image;
-            else if (file.type.startsWith('video/')) mappedType = MessageType.Video;
-            else if (file.type.startsWith('audio/')) mappedType = MessageType.Audio;
-
-            return (
-              <div className="hidden mx-4 my-2 p-3 bg-white border border-slate-200 rounded-xl shadow-sm text-[12px] space-y-1 text-slate-600 shrink-0 text-left">
-                <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px] text-primary flex items-center gap-1.5">
-                  <Cpu className="h-3.5 w-3.5 animate-pulse text-primary" />
-                  Auto-Filled DTO (MessageAttachmentDto)
-                </p>
-                <div className="grid grid-cols-[100px_1fr] gap-x-2 gap-y-0.5 font-mono text-[11px]">
-                  <span className="text-slate-400 font-semibold">FileName:</span>
-                  <span className="text-slate-700 truncate">{file.name}</span>
-                  <span className="text-slate-400 font-semibold">ContentType:</span>
-                  <span className="text-slate-700">{file.type || 'unknown'}</span>
-                  <span className="text-slate-400 font-semibold">FileSize:</span>
-                  <span className="text-slate-700">{(file.size / 1024).toFixed(1)} KB ({file.size} B)</span>
-                  <span className="text-slate-400 font-semibold">MessageType:</span>
-                  <span className="text-emerald-600 font-bold">{MessageType[mappedType]} ({mappedType})</span>
-                  {(mappedType === MessageType.Image || mappedType === MessageType.Video) && (
-                    <>
-                      <span className="text-slate-400 font-semibold">Thumbnail:</span>
-                      <span className="text-primary truncate">/thumbnails/{(mappedType === MessageType.Image ? 'img_' : 'vid_') + file.name}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          <div className="bg-[#f0f2f5] dark:bg-zinc-950 p-3 flex items-center gap-2 border-t dark:border-zinc-800 shrink-0">
-            <Input autoComplete="off" autoFocus
-              placeholder="Add a caption..." 
-              value={uploadPreviewText}
-              onChange={(e) => setUploadPreviewText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSendUpload();
-                }
-              }}
-              className="flex-1 bg-inherit border-none h-11 rounded-none px-4 focus-visible:ring-0 shadow-none text-black dark:text-zinc-100"
-            />
-            <Button 
-              className="rounded-full h-11 w-11 bg-transparent hover:bg-slate-200/50 text-[#1fa855] shadow-none flex items-center justify-center p-0 transition-transform active:scale-90"
-              onClick={handleSendUpload}
-            >
-              <Send className="h-7 w-7 fill-current" />
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Media Preview Modal */}
-      <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-[480px] p-0 overflow-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-[12px] flex flex-col h-[85vh]">
-          <DialogHeader className="pl-10 pt-8 pr-6 pb-4 border-b border-slate-100 dark:border-zinc-800 flex flex-row items-center justify-between shrink-0 bg-white dark:bg-zinc-950 mb-0">
-            {(() => {
-              const hasGallery = galleryMedia && galleryMedia.length > 0;
-              const activeItem = hasGallery ? galleryMedia[galleryIndex] : null;
-              const isVid = activeItem ? (activeItem.type === MessageType.Video || activeItem.contentType?.startsWith('video/') || activeItem.filePath?.toLowerCase().endsWith('.mp4') || activeItem.filePath?.toLowerCase().endsWith('.webm')) : false;
-              
-              return (
-                <div className="flex flex-col gap-0.5 text-left select-none">
-                  <div className="flex items-center gap-2">
-                    {isVid ? (
-                      <Play className="h-5 w-5 text-[#00a884] shrink-0 fill-[#00a884]" />
-                    ) : (
-                      <ImageIcon className="h-5 w-5 text-[#00a884] shrink-0" />
-                    )}
-                    <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-zinc-100">
-                      {isVid ? "Video Preview" : "Image Preview"}
-                    </DialogTitle>
-                  </div>
-                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
-                    {hasGallery ? `Media ${galleryIndex + 1} of ${galleryMedia.length}` : "Viewing full size media"}
-                  </p>
-                </div>
-              );
-            })()}
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-10 w-10 rounded-full shrink-0 text-slate-400 hover:text-slate-800 hover:bg-slate-100" 
-              onClick={() => setIsPreviewModalOpen(false)}
-            >
-              <X className="h-6 w-6" />
-            </Button>
-          </DialogHeader>
-          
-          <div 
-            className="flex-1 flex items-center justify-center p-6 bg-slate-50 dark:bg-zinc-950 relative overflow-hidden select-none"
-            onTouchStart={(e) => {
-              touchStartX.current = e.changedTouches[0].clientX;
-            }}
-            onTouchEnd={(e) => {
-              touchEndX.current = e.changedTouches[0].clientX;
-              const diffX = touchStartX.current - touchEndX.current;
-              const swipeThreshold = 50;
-              if (galleryMedia.length <= 1) return;
-              if (diffX > swipeThreshold) {
-                if (galleryIndex < galleryMedia.length - 1) {
-                  setSlideDirection(1);
-                  setGalleryIndex(prev => prev + 1);
-                }
-              } else if (diffX < -swipeThreshold) {
-                if (galleryIndex > 0) {
-                  setSlideDirection(-1);
-                  setGalleryIndex(prev => prev - 1);
-                }
-              }
-            }}
-            onMouseDown={(e) => {
-              mouseStartX.current = e.clientX;
-            }}
-            onMouseUp={(e) => {
-              const diffX = mouseStartX.current - e.clientX;
-              const swipeThreshold = 50;
-              if (galleryMedia.length <= 1) return;
-              if (diffX > swipeThreshold) {
-                if (galleryIndex < galleryMedia.length - 1) {
-                  setSlideDirection(1);
-                  setGalleryIndex(prev => prev + 1);
-                }
-              } else if (diffX < -swipeThreshold) {
-                if (galleryIndex > 0) {
-                  setSlideDirection(-1);
-                  setGalleryIndex(prev => prev - 1);
-                }
-              }
-            }}
-          >
-            {(() => {
-              const hasGallery = galleryMedia && galleryMedia.length > 0;
-              
-              // Back / Next Buttons
-              const showBack = hasGallery && galleryIndex > 0;
-              const showNext = hasGallery && galleryIndex < galleryMedia.length - 1;
-
-              const activeItem = hasGallery ? galleryMedia[galleryIndex] : null;
-              const url = activeItem ? getFullImageUrl(activeItem.filePath) : previewMediaUrl;
-              const isVid = activeItem ? (activeItem.type === MessageType.Video || activeItem.contentType?.startsWith('video/') || activeItem.filePath?.toLowerCase().endsWith('.mp4') || activeItem.filePath?.toLowerCase().endsWith('.webm')) : false;
-
-              return (
-                <div className="relative w-full h-full flex items-center justify-center">
-                  {showBack && (
-                    <Button 
-                      variant="ghost" 
-                      className="absolute left-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 dark:text-zinc-100 hover:scale-105 transition-all duration-200" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSlideDirection(-1);
-                        setGalleryIndex(galleryIndex - 1);
-                      }}
-                    >
-                      <ChevronLeft className="h-6 w-6" />
-                    </Button>
-                  )}
-                  {showNext && (
-                    <Button 
-                      variant="ghost" 
-                      className="absolute right-3 z-20 rounded-full h-10 w-10 p-0 bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200/80 shadow-md hover:bg-white hover:text-slate-900 dark:text-zinc-100 hover:scale-105 transition-all duration-200" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSlideDirection(1);
-                        setGalleryIndex(galleryIndex + 1);
-                      }}
-                    >
-                      <ChevronRight className="h-6 w-6" />
-                    </Button>
-                  )}
-
-                  <AnimatePresence initial={false} custom={slideDirection} mode="wait">
-                    <motion.div
-                      key={galleryIndex}
-                      custom={slideDirection}
-                      variants={{
-                        enter: (dir: number) => ({
-                          x: dir > 0 ? 150 : -150,
-                          opacity: 0,
-                          scale: 0.98
-                        }),
-                        center: {
-                          x: 0,
-                          opacity: 1,
-                          scale: 1
-                        },
-                        exit: (dir: number) => ({
-                          x: dir < 0 ? 150 : -150,
-                          opacity: 0,
-                          scale: 0.98
-                        })
-                      }}
-                      initial="enter"
-                      animate="center"
-                      exit="exit"
-                      transition={{
-                        x: { type: "spring", stiffness: 350, damping: 32 },
-                        opacity: { duration: 0.2 }
-                      }}
-                      className="w-full h-full flex items-center justify-center absolute inset-0"
-                    >
-                      {isVid ? (
-                        <video 
-                          src={url || undefined} 
-                          controls 
-                          autoPlay 
-                          className="max-w-full max-h-[90%] object-contain shadow-xl rounded-lg border border-slate-200 bg-white"
-                        />
-                      ) : (
-                        <img 
-                          src={url || undefined} 
-                          alt="Preview" 
-                          className="max-w-full max-h-[90%] object-contain shadow-xl rounded-lg border border-slate-200 bg-white" 
-                          referrerPolicy="no-referrer" 
-                        />
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </div>
-              );
-            })()}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Fingerprint Modal */}
-      <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl flex flex-col max-h-[90vh]">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Fingerprint className="h-6 w-6 text-primary shrink-0" />
-                Add Fingerprint
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register biometric data for a user</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="px-10 pt-3 pb-6 space-y-4 overflow-y-auto flex-1">
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                    <UserIcon className="h-3 w-3" />
-                    Select User
-                  </label>
-                  <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
-                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                      <SelectValue placeholder="Chose a user">
-                        {selectedFingerprintUserId
-                          ? (() => {
-                              const u = (allUsers || []).find(user => user.id.toString() === selectedFingerprintUserId.toString());
-                              return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Chose a user';
-                            })()
-                          : 'Chose a user'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(allUsers || []).map((u) => (
-                        <SelectItem key={u.id} value={u.id.toString()}>
-                          {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                    <Cpu className="h-3 w-3" />
-                    Select Hardware
-                  </label>
-                  <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
-                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                      <SelectValue placeholder="Chose a hardware">
-                        {selectedFingerprintHardwareId
-                          ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedFingerprintHardwareId.toString())?.name || 'Chose a hardware')
-                          : 'Chose a hardware'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {appNamesDetailList?.hardwareIdNames?.map((h) => (
-                        <SelectItem key={h.id} value={h.id.toString()}>
-                          {h.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button 
-                  className="w-[220px] px-4 font-medium bg-black dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-200 flex items-center justify-center gap-2"
-                  disabled={!selectedFingerprintUserId || !selectedFingerprintHardwareId}
-                  onClick={async () => {
-                    try {
-                      await apiFetch(`/FingerPrint/RequestFingerPrint?hardwareId=${selectedFingerprintHardwareId}&personId=${selectedFingerprintUserId}`, {
-                        method: 'POST',
-                        body: ''
-                      });
-                      toast.success("Fingerprint request sent to hardware.");
-                    } catch (err: any) {
-                      toast.error("Failed to request fingerprint: " + err.message);
-                      // fallback dummy image for sandbox testing if actual server is not reachable
-                      const dummyImg = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-                      setFingerprintImages(prev => [...prev, dummyImg]);
-                    }
-                  }}
-                >
-                  <Radio className="h-4 w-4" />
-                  Request Fingerprint
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                <ImageIcon className="h-3 w-3" />
-                Fingerprint Previews
-              </label>
-              <div className="border border-dashed border-slate-300 dark:border-zinc-700 rounded-2xl p-4 h-[150px] bg-white dark:bg-zinc-950 flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {(fingerprintImages || []).map((img, idx) => (
-                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 flex items-center justify-center overflow-hidden shrink-0">
-                    <img src={img || undefined} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <Button 
-                        size="icon" 
-                        variant="destructive" 
-                        className="h-8 w-8 rounded-full"
-                        onClick={() => setFingerprintImages(prev => prev.filter((_, i) => i !== idx))}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {fingerprintImages.length === 0 && (
-                  <div className="col-span-full flex items-center justify-center text-slate-400 dark:text-zinc-500 text-xs italic">
-                    Images will appear here...
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
-            <Button 
-              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
-              disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
-              onClick={async () => {
-                const payload = {
-                  personId: parseInt(selectedFingerprintUserId),
-                  fingerPrintEncoding: (fingerprintImages || []).map(img => img.includes(',') ? img.split(',')[1] : img)
-                };
-                console.log("Submitting fingerprint data:", payload);
-                try {
-                  await apiFetch('/FingerPrint/CreateFingerPrint', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                  });
-                  toast.success("Fingerprint registered successfully!");
-                  setIsAddFingerprintOpen(false);
-                  setFingerprintImages([]);
-                  setSelectedFingerprintUserId("");
-                } catch (err: any) {
-                  toast.error("Failed to create fingerprint: " + err.message);
-                }
-              }}
-            >
-              <CheckCircle2 className="h-5 w-5" />
-              Add Fingerprint(s)
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Register NFID Modal */}
-      <Dialog open={messageToDelete !== null} onOpenChange={(open) => !open && setMessageToDelete(null)}>
-        <DialogContent className="sm:max-w-[400px] p-8 overflow-hidden bg-white dark:bg-zinc-950 border border-black dark:border-zinc-800 shadow-2xl rounded-2xl text-center">
-          <div className="flex flex-col items-center gap-4 py-4">
-             <div className="h-16 w-16 rounded-full bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-500 mb-2">
-                <Trash2 className="h-8 w-8" />
-             </div>
-             <p className="text-lg font-bold text-slate-900 dark:text-zinc-100">Are you sure you want to delete this message?</p>
-             <p className="text-sm text-slate-500 dark:text-zinc-400">This action cannot be undone and the message will be removed from your history.</p>
-          </div>
-          <DialogFooter className="flex items-center justify-center gap-3 sm:justify-center border-none p-0 mt-2">
-            <Button 
-               variant="ghost" 
-               onClick={() => setMessageToDelete(null)}
-               className="h-11 px-8 rounded-xl font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:bg-zinc-800"
-            >
-              Cancel
-            </Button>
-            <Button 
-               onClick={async () => {
-                 if (messageToDelete) {
-                   try {
-                     await apiFetch<any>(`/Message/DeleteMessage?messageId=${messageToDelete.id}`, { method: 'POST' });
-                     setChatMessages(prev => prev.filter(m => m.id !== messageToDelete.id));
-                     toast.success("Message removed successfully");
-                   } catch (err: any) {
-                     toast.error("Failed to delete message: " + err.message);
-                   } finally {
-                     setMessageToDelete(null);
-                   }
-                 }
-               }}
-               className="h-11 px-8 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold flex items-center gap-2"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={messageToEdit !== null} onOpenChange={(open) => !open && setMessageToEdit(null)}>
-        <DialogContent className="sm:max-w-[400px] bg-white dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100">
-          <DialogHeader>
-            <DialogTitle>Edit Message</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Input autoComplete="off" value={editMessageContent}
-              onChange={(e) => setEditMessageContent(e.target.value)}
-              className="bg-white dark:bg-zinc-950 border-slate-200"
-              autoFocus
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter' && messageToEdit) {
-                  try {
-                    await apiFetch<any>('/Message/EditMessage', {
-                      method: 'POST',
-                      body: JSON.stringify({ messageId: messageToEdit.id, content: editMessageContent })
-                    });
-                    setChatMessages(prev => prev.map(m => m.id === messageToEdit.id ? { ...m, content: editMessageContent, isEdited: true } : m));
-                    toast.success("Message edited successfully");
-                  } catch (err: any) {
-                    toast.error("Failed to edit message: " + err.message);
-                  } finally {
-                    setMessageToEdit(null);
-                  }
-                }
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMessageToEdit(null)}>Cancel</Button>
-            <Button 
-              onClick={async () => {
-                if (messageToEdit) {
-                  try {
-                    await apiFetch<any>('/Message/EditMessage', {
-                      method: 'POST',
-                      body: JSON.stringify({ messageId: messageToEdit.id, content: editMessageContent })
-                    });
-                    setChatMessages(prev => prev.map(m => m.id === messageToEdit.id ? { ...m, content: editMessageContent, isEdited: true } : m));
-                    toast.success("Message edited successfully");
-                  } catch (err: any) {
-                    toast.error("Failed to edit message: " + err.message);
-                  } finally {
-                    setMessageToEdit(null);
-                  }
-                }
-              }}
-            >Save Changes</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Register NFID Modal */}
-      <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
-            <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <ScanLine className="h-6 w-6 text-primary shrink-0" />
-                Register NFID
-              </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register NFID tag or device for a user</DialogDescription>
-            </div>
-          </DialogHeader>
-          <div className="p-6 space-y-6">
-            <div className="bg-slate-100 dark:bg-zinc-900 p-4 rounded-xl border border-dashed border-slate-300 dark:border-zinc-800 text-center text-sm font-medium text-slate-600 dark:text-zinc-300">
-               Kindly place the Card/Tag/Device on the RFID Sensor.
-            </div>
-            <div className="flex gap-3 items-end">
-              <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                  <UserIcon className="h-3 w-3" />
-                  Select User
-                </label>
-                <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
-                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                    <SelectValue placeholder="Choose a user">
-                      {selectedNfidUserId
-                        ? (() => {
-                            const u = (allUsers || []).find(user => user.id.toString() === selectedNfidUserId.toString());
-                            return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Choose a user';
-                          })()
-                        : 'Choose a user'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(allUsers || []).map((u) => (
-                      <SelectItem key={u.id} value={u.id.toString()}>
-                        {u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
-                  <Cpu className="h-3 w-3" />
-                  Select Hardware
-                </label>
-                <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
-                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                    <SelectValue placeholder="Choose hardware">
-                      {selectedNfidHardwareId
-                        ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedNfidHardwareId.toString())?.name || 'Choose hardware')
-                        : 'Choose hardware'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {appNamesDetailList?.hardwareIdNames?.map((h) => (
-                      <SelectItem key={h.id} value={h.id.toString()}>
-                        {h.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
-            <Button 
-              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
-              disabled={!selectedNfidUserId || !selectedNfidHardwareId}
-              onClick={async () => {
-                console.log("Sending NFID Data for user", selectedNfidUserId, "to hardware", selectedNfidHardwareId);
-                try {
-                  await apiFetch(`/FingerPrint/SendNFIDCode?hardwareId=${selectedNfidHardwareId}&personId=${selectedNfidUserId}`, {
-                    method: 'POST',
-                    body: ''
-                  });
-                  toast.success("NFID code sent to hardware successfully!");
-                  setIsRegisterNfidOpen(false);
-                  setSelectedNfidUserId("");
-                  setSelectedNfidHardwareId("");
-                } catch (err: any) {
-                  toast.error("Failed to send NFID code: " + err.message);
-                }
-              }}
-            >
-              <Send className="h-5 w-5" />
-              Send NFID Data
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none items-end">
-        <AnimatePresence>
-          {(chatPopups || []).map((popup) => {
-            const sender = (allUsers || []).find(u => u.id === popup.senderPersonId);
-            const chat = (chats || []).find(c => c.id === popup.chatId);
-            const isGroup = chat?.isGroup || false;
-
-            const displayProfileImg = isGroup 
-              ? (chat?.imageUrl || popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl)
-              : (popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl);
-
-            const displayName = isGroup
-              ? (chat?.name || "Group Chat")
-              : (popup.senderName || (sender ? `${sender.getPersonDetailsDto.firstName} ${sender.getPersonDetailsDto.lastName}` : "Unknown"));
-
-            const displayInitial = displayName ? displayName.charAt(0).toUpperCase() : 'U';
-            const messageContent = popup.content || popup.text || (popup.audioUrl ? 'ðŸŽ¤ Voice Message' : (popup.attachments && popup.attachments.length > 0) ? 'ðŸ“Ž Attachment' : 'New Message');
-            const isTooLong = messageContent.length > 60;
-            const displayMsg = isTooLong ? messageContent.substring(0, 57) + '...' : messageContent;
-
-            return (
-              <motion.div
-                key={popup.id}
-                initial={{ scaleX: 0, opacity: 0 }}
-                animate={{ 
-                  scaleX: 1, 
-                  opacity: 1,
-                  transition: { duration: 0.5, ease: "easeOut" }
-                }}
-                exit={{ 
-                  scaleX: 0, 
-                  opacity: 0,
-                  transition: { duration: 0.9, ease: "easeInOut" }
-                }}
-                style={{ originX: 0.5 }}
-                className="bg-white/95 backdrop-blur-sm rounded-full shadow-lg p-3 pl-3 pr-6 w-auto max-w-[85vw] md:max-w-[30%] min-w-[260px] pointer-events-auto border-2 border-zinc-300 cursor-pointer hover:bg-slate-50 transition-colors flex gap-3.5 items-center"
-                onClick={() => {
-                  setActiveChatId(popup.chatId);
-                  setIsChatModalOpen(true);
-                }}
-              >
-                <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-700 font-bold shrink-0 overflow-hidden">
-                  {displayProfileImg ? (
-                    <img 
-                      src={getFullImageUrl(displayProfileImg)} 
-                      alt={displayName} 
-                      className="h-full w-full object-cover rounded-full"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="text-sm font-semibold">{displayInitial}</span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0 text-left flex flex-col justify-center">
-                  <p className="text-sm font-bold text-slate-800 truncate leading-tight">{displayName}</p>
-                  <p className="text-xs text-slate-500 font-normal truncate leading-tight mt-0.5">
-                    {isGroup ? `${popup.senderName}: ${displayMsg}` : displayMsg}
-                  </p>
-                </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-
-      {activeCall && !isCallModalOpen && (
-        <div 
-          onClick={() => setIsCallModalOpen(true)}
-          className="fixed bottom-24 right-6 z-[10000] bg-zinc-950/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-        >
-          {/* Pulsing Avatar indicator */}
-          <div className="relative">
-            <div className="absolute inset-0 bg-emerald-500 rounded-full animate-ping opacity-25" />
-            <div className="h-10 w-10 rounded-full bg-slate-800 border-2 border-emerald-500 overflow-hidden flex items-center justify-center font-bold text-sm shrink-0">
-              {(() => {
-                const callChat = chats.find(c => c.id === activeCall.chatId);
-                const displayImageUrl = callChat ? getChatDisplayImageUrl(callChat) : null;
-                const displayInitial = callChat ? getChatDisplayInitial(callChat) : "C";
-                if (displayImageUrl) {
-                  return <img src={getFullImageUrl(displayImageUrl)} alt="Call" className="h-full w-full object-cover" />;
-                }
-                return <span>{displayInitial}</span>;
-              })()}
-            </div>
-            {/* Call type icon badge */}
-            <div className="absolute -bottom-1 -right-1 h-5 w-5 bg-emerald-500 border border-slate-900 rounded-full flex items-center justify-center">
-              {activeCall.type === CallType.Video ? (
-                <Video className="h-2.5 w-2.5 text-white" />
-              ) : (
-                <Phone className="h-2.5 w-2.5 text-white fill-current" />
-              )}
-            </div>
-          </div>
-
-          {/* Call details */}
-          <div className="flex flex-col text-left font-sans">
-            <span className="text-xs font-bold text-white max-w-[120px] truncate">
-              {(() => {
-                const callChat = chats.find(c => c.id === activeCall.chatId);
-                return callChat ? getChatDisplayName(callChat) : "Active Call";
-              })()}
-            </span>
-            <span className="text-[10px] font-medium text-emerald-400 mt-0.5 flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {activeCall.status === CallStatus.Ringing ? "Ringing..." : `In progress â€¢ ${formatCallTimer(callDurationSeconds)}`}
-            </span>
-          </div>
-
-          {/* Separator */}
-          <div className="w-[1px] h-6 bg-slate-700/80 mx-1" />
-
-          {/* Floating Actions */}
-          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-            {/* Quick Toggle Microphone */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleToggleCallMicrophone}
-              className={cn(
-                "h-8 w-8 rounded-full border-none transition-all p-0 flex items-center justify-center",
-                isCallMuted 
-                  ? "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30" 
-                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-              )}
-              title={isCallMuted ? "Unmute Microphone" : "Mute Microphone"}
-            >
-              {isCallMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </Button>
-
-            {/* Quick End Call */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleTerminateCall}
-              className="h-8 w-8 rounded-full border-none bg-rose-600 hover:bg-rose-700 text-white p-0 flex items-center justify-center"
-              title="End Call"
-            >
-              <Phone className="h-4 w-4 fill-current text-white rotate-[135deg]" />
-            </Button>
-            
-            {/* Quick Return */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsCallModalOpen(true)}
-              className="h-8 w-8 rounded-full border-none bg-slate-800 hover:bg-slate-700 text-slate-300 p-0 flex items-center justify-center"
-              title="Maximize"
-            >
-              <Maximize className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <AnimatePresence>
-        {isScreensaverOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] bg-black cursor-pointer"
-            onDoubleClick={() => setIsScreensaverOpen(false)}
-          >
-            
-            <div className={`h-full w-full grid gap-1 p-1 ${
-              (userProfile.cameraIds?.length || 0) <= 1 ? 'grid-cols-1 grid-rows-1' :
-              (userProfile.cameraIds?.length || 0) <= 2 ? 'grid-cols-1 sm:grid-cols-2 grid-rows-1' :
-              (userProfile.cameraIds?.length || 0) <= 4 ? 'grid-cols-2 grid-rows-2' :
-              'grid-cols-3 grid-rows-2'
-            }`}>
-              {userProfile.cameraIds?.map((camId, i) => {
-                const camDto = (cameras || []).find(c => c.id.toString() === camId.toString());
-                const camName = camDto?.cameraName || (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name || `Camera ${camId}`;
-                const rawUrl = camDto?.liveStreamUrl;
-                const videoUrl = rawUrl 
-                  ? resolveCameraUrl(rawUrl) 
-                  : (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
-                
-                return (
-                  <div key={i} className="relative bg-zinc-950 rounded-sm overflow-hidden border border-white/5">
-                    {camName ? (
-                      <>
-                        <HlsVideo 
-                          src={videoUrl || undefined} 
-                          autoPlay 
-                          loop 
-                          muted 
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                          <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
-                          <span className="text-[10px] font-bold text-white uppercase tracking-widest">
-                            {camName}
-                          </span>
-                        </div>
-                        <div className="absolute bottom-4 right-4 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                           <span className="text-[10px] font-mono text-white/70">{format(new Date(), 'HH:mm:ss')}</span>
-                        </div>
-                        <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent group-hover:border-white/5 transition-all" />
-                      </>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600">
-                        <CameraOff className="h-12 w-12 opacity-20" />
-                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Signal - CAM {i+1}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {(!userProfile.cameraIds || userProfile.cameraIds.length === 0) && (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600 col-span-full">
-                  <CameraOff className="h-12 w-12 opacity-20" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Cameras Configured in Profile</span>
-                </div>
-              )}
-            </div>
-            
-            {/* Screensaver UI Overlays */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="text-white/20 text-9xl font-black uppercase tracking-[0.5em] select-none pointer-events-none">
-                CCTV
-              </div>
-            </div>
-            
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center gap-4">
-              <div className="px-6 py-3 bg-white/5 backdrop-blur-md rounded-full border border-white/10 flex items-center gap-4">
-                 <div className="flex flex-col items-center">
-                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Security Monitor</span>
-                   <span className="text-xl font-bold text-white tracking-widest">{format(new Date(), 'MMM dd, yyyy')}</span>
-                 </div>
-                 <div className="h-8 w-px bg-white/10" />
-                 <div className="flex flex-col items-center">
-                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Active Feeds</span>
-                   <span className="text-xl font-bold text-emerald-400">{(userProfile.cameraIds?.length || 0).toString().padStart(2, '0')}</span>
-                 </div>
-              </div>
-              <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Double tap anywhere to resume session</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {isMicOverlayActive && (
-        <GrainyAudioOverlay transcription={transcription} 
-          theme={theme} 
-          isMinimized={isMicMinimized}
-          onToggleMinimize={setIsMicMinimized}
-          onClose={() => {
-            setIsMicOverlayActive(false);
-            setIsHeaderMicMuted(true);
-          }} 
-          onExecuteCommand={handleVoiceCommand}
-          lastResponse={fridayResponse}
-          isSpeaking={isFridaySpeaking}
-        />
-      )}
-    </div>
-  );
-}
+        xœì½ívÛF²(úž¢Í•=¤‘”ä8;£Xörlg¢=¶ãmÙ3ç\Ç³ ‰8 (‰‘¸Öy•sþß_÷ö›œ'¹UÕÝ@ ,;ÎìÍåe‘@TWWWWUWU3¶aQRDìêLùL²´(YMÊ8K±#6ßv}ÍÞ¾ÛMã4ìè+Fq8*³“2ÓÙ`‡±`$Ê?TÞì<¥Á"Âú/2vÂKô¿ó÷üýö=ŸÞ¸ç<*WyZz”d“ ‰g‹eGŠïwÔJ›êûžÿÁh)ŠURÊò›ª â4NÊ(Â§—ð'›EåæãAÝ²hwPut‘!P£0>W :‹ÖG½i0‰“¸\#ÙPO)§qÉÑÕË–P²\²½]ÿì±ÍF)¤ñ"(#­ä>•4
+N’ (^ –zŒ†ëá·u—”’÷\µø4‰.þ7œd	[„‡ô=Ï.ð{\F‹b8‰RûeU”ñt=<Ê‹(JÙ,X¿fÃé*Iz´Ùlî+î»+zªjp`õ»¾êÐÀ÷«²ÌRf½`ì<Èã -z³yV”=W‘"þ:Jœ¯ÀæÃoˆoYž­Ò0
+	6ÏÎ£üðt6\æ0sùz¼¿ÇJ ù›•y1Ò¢"Ëvšå!ŒŠÿ©êìõÝgéã$žœ]ázƒ%•`aœG£‹A¿¢:âõw6ŽFÊ¸L þïƒÉ+3ö“(l÷gã°ûxçYú,š–:6î6îõØØ1#c>%Ž7ÆdÏ‰ –—0(ð²¸î»[}„qæšáîª­4fÒº—Ú ±ù¾Úu~÷2aÓ,-aIˆs>9V8,ãÙ¼ì=¨¸Ëýñ|ßÙä÷A8‹jrö—¥!Æîò0¦Q {½ F‹xÉpoA[gH¥¿Æédøíž ÑÓI‚ÞÑoz‹Åm¦Y©ÃÂ2o÷÷–—ïØj¹ŒòI [Y5Ø‹ê81æž;\ÒwÓ…Ÿ«Š“Ž’(•óýˆ¶ }öõ%†ûì°þQô]«ˆ‘í¢Z ‹;9.-à¨¾'Q]£óë½½Þƒçì Yì‰#žÍ`–‚Õ%,^drX°OÀXÔQÁšcVÎ#¶Ì3Àu¹†YYQŒî—û5¡:oÅ¢Þ8›oZ-Ì? À¤Ä"b‹àrx1\„6ë?‰‚|2Wë§E–¬Êˆ%Ào€DÊ¶ŽñãŒâk6$~JÈ^Ó‹Vì³_¤dvÿ8]®J˜†2C©#‰`ÛíeÓi•ë¥˜V›E.aÉDsXQ~ÔàWdÉN×%ŸÑhd×T¹L $Ò¾ƒçŸÉ
+öÉÚyÿ¾ŠòµMÌ°;ÌƒtÅ‘Ü~°+¢Qä íŒ¨qk·Ó¶{4RÓÅ{ƒÍ^ò¶dVm”³á$ÈC„àÚýOi«iÜº¯&éÀÉdzÀNï²%P§£Ë‚³»EÆ«EË"´·ñÞ®³ÅjÞ²¼ü~MªŸgÙ¢\ªW‹	Ú–5œfy4ãžº/¢EŒ·Ü¬WIXa;½»Ä§X`Ë?hÀ8àŽº.Žƒ}Å\õÔ'|þ3'ÔßåäIØ»ÏŸPÔ:O¡so¼Š‹Ÿ.RX¶ü#³§NÊêøW€`Hr#ÿ!Ëƒ«šÏ"iÀ>ßßeA|‡ ¬’Zèlè¸xV:ÞOË(”90B»ôf£r§S^ÌAç=î¹%Å—ÉªP\äÃj+Ã-‰XLÂÅžDçñ$ê,M{`–Ç!Ãÿpe°”øÖì»~xÀ’™òó®1P˜nÔEže ßîß·áþ¬“î¿žçQô$+Q“%Ái”õäÏJ&
+	)n©æFµ+ÌÖëî¬‡R^| j´ÌÀnD?Ár  ‰:hù1îJ¨þ£`:ŠCv–Ão˜­-75…+°cNVy‘2˜‘XmyÅ<³‹a±èY+Éú$J`ÉÖp#¬;ßq‚ÇYqP<P¸“Rýûr²CÙ"úš‘¦	×Æ-jÌïjýêÊF2ë= äJrÀRÐ¢îzÛë$©°E9ÜÝó‚ÕU%ƒ]ht÷!¡R½ýjGõ0:haüý¿ÚûÁ]]k Ö!Îý¨b‡%Å!ïílØ3`R°ÿ<â¶=ÿ }º‘|í`øí¯5>7°R!ý„¢ÏðIÝ¯¹B…Dþ¨†QÔN†R«¹ëkKT
+	 »Ã<Ð,Âdªjn5‘Èoåõ«ã?ÿùé«§O“×^<ùþ:õÒø¿x»‚y¾C\¨à"| vâ÷VÜ8=ÖŠÙW9W6¢QÚÙKÐNƒY€t5Øqò–ª£“‹¸u©¡ˆ~óh”*XªÌ¦¹ªATKjCA±N'l ÚòJê§„=¾­Œ´%‡eÆŽ:”ÆO²«Åi”ø&±ã–>ÍÊð™É»µ!Ñw(±ÚµZE[¼gåA·©LãJ|[íÖêÇ þ½[=!öÊªÕÏÖÊ—ìhŒë"ˆK,ã" äA,ãøÍ2&^Y¡va^Då<(ú/ß¼†§Y¸>dÿvòÓX6xN»é (iÇ#µš£ª„áb°Ì£s¤iüËE¾A˜C­…Ó0Ÿ+RS´kÓÛ 3Šv:ô„á³lö4…å1èÿ"ÉEG¨(¬rò`Xï¿°÷g6]¥„uß@z(#-Ï_\I €3FipšD!ñÅ0.øÍû@•YPÀÌ®& ƒ÷OuQ‘­h.@xâÐ"±nov† '5ÊóC¤ëœ5²|ðþ‡ NPÅË Õ>„qC™Ñ€	fQ‡!ú¶ñ¶ùu6ÝÐ€Ç‹Ÿ†=Þ£¥6Ô±µùá¢ŒX¸È2$hØÈœ›—ô¤y@HR%[–Ãïv~¥öÝ¼ov=»)ˆ$Z¤ Ùå¶1¥	a|Ï­jVP=ÖQ^lci—Xo>ù­X‹(¦ò*Oý”Õ"ÚxiòJÎþïr6N²ip“¹Àë‘ãDäêDÐ’ÐgÝöxW0”ï I¢Y¸B××{ª}·Òåõi•P0ÝêÄEµö<–ËZù9¼?Æö¶ÐU*Aå"–¨=úUÚ+]æ²Õ4Û"ê^	·ù '¿Y”å*¯†#@ŽÀ±¬l(p¹’h€¼”¶ ÷¿~q¥6ï›v1ËwÂ‰l¾fÉ‚‚-Ö«7[•I¯eXdi¦*h½W5€›ÇOÃÞ»Ùñ-Q8ÏöÔ—lÑ½/2yX ÆfqAV¨&ú¼ñ>k?Fë•eRÔQà¸¹B@‡"¼^ïŒÙ12\†.GWt¼aB:ê½žÃ
+•0±õA(¯‘Òùg!¬\õkd"´N#– ÒBÛ6è¸†;ãýýqíÝ#Ÿ
+b|.žòµÄ½/øAeî”›g¿–·ñ’Õ'^CdÊìì„‡Ê¶Ä­ƒ4\bÜ»5:ur)ju*rºÉ“„Oê_tKF[ø¹OŸšüŒªÓ'wóyuö5ªp<]¸$jÛï¨µ™­½†~Ì‘<“óxù˜ûÖþ)AŠ,Uœµ›
+—@ñ”e§Óµ4¬ØÎ'0ZVsEîK·,õ¹Dñ÷²ñôanQ-ç„Û*mWr¿¨}£Œ'µk”t¿%û³Ü¥ìEì‘\Î Íý6½‹ºîÝŒ¶r4²Œ¤ç‘B^EM~E.ß¡jÚð|Ó1Ó½†*¿!Ñ^£ÛÛqèÄªÙæ7ä0¹Ýå:HÚÞÜ°XšÝ¼Ò@²>½Õóþ®'þ/@|ô9[4íiÖøW§õ A¶sº|Ûõ _‘|éÌI+¥¼¼Àw@m…8< ª÷üŸ[¬…ƒÐß•öYvå3vFÀÏ“U{µè%wvšµõÜ7*ýÒéTüµðW´cSXÃ‰òD¶°Ë·t‡¬µòDÈ j;Oâ¾ˆ7u{B\p´h=h°5’@J†'…ÔT¾æÒ“|¿£‚Wà›ù)[ž6Øƒ[3y¾·{‹æ–4¦Ê}½ÕÀSáÝpÐñÜ#-ž"‰(òI'gmüT0¡3,Qò,¶$7=»6Aw™xð0YW’'ûÿû¿þOõ^jUBü¾!Ü9Œ¸µ{dL¿U°E­äŸNÊ%ÿ´ª˜ü£@.L rÓ:rÕR>EùVÑ%Åc¦©:F-Þœ¦9”W·Ê?œ•ñG%î4@Ë‚II¾ÔrºV9GY¢@S½†3·Fûÿq:Íºk³¢RƒNËß·zátbŒÎmÿÝÝ¯á lü¥Xzq*…öåØË<ža~‡Ë7Œ“àB÷²õk\Ô^‚¿É›¬#Òî.“ÍžZÃ-žN·œ.†$µ»!V0wIaÑ0	«LK9¬EÆžÚB‹µè=Â5ü¢ï}ãAsóÊ©Füf!ï`ÒkrSZ5ÕH%à@úi»M‹öç
+ùïó`ù–~¼)ñULÊÑ$Ð%$‰ ãÀ.ˆ>"è*.YÃ¥ZÇÉaÅ9š±Jcl:©WŠ¹.úñŸO!›4MÔ½+×\Ø}¡~v‰È%éc¯ù¸˜ú¶­d—E‡N9½É%,çqÑd!ÓFÔtBÛ0oÌ3d)¼ÿ~Y2W5ä@~+Þ,%HäÎÂ«¨?óJÄ¥[1qÞ.±ñ–â¼¤¬ÑZ<K_g³YæA&ÿÕÆ4²ô¯hä‘v!^Uyä¯¯Õ|š†ŽÊð´½ÿ“2(W…€ú¬	‚'Y–óó}Y³~ÒÞ³ØÓDE>ø¨¹f£G7¶¥k*Ÿq…|™…5¿ø”l›Wž–´¾ùèG×Üà;»–v÷Ñµ|ûùœ\ÓÖuÃÓjªûyU@ø²#wÅM“V¸³UÄ	Z7té®k&ƒ­%	“ŠŽu„x;áíò´—eS†ÑL•Xô#hE–þ¸:í³ÞlÜ—Ön÷pDDI?ŽU±ï;PØÉFïfu+æ®¥¹­±ý›æ˜;v™(?MÇ‹+ŽnÀY®JÁžX7Í³PÕ>}Öåã	ZŸ™CÓFPKñ”±dmM–q|ÂRNžl!9,>4}Ð„þ¨¥òuÂÙÚ1) ìHíÓè© I‚ó><àõ‡ˆ²^¬Ò$C§uÇ«è¬/Ï>ÐÞI½Fk¾`9V‚¦æŠÿ4Wó8£Ô8ä†Q{v2Ü‚òïÙü›-£­¢,¢®ó_<ø=`92Køû+`•}¥½K0¯Êø@¸\ÌacPÍ£JxZm ¡R>ó‹éÓï7:¼ýývÍ<úÇ
+`y´*çƒv›+Ì7?PÒâOÄ*«Ý“ïÔ+¸9ÂÚ{SDù-¶é¤ñØo½‚êë<(æÛXn›­¶æ.K‡o÷¿ïï½«Öµj¥EÊ>/f~…°È'GWïçe¹,Çãe<)V‹Ñrž•Y1.¢(×ëu;ùøàÞÞûý2HÊ#Åä/¨áœ3„FvúŽ{‚ã¬–Ù·§y4ò<Ê_f° @ôL³¡|ä«ä?‰3'A²€8Z’[ÿ,Â$¸a™K6Í§ñÕü¬æŒ;‡`†º´l:òóutš‰,€’Èéäk¯£RÍ7šl1´3wLÉUU2M~ê9dWCßã€=æ\Û•ÔÉöÄ]Â$Õ„·­¶j<çŠmFQ3rYY¸”Ö£i°JJÊRê6†ÓjílßŠ›•nÙÝbÍõÙp½Ò­|Z:	»n^ý6úùxÌdö–å¤z°Ø âi<a(]Q).ðÆ…uk…~DnÕÅßbØÆI¯öEûµ ~¢Ïë>Tëæ¹¥ÉŠ»è²‚®‚}³µ~S|’Kš?Ö‚J ù¦“w ô"]Š^£ËÁ‘ÈÊëˆªÂX@ã«$È±6(*‡ì¬£<¼Ï£mwÿû@‰ÜîËekÖpFüHþêËHã~‚R!½|†ßê NðÍcúZ¿
+³,§h¬_ ’²zñ7úÚçà‚ˆÜ1FôVÅi_}Î´©"Glu®¸ŠEI‡ŠG“y?*{è¢ômöÜñˆ}¥+`çû;Ö|½Æ®¤zÈ»£
+QõÅ‡¤0r¨JmÜ‘…è3šÇ"4ôt/p^BÌÁo§«äÔYN™d(û¬œåäA!>A4²CÆçW¦…548—‘ŒÇ3UÄ[s•ìÒ´’yld—†,ºŒKG[C½±&;šÂ£¶÷¸å`›„züwÞX×Qû¤:àhÔÙ+QóUnÆàŸ6¹ls¤Æýš«}PÄÇö†Ú+Båæã™iE”šx_uÓÊDël•“ãm'‹mã*nñø¯àá#)„Ç•ÌHf¨W}æð¿¼j0Þ4-*[ãŽÜÙú^¾|vüèÅã§'}—5¥±A¾k×m=ùé§W7hFnÅuC;~ñä§¿Ý ))¨ÕM=~ôüé«G7hJuKÏŽÿüãkwC¢ˆ{ëØ!¿!»E­mvìŒNuÎçú_?P¾^Iîâ˜&Ý!ÃvÅóí³˜Ï<ÖçêŽ˜/BÄ£æþ–¹ˆ7ÊHÌ?jlÑÕ{1–/Ül~4½÷àwŽ7ÂÏ6¹Šùç–2ó'"ôfq3·¦ÔF„·ž™ZõfÔÅO‡¬ºø¹ýÌºøù<ó"ãÇëÌróüÈøñYÚ|y’ñãÏ•Lo_³ûYäNÆÏLpCeü4Ì±?¼¯yš}îN©¯¶Æ¹ÚÊ­oÓ)Ê¢Ž®À>ÈÜwÇs¸VTèŽ®Â_úMÜdPÌÿF9Ï®åï¶˜K3ÈÂôçpÖ"ø$*ƒ8q…5DbzRÂ´D§¶Æ§r)ð£…§vp~ñÔ“a«WªÒ—ŠÆj§Ø¹QL«RÉô¸¹ro¼Ýpaƒ¯0wÑ0r<+&œ{¦mfßž—5lñ5±/Nýç‚ÎÈöy%!%@½Q¢ÌåÈ¸«­5¶v*ï:³Ã¸*º·ÆÒ¹OïŒˆJSñÒ}JÍÌ\9ð4œzº{•A•­be5è=ÀSï‘¡/ŸÇç‡8®¢ZÔq³ü?ò¸QâÓ"cl‡<'+¶{}|q%èÊ°Õ¬Qyö)¸ãÿ,½\±ÅÉß”(
+ÆQÁNVdŸÎ~O¬‘Ì]Ÿ–Fé ïŸ`}WvÕO‹¾ê û#¬r£šûÓ˜ CýìvÉˆ¦[v±Wë'xÞ\œÄatä³$	–%™îi~Ô_“Zi\g²£·d0}¯¨ø1Ò£ÔC°ŸøÒž\½—¿…ÝÎe¶Ó9•zŠtµVî?1ÌÎ.ðY]ñ÷G¾5ÆºµF·µÆ³u`ûô1kŸ2JÃÃÈ\¦á/ŽyWé§!úð²øÝ_²k¼›™mgÇ ½æsfß-ÿ¡Œ’E‹e¹~^ÌØ{ÿÇÏ£ Ä‡×s6¹•ˆè‚þø5èÁ#GrÚî'a.“ˆîQVÕô¸•Õï¾eŽÃ~?t·ƒ¨­ ¥Z ù»[°>tÛ
+B^Í¢xyk0Ê£Ê­ ÄJøèÕ­AWŸ€n¯æP¼ì£õDœh—ÕÉvípy%¡Ã½Êv5Ï2;ØväÏÚÆÓ}Ïs†ÔZŽ"älo†U¿d‰¢%nÈˆGôNˆÅ­S˜kÃ±ÄŸ®JÆy)%Ê”
+N³óÈˆ¿·Å(ùÜô%*Þbþ‡Ê;pgÍ`t¯¢b	(»7Jƒ‡Â¹Qa¨hÌ©%XË²TPXeã‚¿;ÁÑÆMG“UŽ^íÐ$¿“E¥q—·3åý#~ñï X ƒgTŠ’÷É2;‹ÒGEä¤åË9ð†¨Ð;}[áDi¨
+AöéØ–pWÜÛeû÷ä~õÎô¶}²šœ±1Ãƒ¶ˆ'y¶œ£ËGLç¯ó8%» l	‰4Yó9 ŠÈ(TVxµñ4ŠÂÓ`rV!ŠF“9:¡ÎR¢ÈCú½CMuF@OyY‡óˆK¤^mÄ eçI6	’“2‚…³[÷ûÑ,*áh^£oK1Ø¡?&óAÉïœ+GâÖ˜±i \ì»*æF	5FE(›J~s‡ÇÐ…Ñ4N1ˆh…¿ñÑž¬SX^€lRÜ¥GÜT/>ÄS¾tV%ðÚ„XŠÉõ¶ÞÈ×ê"©øoBHzTñ)ž[àâ3$˜æuÅVÏµcqQåèXT©¡®õvŸ€v8J³‹\–‚Èaå—Yî ð`ŠÊð$¥6»H}M§Q®Âõ:^DÙªtHh8½w†iîW~ZD:€–IòÏ÷ìîh”X™¶±@ì¶VåÇ}WXãÚ%_X;Ï±†]@Öß7ÈÖööj¢¯¦¼"ñ’+zÞnKŸ5ß§áøyûäê8»}f£"¥º·KÅ Þ'xd¯YgQ¼¾É]Xc \Žú!ZÄ)02Ú‡(Fåå<1ÏMRQu‹Ò1xG5†ÓD“UËž(å½é¤†Ýˆª°êô^˜}0ØÐ-¯ú›4·•'yˆÊµ^æq–Ãúù5b'ÀÀâ€· ;²XêÛÜøÜœ‹’rVD—˜rnò0^%å1ç¡k”ßY…WyŒs}>¢†ß¼:vævUëÉñaãUÊ×¾„“çÊ…Vï7V›6Î
+‰ÚS›öED‰ÖYš ÅXßa$MœÇ!~YùþEY>£W³^óÖ‡‚—øw
+"6¯‘Æ^t§6·Vø¨Š>øå~_Êy¶è[cØ	µyN}Až¥F[9€„ï@ñ_Ð`ióUN ÁP¨|?Ï2j5+Îz·¤|q4ËŒ&‘cÊãbN¥²Ä:ª0åkò„0fÁÿ‚ò¾À¿Q9L/âD¾>RlLP%«	ë<Jó
+{À^xW€ýQa!1Éfy“ìT‚$ª$ÇJ‚h °ŒÁ"ç"2AÆ… qHïûE°XQ¿€’"ZÎù·9½»Xe)Z…Ê&t«3ÞV1ç£™À¼ðo¿¬Ð,ÖÀÂZô=€:¬AÇEL8ºÓI–PI½Ah!üÍW¡h/\'¼èWº‚þaæ"2µ½Éæ¸©G€\
+”0ß1Ÿa{Ìçzß`’rs?‚Á˜­BùŠzMA0þ$¢YÊ×üAJê_Ä0l‹“Tb‘4–m-"¾`xÑGSðQfaÑ_ “?™¯RŽ}µÍ(ý•Ž{v!ªN†KIè±@f€Î¸ôí, /"QÞX6!‡O®êUÈ±ËXPÉxÐ‚ë£-›ð+žS[œX˜„å’Šša†;ê„£Ž/¦KXûu%|…ÿ²â­-£07öÄ„Œ#(.$YóéN¡1eiœqTä)"³’ô× 1ÛËƒ)_—°Îò¯E”QðiÉF“è|.H\=³5H¸82¾úÒR"'3(QÁúKüc‹i‘^M _G*À \žC8«¦ó4_ñ¾âYLø ÊlñŸÿ»¨yÕþ¿æD#,	o§ÁªDí·—·–Àã €_ÆÊ˜¦ÁdÅQª6xJKÞQ÷íS>‡@Ne$Z¶÷ˆ¢ZØ‹7&!%+?[ŽòEÆÑ@Õò¦3X’Ön [Ý„“ÖXéþ‚3&çA˜qÚKH³'4žÿçÿ–Ë¦¦šýËØ„¥ ”S;åÉ•°«18kIeã±Eˆ°äšËx§bMfë~UðµçO…”êÛ÷á½Øùa+@>K3ýkÌYj%‰cÈ9ßž¢åËD!j–E6-™¬Z?‰ÎóàW1„êQ±*p8j“EÌ÷ï_€Að­S ,K|‰Çô­„½å:¢§j[ ZVœŽCÚì€â„ Ðó†`VbÎYÍø89£Ïr£U4rR1 Y–Í’ˆ­Îˆ¸ÐåœÕø•ï
+ûÚ¨UŒ¸±ä ³8Oøú…8Q#&¬ðÚh£þôQñEl¬©üÉ[Yk[sjÌá_À™D97Zfœ%‚+g‰Àâ°XðÕL[qVÊI‰eÄ[ƒ¸0¼ùKø(ŒK¾·$p†œ<ðƒ
+úšY˜t)h/B“'ÞD ”ã„þeŽx˜W”@_²„7‡f›14@Õ€@iQã•Å|þù7V|.¤H^ÿ–œž­­I<ž
+%*
+A‚ÀýÅŠ_s8a»8!	K~‰øò,MR:Si$°³<_ä£5æP´˜LkÂšdÃ¬szCLÅ¼%l½’§¯9§:•,+ŒµüwÌEÈšb•Ó—yõ-•ßÄ<âW)ÈåœkMŠ®×¼µHˆÒ  (C’P¨2°Ô…¿Ó¯mµAÊÇ“WD€ÁYi$è	Þ0ê@üÐK’-Íaç¨\s):&|Îs!¯ä«Ó5ÿË'¶#Þ~kˆ?™66ÇM#Á!ëD@„Ç"|ì²HÍá^š¾	ÊQ£m¶‘Ü
+²„OÑy’`Á’ë€¾Á9Òú<ÌäWXõ;S\–ú< $ƒóCÓ+T[§Îž ®ýbÅj¼ÙZ{7l'æv:*²E48»@(+˜jUþì‚Ô{Ù·öbÇ4¶ÈHAÝ8¬Ûÿl»‚ªÔshghghà…jj°¦*Å	·tªQ…œžÈ¬rG™ÎÁùŽa­Ðh°jI3†i´iB»kúMDÃ¨ë<#§šn2‡e‡É+t@k TËÛd¸™–iSÿ±?þQ)ôa W©v|²¥q@u¤mü­A¦%õÙÜ”¼ÞJ7o÷Þ9›ô&*T²1Ì¾çÂ¤è0ÿÖ<£2°î(¦åsÕi[ž—1ZþØþèî=ûm;½Ü3N£:Ñ1å jÍ}FV5bY¾•C5H;³?. kß—I\úÌJ‚ÉËƒdH©LÂçÈ@žƒ02µlppoooWiìKöõ½=öÛßSŽ6Î¡ˆÜCÇéô¼ÉÃÛëHk‹­dq„™ß6»*äi)÷¹ê0ÖßüL±ÆA==88¾RÔÓQZ³j%˜À©X§6 @ÂI/]~
+r«¹ptŠ3ó‡v,ÀŒ‹RlgØe„÷ù`Ôº7<µö¿©éº0SmkÇæ¸ÑMçp_OæNU2¬ñßçÑšMi ?_ŽwY¯'0'›¢¿u…ŸO«Åõj~=_,®óÅu1Ÿ_'ñYt½ÎVì°w]dlókteà1e×i’ýÎÏ§ãY]°žÁÏÅWã™xÈ¡«gîu¾SV™î	êv4²ÙËU:)W¿ãÎøíß¾ø¹x‡}¼¦t!ÅÉÊä)ðsÌ ÜÕM7@^X]p
+€¯ÄKÑ¤1]`¬·¥= ßøÑMI)ZoÂž
+D¿žwFeÞ¢ÜW7Ê<(ÜÑPÒÿ(ÉfƒÞÉj¹5Ýªù¾6Ë<\‘7Yí.K ;ìí*dl`ÃtÆÙ±— G WMÀ³äO(šmf£]öè"ˆK|	ð”P`Ó/1G'®íTYòFˆ	qŸZ'¯óFg©È4×X“üúåK¢ü¡žgÊó·S‘âHÊ>çAùSŽÙo¿_£´>àkE'DµcÛSáFE“ñÂ÷î?*ÔŽƒ´/`§Ï³0HÜAºUj(,wJ 0KüÔŠòÌ†……OfÛÃ§¡"Áñ<ž<!jÿ
+›§†H8Kôý=Á>pò9Ñ‰q’ÿÝW²#ÊXª»üÚ¾rlRë©Ì`Ÿ«	ˆŠ…ýZ%V"XÝmÓž„	(ëÞà(«ÜÅqPÚ@Õ.Ã‡”skÁ·‰:„6ªrþáˆÛ3qe·‹lñ¶0ƒm}TÌTr·&î™ ÃïU¦}ÎX yg<$„X„S;DœÄÉÃÅ|¥ƒ*ýkž¼Ï¸Åþ}Ó3fÐ–à/ˆR¬Ú0˜öLqMÈ@=.Ÿ°@+½ÊÁ_á3!¿¸^á3µ½zGÓjÖÖ¥€ÚëŽ¿	ª©!L²ØX Œ‹E\jOg&ØA<]aŒö1Ìíƒª6dg-EÉzO„$¥¤!ïÞŠOhw?ÐZ§"¶€	“`Í÷6C¢2?Rh	2ôCÔ™_@q:Í=±jI‡öZÅ›Ð|/‰5u\9
+j²fËdñržyçkJ6e®5Yµa½E—Ë `ð6Œ–ÅDÍ´/•jÔM­UCn*”'X?uÚÛ‡A#6—í‰ùDÆlRÅ¨g0$ýÈ±u œ»LuÂ‘5Û‡Ê5ŽhÊ"Qµp&"³m.Am' ª_Y´uÒµeïœs^´ÓœkCŽ­Ã„-Ò¸“¸#gº8¤MíAHgî]‘™x—=ËV!A,¼¸¨Ù>Ê;nc #[-Ý/A‹<êÊž`;œàQÈ.þ~
+
+©ñ–(£Ð†6P^Æ±£ð˜ÄŠmË|‘Y—Á›C%§ÞS®‚bÊ|ê3JÓ¡1©.aÉv®Æy”V\PÄ Ÿb;éÚ4)]nüDÒ´ÞõX7ZW©«XK‹mM5µQRän+\u±ÚBðÖÖ¸ÛxÇQ’}&›Ný#å%R^ 3!JûÔŽ§#›FÐŽJ¢²¯ç¼§k&{”ÉóŽ
+ŸlÛÇtªÂíI|È.+»í¡FvÓãj¶tƒº›W-þP[±ÖÎk—W‹+ê+G¡ùºpÎlÌ¢˜U8? *ux˜5Áó"´`Ý«ëþ6üP27ÜÈ(”"mL¢©5É':4ÇÙ]Sc\‰ko
+œâ±@í‰øjZÐN€Äûô<•§Õ6ìÄêZ ò)#q±O ó‰ ÎŽ¼°	RïûJ£wN¯Í`+|z9y!Çâ¯Û¹/ÇDV3“ÕËzldßq»°‹ykb´FÉ-ùlGx\ƒ¼ÖD1rÚ&Ð?36›€îå¡ÖK|üYDŠ€R’)-z­PÍQÜ*ßòsõ«PˆF-!©.ƒÇp;ñ±ß¢æ<~{ñ®•Ï€¬ÖóÍm˜•÷E˜ëh	º=áø¤m¹¸	TQ]Âk hX«j…ŽÖ¡}Ö 4„GdÀY-Øy–¬Q3Sl­þ[/íñ˜=±”"^Å™0ðÓWLÙÑÜDr.åª6kýþ¼‘æä[¯ƒÖà¶>²t–Q‡Æ¾¬RjŸÜVClØÆ*Xç*|^ð¶9o0XA·êš9ÜºÙÎ®£0øp”{|©Ì zo%ŒûÒõÎ7PìS	í7ä_tg³8‘Ìå95]çÜ¥Æ2XQh¥âi¨š-½Na®€íÄ¢>G·Ž*ªW˜o,ôãTÜYí,„eÍŽÛy þ 	A?ñ›CµÓÊ1äRÍÔv©2qµ…6£è÷#ö,›e«RçG–J<Ka¼ëí26fõ¯¨œŒvœ<K¬[¥®±B•vì7Ž§Ô”§ñØÇ3 <Ô¬ñ}Õµ·6½4mßŽÝäZBV‡~`PÇˆs1Ã‚Xh¤ãR1Ÿ)ÓýÉœÒÇ°á€`¥FãVfn˜ÒY†;dQ¿Ä‰EVª?òÏ®2|»-ÿ¡Uk)®E›Å|ó:Ï.Ú›L‚U
+œ@+gÎ.KU¶ãÎÎ1°œA¥cÿt«ó„˜jY¯-'­8‘›[kAné8t<ÝaŠaçÝz6çÉÛMÇÓKîÝ¶õtt;}~2|óEV"óLË<KŠCö7µ]ÌBè.{™k6x™GxéÓÎ.;‰:hK4=dÕþê~­ùq5IÞÞivæœRW—­©c—†åP@_ÜNòPE‰.rMÉè¦ÜÓYqˆR®i>û«æxWñÚÞ“²WFAµ\ƒë‘›Ür¢R“ZøS?Á‰÷§•i!9«?ŸÃÝk{INuNV—aÔûJëØA¹6»^ÉÕ»En#’	+Õ48gA™å#¢/™Rq•è²úŸ®xÞ»C"H#Å–ƒØâ7JjR)ÄJ^´ö„é”/ª!8ÃWnD˜0óoAç/EÁùð§+fBÇ“â0°y
+E¼ {t–—QH=ãstVtE$æb±ŠLtÏÕ,†¿Ë®ØB4qXõ££ØË5ŽªÔâ4Wç«ôÌÌ»øN-&«Žð&Î2Îƒ8öð”Éç&aQd‚üÛoÆu¥•òA1Z®Š¹h¦!SÛÆhÁù¢+›0G'Ò­c`ú"Ø¥M~•©F€gTþüZuF±ÙJ~Ÿd§‚ð«§=$ŠR»¤än*ÁñÜý_bˆ…wˆ­‘Ï³Ú(A[„¶-vÎ›Œó¯Ì²ºµOªÓy®eÐÛz‹AÎa‰#(5,u	¹yX¯µýÉî˜rð¦¨ª¸ÚQe£/· cƒì/'æ1´öLÃ¦0¼ïY~V°Ó/ž*&‹“uìEäíY+˜L	ç¤I%U=”[êìùMn·?ŽPö¡bÙVÖ¡N¢™¾Ú˜ SÄœðÉ‹æ·{ïòû* É[m_‹(ŸE¡É²¼Õ\kas'>²=ï¾!Sð%Ðã›WÏFx¦SF?þMJø­4Ñº¿ !¿ÓUÄð!ôØ5ôÜž^1…W*©e·‘Pš-ò	4	ïX_t–×ý¹¶ QÜÃTŒ@Ïxz°×M{ ¾õtDº«4â‰H–3
+¡_mfŠ:$¤É°nåÚJÑI¦Þ˜ÁŠé2„KR`uŠÔÔJ…:qôåàá!²\—Ù5ðæÏŒ),ÔQÊÚƒ¹6á¾6bd”ß×ô;<DTíN†C*Ã©âô=l
+ÓŠâÝæA†#^î#‹ZãŠT¾El‘Ÿ¤Íûx@¹ïhh«Zÿ–GÚsŒtÔ å›gšmUrßp‡©©¸¿Í3v1UdÑÆg’°*Húì[UÜBÊTYL×Âb:•k+%©^L€fùˆ.OÑÊ…Ìý2IpkèY¾	Ÿ†U£»6±rm„?*¿¯-Ü\ÿp1#rô¹X[ìèoÉÅna¤=ÇH?s…ßŒ‹Ý€mÃ¹@ˆúA¢žµo¬>äû–r¿+(Ö°‹VJ%;”»À8(<ÜóµìµàÐ`e·-éWÍUÆä<cØšSr&y³•SÆ¬	i×þ‡ú#7¯]Èº¶ðrm¢àÓsÚfVÛž&¡s’„¦Hhåa·‘¡kÜ¸'5Â-ðùvD7ãOíéÆØ3y¥‰~\LÝxó°“|Ülÿp­ux¾å–Ò¥•æ]æÏ˜÷%Çó~yÁþ¼
+òðPÆVN‚8ù° Q‰ÇÔ°lŠn¨üÓÿñøéË×—[ ¡]@ÂK}Í,5üZóÊÏ_ÞqZrL{öL€$¢!=%°÷ÆÚÎá)ƒ™Ôš{i	ºäY7z;Z’¥¸x†?åx¤9NLH½æ–´ë4º¸Fä^¯–!þlÆÓõuH÷M_dç”ÿiTFEY¥ª©¶}»#qµŽf3\…ÇsÙ£ÔwÁ’4æŸýmýÎ)0Üþ?ŽÂÍžsŠ<âäT{yhÄpù3>…6"Ë]çD\Ç‡–Ò2ìÊÅàí;µÈ‹è‚êÓFÖë¹^=‰xj%À…Qâ¸€2´në,¤O‹tB“&‘µàÌÐjÛvœ,ÒãBäÓˆ–zÅ™¥šßÊ6x	ït9üynŸ5ÏúXXJ>FÇIºæîMšà”ŽØ«,[lçÙMus¨æó2„×‹u[	tün)²Bøª2hVi<¢@#D¢L3L¢*éæ)Á1ÿTHI¿ŽÆ"wvCÐ3
+ÂY<«¬¤Qø¦~PdÊNXýx»÷„fõç(GevBI(%÷OñzlÑ¯EðJäÅkJ}¬>”Ex	:?q@¢ö­ýðœ+Ü±ne`À«8œ‹/\Täñ6X©~PcéFËÕ˜›‡¬ÇÓ4Ëã´žiOº®d÷rý7ŒÂ 5¦“W.’@C§Œã§i8¦£Fþ¦mÑÒù®ØaC‰|•6¾¢™Í€Ø•2>`È»®YS6Þ‡©x¬ëƒGI1ÌÑ£¶¤¾ÄûÞÉAûÞs´úÞrDøë|/–Å@ò"/!×†¦HXÏì7N»É• ¥gYÚb»ø;ôsñŸ¨FÃÅß	ÂŽeäŽ%Å:–¦Yëo¶ìXf´cÉš¸»BÌÜ¯­èì„ÅÈkÇY+ªš@™;û0ŒI”‡Ì S;\]˜M>’9)³4Èé<wy`dXFAÕ¤q==
+f¯ÖöšªWas{FƒÍ…ëFýûSÓkÈ²Cùãb€7%#Âðïh,9úØÍ	;Z#øð!»ÂŸƒ]ÁÌ¹üqhpºlÁî³§ŽÚº¤•Ë	Á2þ!‚þïÇ¼Cúƒ‹ëIµÌø‹‡qxTYÑ*à6ïw-ETÎ³¤§—?¼ÖnÂÏi®á]_{¬{Â¨~l‡ä^äðÁ\¼\íýÄWfBì‘›Þ.CG8Ý‘Âž)ÊU·Í
+·\s·K«ùÅ•>?Üç£’%J/x™z#ÓüšÈ­Éïdsõ¥þRÅKph)kÉKCÏŸËC Ï3q‘‚LiþöÝwb±"¢÷;–à8ò=Û¼}§ÜÂ¥6ð¶Åü4òÃæÙBF¶àÏE§l‰&$ø‘G9öÂ¼Û]ö«ú»²Ûþ“êÛì:»•:4\k9Ø%^(ÔRÕA¯Ò'‹ž¯IaLŽÍ‹‡qTx+ýV$*K*ýÿP·ó“l§AêØ¡úuUf‹ÀñÓŠ\-$Rlï€`¹Ä[–€V©¿ú—«¿ê­Òå£ºJkgüäžz’_ÝˆWJEáÖÂ,Ë©yþÅÑ8½Pš~B[Ž.K¼¬1¡ÆëŽª—J'O«
+­á•´AN‹¬úîèF¾SzùQoí$ÁÐ|Šøæè€¿QšÆ‹¶6ÎÃ´©uùÕÑ¼x¥´ÿ7Q¸µÎZ1Ë€Áªè…kitdET¯Êê»£ùNéê$jY}"©2_"Á2º_+íË"ê*µ|Í">?’‘V_ÌÖ¡ä
+¨j¿¡JÞöqË&úÉf…ˆt¦¿s¼â6_+à•v° ¯ÙežMAŠ_ù?žŠ©ho•¦_ò'ììD{©¼ó!BC-£Ë¦bûÔã–ðÝèÌw±V-šwgé²µB±‹7>K•>&|È@6¡&i¸ñðÔ>žôÛ»<}À'–Ž=êù#d!ÕÀ-nâ¹,ã=ÖÔz§ú%Ï2žUmÏA÷ô«/4m
+X1?¿ç™+Q‘¦DÁ`å{2 P@‘úÄ§·È¡í¨GhØž²Õ=o•vz«T ê£Ý0¥s=Z]SnIjIƒb‘ d1ÂV.0½HÓýTR7t¢cFÖ£t‹¢ÿéhþùˆ}OIkðBö(üeU”‘ä%òÓª´ÛBõ/*õ£ÉrR>øe[¼,!`0ü~µósñå¿ŒuS¶,¯Î¡·rÃ	Jl‡ÚïèŒŽ&ù<-£ofÁÓó#ëó"õ©*ÿv˜ð¾êþŽ
+£sœ0mA+ºNmZ¹ž`Vßè: ÄÒm=Š‰D-¹éuö¦RÙ”|’Ê¬¡P5¸½wþ†þÅÑ€aÏ1xIJ€ŽP„«	CMÈÃ^(ö‡d-J>¯„×á©¨'êS(Å´›QhÆÍv|1tÜ£–Ã³›ª¿þ°¿
+·ù^\Ï/@	7ÞÛº<¡äI™QY’<5³WB³qj„¸$ •‡3ðk9.DŠkc4“µ*øÄdiÿ;ÕnÑjËé©‘ñr` ïý&3ÍŸ•æßN~z1â{<]Ì`¶ ~µJiÔ;fKx[™´Xƒ¶‹’‘€+Ü?U)E‘Š%¤*»‘zi>Ã;¦bÎéTÃH‹,9Ä)[Ý9¿ËE|Çà„ä­4q"Ÿ(­T¥v+‘~Çhj£?0#Ww‰ÀsÛ~òßðÇ°!JÊ–&D(±Ë8i]H$«HE¡ #ü—+_vÿ$ÐÂ’=«A‚€ev’ÀÝz·iÊ¬edY•]žáJ³(oW[}M<.ÜÖ½mdÏºÉ­›Ñ­ÕìÖÉŒØjýT}xÞ×¶Oî®¤ŒùF¥FÂéjóÞ0…Öß=W98¯~Eº­Ê;zˆØÕz´m…©ý<ëý4w÷t7g¾14µŒ¹–/íS‡ä²+CvŠ™»ü†ÅØ‰6Q-—},‹7<s·ºõzÉ¯§T4}‘I@qÙåµI/…
+×²æ5¯x-ê1~«–œNQQKZV ÑHë¬*¸äÂ÷0CðjÃÞ+o£4ä•äÛ÷š’iž!,<þ·FýisénH†›ä¸JÒšð9„7×ñ—[Z!·ÝY2wfá/Ýïdåž-Üâc`â…&•ÑõÑ$—©ÂU 
+@n/( ó_ö¤¢‘ßvõÜ±Œ}ˆ¡ŸI€ôœ?*{xYø›å²:²ûÊ8µ*Ý`gC×JtÞ¢ÕÊGM-«Û¬K[¡gÞåkÿÌóŽ¹‡§ž7Ñ<ù¢µßÇÜ¬}³¯)HOPŠiRÖ‚¤ywL•¦4}•iÇefñø‚Çj¨7ÅG …ªìûQÛNz§KU	§}«Å­l7e>â„?ØËlý°å‰{ vÙL§ò	~+.èu|+¿N§Šƒ%Jÿ†Öe’bD[(¶Pkô­jH/ üÎ3uKYGœ¤IIGé`:5{˜N«.ø×:üUûôÐ/žÉº’¥ŒŽP¤Š‹×4ýÒoåÍtj¿âq2¼ë÷mËüòVE.ÑªZ¡šl¤ ¤'?Ñ:½h”dWwdsuN0¢[rœ_IÊU™™Z|à {dl !0¥êéf²^ÌzÀô…IÌàúÕ	´õFÐ©ùXš•û2[Îç¸_Tá@ÜF“¬‰––m˜¤cŒùV¤6úN£ÉŠ,`ìZ/NŸ¹ñT{æx Åpê¦z$…rYï:(ç>MS#,,ós+£œN?ƒa:å
+~í‡.Sx…DßN+RxÈ)	mQ°l~"1ŽÏL4x)‚´(„†¢Ä´?Š0Dø^±fÑ€–Á÷q2â5ª…•áÏ_›ß¸s»Q“žÔqê;w»žŠê»¢¡ß:ÈÈºƒ ñŒY¾þÍÄÚþx,Ýþ÷U7mEd:V,2ö]Æ©¢›÷úÀN…DøkøZ'Œ ³†XçE‘â>bðØ¿‹r|YÎ”l »ß°Ä°¤EµJkÎwëzáO¯¨¼æ¹šrí«ý·%ŸhHâPÚÖ†€¨Cª^==¢­Ñb£•	öÛ0#Ü‡›Úhw/e9HA‚*Ê
+Z® Ä %Wõ¥‚ÈEíHŽ§O8ÔS¬Ð›¤‘CfB â1ö¢yJ,óæW-”e0™£O:N½«e}.ËNÔˆÜÏÒGŸcÅ¿U‰^*
+kžâb«•ÞÛîjwÅÌS6¡†5TóÕ–uH%tw!Qì‡$(à¶ãAS1'¨b©Ê#oSÇœŒb(Œô;!i¿ Mœj‰&« @“N:§­ÎPý[I_B-qI¶*J˜,f¸„í@§×"Z9æçF‚;ú£#XãÜù·CüOL(½&ûJÚie Qœ†ºm—±Ä“žÊ‡»8@Mœ'Ÿ,W‡šî»óŠ.³¢ˆO“èy1ã8PGZñF¿dqJm¾mJ'uu5w-jCr›^¥H¦L‚Rî;£A6*éèß7†ã	oÜ ÏªGñ­Éü)JH”jWÍeOæ,¹V¶yÇ\KÎ[ü4obÂÅvaP½íâPíh»Dû¦Á?¾­CL†AP˜ëôžžLÛ9sºÖ¦Ê„´˜xº†Jµ¬	ð6únz"¡phÜeè¼ßÏ•WÄ•ƒ$!icæÅ¦P[D¾ÿâj…ß_Bù,}ÂÝaMã¼ §ÔºÝE’@”x¯/U“÷QS˜Q·¹#_#²— Ín@-ÔìäÀ±ÍPÏÆB»7@wÃ}«Û(æQ„5’•Âíèn+\#ÞDutèÙBúþ‘¾AskæÙÁcs^*ÙUr¯ò%yðŒ–Ô÷±æ5DpÁög¸YNŽyÒ±‚‡ä4§Mä(¥Ï‚í­V¯W\fÕ5Ò}í>,ƒ÷cìaü˜ròPgU¢§—æ#“"Ñ?´¸
+ï,É‚ðùÛ-\›ùX%ˆ8N¢Ä‹î‡†¢7¿±kY(o—|lÙgr¬É;MÏíË<ÛH=ÛÈ=Ý$Ÿ[}ºJ?íüáfRQG¹È)™éØuIÉOœÒíÉH¤¤mä¤’R7Y©––&Ç	©‹ŒÔ]Jj““lIÉ)+5ÌdƒÄ$òÚÖûÛíÀ1‹©¦ÿû**ÈíQZ Aà(~¹—ÙyÈôyŽ©‚º	oºâ†QmASrŸîa+°ŠŠXø/§UÝ§åÓÃ¦WÏß<
+BX×Mar0}CœæÞ¡ˆiPíøXúJZgëˆarngu.ðÞsù„9ø+âÑºxÍÃšÙÐÖëý÷b<ô@B¦£:%å¬ló^±ôÈé0ì²€©'xûQµ¥zG8àšcRnLQM_üë( Ôx›ÔŒÂ¦pNç]Þ2[Ëèô¿¾	+ÃU<Å?8"@Is‡Z‚š0Œ¦Á*)_U'M@;˜î±÷ÅÍð¦7b?âaJ²cÆIóM>kÑ¥IÑ£‚ûe#2jDl@&€?¯Ð?c”õt:&:/å#:¡‘1'é,e®áI#ïˆ±Ë PeºˆNÏâÒ*ú]ew»c½Û© V Ê5P0ÏœUoP·z4÷Ëex–­8G¨EbXq àe‘Ié/–)Êý(¾9éWó¦ƒ`ßUV×j0Ksê’®;§Ý†œ	”]óˆbâPÌ‚±ðHRùL£ˆŒ©Äc =»H…ý6HØpµÅœÂ¤1XJÑ¾š‘ŒqñH¶[E°Ä§}ºY:R§Å"bÓC†jŽ^á)^÷¢ÖºÏîíí‘Œ¸rH¤:/XAEÇ£â—ÜwtûßŒ
+Ñ¿î'aQeNú¼ þuˆÒRjò3÷Qú!Nƒä•œNÅOIÞq
+;È4£t‚˜Ýí©¯çAQ¿>†^·¡¨+ÔÙXFœxŽS—ßÁãûÚcÉå¿c_};ÜB(ÂC¯ñ6~GŸzIøÝŠxL`\L…†L”!á¬¥«Å)ì=äb¼§\x­Ç‡¬šiÝ€@Ý")TïuYÐ…1ë’*éÏƒr>‚‡íÅ.QóŸ­¾Âò;9‹—´ÀÐì”†$T•üø 8ûP]l'o½+ZFCŠ%>½ÏöF_“	ÄœŒ‘ *ËHL÷e:áµ)õ«#Žó²z¤ã¹[§&}ë˜¶¬-˜žsÊÔ¼JÖ*ŠL ’8ð9þã½ñ,¥Â¥²ríÙÆûÏ´é­ñ¨Ûa‰‹Ð@Ü¦µ%n!ÓPå·4¼i2Ï(Š
+ªá6"0fÉºÏRdÏ5÷^Îshˆ§u†mÙ#lýgQZÙ)
+ÂªæKQ±Î·ÃX.¤‹X‘.”(À~ÌEõQáLÞP5»_WÈ¨¯Á%Š"X`Êe¨jZ1.±´›äÙrž¥ éªŒBÏ»Uj½å^|Œ;»ºÞÿTíì$H…¥8€å÷„P4î¥jaé££Ür­¾ŽìK°54ê·Ó«¯.\ÉÉ50¢› k¯ý}që§&rÅÛ$®3tµÀ²ñ–3µuús¿rµ¹Gdž°w†?ç®ÃZˆ)êíÈ\J:¼y´”òsñåxöâ:_Ãøíß¾ø¹x‡N¤øÜ•´A‘hÅYKK±ñép)öb–ÊÉ¨VPÏRÇ—÷	­îGF_ÚMvØ­àÎ›©“W¢€hÖ`KÝ0nßUZ„Ý1†!˜¦.Ñð!Ñs¥ºØ®J}#¯†F¥ÊwvO¥g%<Î¨S¬N¹
+>ØC‹ÊŽjßxÅC$‹;G)»êÖ–Qõ¦ôcvmôª	›ßCÏ²Ù,
+uoSáPÊ&ƒiK³ºc«ó:C,ø#;PDöé¼€QûÛÝcÚÞ bŒèáJ]hÅ”‹3‚$q:/`k‡7Ôë÷tåêÑškº.×å,3¨ÀHUÀePåÙ8à-ëx­ºÀRKÕ¦b[‡ý&VçÑ“ÊaëY6Lœo6Á®™sÍ°ƒÌ	~C{©˜^”ùq¶ð2ÚbÅ¹ÓM–òŽÌ½È&°ûô´Í†.ÍRÇ&‰ÁØò±POzo…A7ì^êw¥âTQ$!Ê¬˜gy©ÊË$%Ãžš$Q^¸:‘½ "Güg½ü|:X-®Wóëùbq½˜/®‹ùü:š_ó9^w¹ö	Ò_”†•ƒ—Š“nSÓ²¡©á¼‘mK¤ä×šs.
+CÓb‚ŽQæmèbN›LÓÆÐ´Qð¿ú‘©: ~ÅxS§2NVçƒjÞŒúŠíÏ@™©ª‚ÞC}¥3ÝÈ³Ùeoí%³Ëê…¿«®å]ž³+Rîòèá]&v¹Ãï;¾fnn}rÂû*„Þ†QX0@}òQï4+Ël1$a½2ûdþ8Kð`s¬Tƒâô„dr•õe)Á;Ž®8«Ï6Z&Þy´ˆŽ®èº+ðÔµ¯ÅÛúG]¦‚å¾øFHÞT8Pÿ>$„ñ9¬@_ÑúÔ›&Ñ%›¹žÁ.†èwAú1D9	P„Y’âéZþ<Þ‚Ã"¹ixoo…A~vHÏ@9›¿†GØÁp’%l,‡_÷4dâîr Bs1ü€ùÜxmË8å},Çùº§MÇR­ËAY°)hC¼m|µ`xÛ®¸aIÓúà	4H¸êø#°Ú"K\2³Ñht¼¬q¸2Ñ¬¡³2Ã-MüÆ4®S4Íã0„J}U˜º­Þ?ýú4Èk²ªÜ€GWõw….³<¦äXGWZ6A¥%Á9º¢?5]ÊŒ6X«ß)4y¤žL)qS€ŸKP-0e2½z&Vƒ“c¤LÀ&ú‰Þök²[Äép>Ü³G@µ0>ÀsÈÕøKÆeöå¸†ï>?ÖsÌôþ7îµr•H§tÛýð”-/ª&AŽïîÑö‚02<MVùp²_‡û{°uƒÞq6ÜSV‰‡È´^Í•Õ½Ö[äÃ¯Ù¢ŒÁÞWdùp™Ñá›#Â³e0Áì¢ßî1²ÅÓÐÌã$žœ]U·³[Ó‡œÙ|¶³Ñ¡õ.¥o²„&~DË(
+‡Éñ+Ø„Æ3”åÖ3»Å•2£$TûžïA·÷4^c±åa±R‹<´–O3hÜäC5ë¹?ÆÚÆÜÙ½˜èá˜y»¿¼|G†èŒ&Ó‚º+%´²ry÷ùZ9žd©Û× ›ˆS:ÏvLÑ_¯ã2‰6ÖŒtÀŸõàƒ—r
+UV'	Aˆ,
+gt„ž–Àž(y*îábsßeŠáñtl<Ý%s.y^ðïÙbG÷HÑÃzå¸zò§=†³ŒènµføþÄiG²*ú3¾‡Ì( !vxpY¨K/Þ3g‘A‚
+ãºûÞ=1k~+.â”yä§Ú&‹c­F¯ì½Î‘~³§£ci³B}ø*bï{€w~×Ó0Åp7ðéöèêý	Ïw@éÆ8Mð´"°ÐúË³ô1ÊT6˜ô6zo"ÂÁÁtò¸š¤†¶‰ÃÔÆmÌñ.S@AðYà‰±Z½sèFÁ	ÝÕ.òù1¤¡ž½/Ð OVƒ¹;Bÿ;˜Œ‡K
+<É©D4áÑÕ,~ó)ñô<39ñ%:Öxm?iXá‚‡5,_D¼úž”È¬õc0–`ë´u`jÆ"7äÃžË)Ïaõq”b‚ò¬ iƒd' ¡Gw÷öT:Øë¹;¤ÆÚ¹›I#Vc;6O5ä7—	´£éX~:›µ
+LÉüãHKØÖ·¿±ÎVNÑ·õlc?ÌÞA)ñ~ålY9‡É“b•Ç˜ò|kÎßÎÍ@ªe(ÝZÊ²âôôd ºðKZ“èdI‡Eü+ö`oÃ](s§gðû_ïÁ@÷0¯
+Œ°Ùž7[p%ÎXœŒ‰b!>„%5òž›¬¾í¥ªvž¦3,{}»”1G€f{
+a6ë˜á¾|òU $ÐIðwˆþÁi‘%xV@VØeamÀÿsQ=†ˆ:sÚLÊÐŸÚ»’Ê³l†Fr±Ü_ddÀtSláIô#NþÑÕ+&A¢_Ö·6# ¢¯ƒ¥Rpoô§» ‚±Ó!!É]AÝþéÙ7Î½c_ÓÎ'Ü$1x)E|4‚¬Ê$N#T·%¸Ú4%âé*Š1¤Š+3(tkŽ[Ð©·`M°˜˜P‹¬„¡Ñ|yÈÞîí2PƒvÙÞ;'o®p„åÃUpêýÑ·»0še”‡ì8‚ÚV®wY0m=üsœþPºÚÜ‚ûvXZ€èÈa‹à(
+rÀqÐxIÚ‡úˆs(¿Q)‚¾sZTƒ€>ïZK5®Íõ¤-íúþ˜«ëÊÇ6KÝ²Ì­‡xÏ”j™ÓZPºl&kÆ‚e%Ñ´„?óáÛ4–ü
+Æä¼RP2Ãé"Mê`Mó¨˜ó$ìÇ@Û$ìKÙLÔíæòÉ> ¹­C£á¸Ðxš gîÅðí¿îýË;lL«>°ë‹Y†¦gbÜüÜ¥	ra—¬#¼àÝh¡×ÛQs“ï¨'æì.‡ß²åépÿ@L°C¦¸ÿž½Î^qHù@ã7É2ÄÏ[B9Œ4ä¡GWf_Ä+MíkÎ<akU,o­Ö
+C“&0ëµ•î"£¢ì=pQˆMN?¢X\rÒ]À¸qY1 Ñ{š†Ã×ÉFþ¼…qIkçGÂ«
+L:!ØÛ¬¶õŒ£¡é€-×¸§¹¬®xß/¡rÆ\d!žÿqé”?¯ò6³œ®6rH0÷ÇF{·÷Ç>àE´‚Àô‚¸9Q~x†"L†=‰ƒ$›)2Ä}ñ}ûP
+†²¼(
+_ sü«°%~Ç[ô¡b¸X.‚Ë!0 ]`húQ¯ö£u\“jšoEY2ªv0.ÚF?o48"»ÿ2Yã|’D®Í<Õ³ÂÙvì‰Fä¿ˆ.ú¡Ù”wQ9òª\êûÒúä»`ëy2Wäò½"—ÅûÜlWÜ[ù v©Ÿ}åVÂCÖ¯®#´îÕ ÂâV»Ciõs’B)~ó »¿JÍ†˜ ØYDÞr…xâû¾Ujc£BL$àâ-bôÅŠqzí·O×ý±Ba*}U^p:mÕ§æ•§bˆ‹¬{ÀŸÖÙ*WŽnG°{t¶,_þØ"œ˜Ò®6¾Ù;Ÿ¿cK<-ƒÆ30ÌQ{¶¤¥©(õüô€-ËáÛ»(ÀÎø5òÆýÆ3¾ª¦¹îî?Ãû×Ø¼\$?dùQ“XônwùÞÖ¢c¡#¦çÏ&9ïZ ¡ÂH²Ê_á·ÓUrª½W–”yI	ÏÔ÷’¼á%'oê[-!—”àK	Þ>ãò®—êïÛÇZwÑ”Úáœ¬#7û=q1†8èÄÊJZü¬¡¬ÆÔÊYœ—íÂÞoÆ®äšÈûcZ•–ÌAì¹Èãl±L¢ÙËtÚcq(W®Õ>Mð$<42¼§ë¿ðÊmŠ¸Þ\Œ•7 ¤8cÏ‚ÅÒ³2Ÿ¶ºîstÑxš¢ÂåØ4ìú’Dê¾vñŒbloC!áº™Ç€ø(bÏƒ³(w¶QA¼fž-NL¾u"ÇøJGW°]ñª<·Ë@'„?ô¶ã&º²Nu§Ò€.IÂ_»”DöE#‹?¢~ 
+‹Í#—ñ«&Ž&×uÊè¼hžÍtÞ›¨°±?Umq~n´S‰faß/ÿŒ]ß”%;š­Ùé;´
+çºÆI:ïu×X¤Pa »x¨^Œ…Ìf¿¿qµ’¥Åv*r9ïF.Z_ÊµlPÝA4.T5¶×y<›Áœ «2&ÑU«ªGpk\¬'UµÂZ¡]Jâü<aÁ³¸(êhÔòï” èÒq÷Ø û\`žT&ê;áîÛX¤Ñ•á;Ñ:ÖðÚ€y¡ô¹ñsÕ9x-Å¹[•þŽ1L÷,Z]!ö6’‚Tn\‰ûÒäH°žH©ÕðŽOè »ïlº2·JðëÀÙŠ%P-Èý$®H«y‰îqN^·c´Yc¼u6ÇK[;{g½ÝG•ßgîÉ»xãJ’oÿ9ÉN#õpPÆŽ_21çœ{8h›t¤ ÇÙ+.En&³ÏÁð£1 ’¢öÿt0ÚÿæÛÑþ­²ÎJï®  ~àYúÛïêU³]¶vüÜØÇEÐ$ü‡§BÐ‘Ë™­©ª—œm‚FßÞ®úè§¢g€ã\f¨f²f”ò‡ãá÷^Ân#íMžŽÛhÛ î \Ä©¯¤EÒ²÷&Š¾	MËv»’´“¨½d}Ô¹„ª”ý³¢N—÷qe¾C¹mÊ¬QÔH™U±.Ôùÿ×ÿqþëL°²·Û&XÙîÇ!ØÏ=e‹—A9ÿÌ–À_y*ˆmVÀ	…á`n{¨hº=NNòcÑ{ÝÿmS|ÝòçË¤³¼üÌ¨S\$]lÉ£a$·ÎŸ	;DÉó)u"Ëo=R°‹cD±žŒè!3^Þ.w†&†N®¤žï}DFýA§8æ¸mK6ûF´ïWq‚¾&.R¾±ìóÏ|†Ãþ ËYmj%:Ù×íYÎêI»¡Ñì&¦29ÝJ*f²°ÅNÖ€tÝDvLy³ü³´Š™x@ƒ˜††Î†±P³Œ™ØsÆbÀÂÒs ÿs²¥mÁ¥,“ÿÞC¡‘ï4¸5ætÂÁ¡£<6ø‰‚dÇB‰ûôN¬@[@­"ý£msSs½hé‹dˆØì¬õ.¯v)äZÉzèbH^«2#9;«ÌÏˆš*ÛèýÏ~x§¦gA<dƒ!×øWAu°-«•i	f¥šóE©¾IòrÌ‹L’Ž“¯µpµVžÖÎÑTÄé¯G¡…jÈÚ8Ç•…Fdr¼ÌÏb}¢†ÊÿêGúù€|Þé”ÀÅ×Z¸š›§u–Þ‚ƒáZ»)û:É¦Áí1¯W É‡q.«I‹•áhU>fÕp36_˜˜ÊÆâÃš™¢ƒÛm&o‘@4D!aòˆg®àÌ$ÇNs39Wy‡;dL¶=)é‚PJ°}±*C@‘7ÔÌ9pªðáyÏÑtîò‰á½‰­E 
+“\¡ÔYÅ‡fë™Ñiï¡uu£Ç[SÛuˆ’µ-‡žtÚoˆ0´ÍÆKzó-;iÙft>Ã=ÁjÝ`¶ÞòÙîMÇk|q¹Å«Ï6.þŠ/ºßW£Ìd+¼x@M|»·‡aU2ñ…>]Š§Tã_¡Æ7{äK¯åðk
+¯ˆqæ¨×}T¸ª”o<”Í½ä¥˜tŽ¯‹Ò…F·ƒ”dZ¸Ú™CHÁ*ª„"~ëâ	=ìèÁàÓ»X•xË(ëù¿iÛ7_oRÌ–;ÃÝœÈü–HîŽ›æ~ÇTtK"1`ëŽS_µ5sgwÂž·B"m'ÍÓ½%)â¾RF‡•N,þ±Šs 
+¼%LSÎ†üö#xE³îÊñã[s­Ë˜)¸“yvAYª?	®tÐghf$E[>#ûvø!¤âÞ´„6bv«¸¤ŠÊ*<QIhRÇÂãd%{ùÓ=‹2ö%±TU%#Ry“ïØê›;Æh‘OôG£cÑïÉùþ¿pÑ÷Žhc7iËç§”­ >Ò
+»„ðaÁ¦ ¾êýï*|Ïa­pÇå9Ö†àá¨¹ò„{±Ö€/ÆøŸ"â‹¶î8mŠôª»ó4ê‹öÂSøÖ#èQC±æeÆ€u×2"½Z’2ni˜Þ8ÚÚ£h§`žêh“j<ØVgud{rž”«pí(Y›·^UBšÃ¢å<ŠÆ!C{ô“Ï/Ž½éô£7ãE´YMòK·¡v»$Mœ¼!×:}ÜÎJÙ2±²—ÆÓ—–sàÎ¦/9y7²€5ÔåfkÂ
+£?ëdóÚvåGÞ@~d]@Îã]³ý€|AÝâ±w~=FSþBÄ
+ ¼ËÌÑú¦!×Æ?(•4ÚðÄ:x$TÜÏÐœg@Ø~tdÎ.*Ô«-Vª½êxZÞ1ËiƒÁN’ûð·oô\Rfê3™ Õ|Ùê"^Ì|&yþ)òÉ‘‡ A¦šEoòD³Æ;½XêO”¾æ’olBÃá@d&ÏNAëÍQâóãŸ<šFyå/3Ð×HZCù¨©¢×;®ÅØãRãóUŠ7Áõ´c£mý»•îýŽ5‡ÿÜ¾´±lé™á:ùe|˜<ð‘}14t(ÁÇõÃP»øo/š‹ÿöÂ¸1ÃŠ'Ä­n=\µ§ÛUtp„·¥Î`[Ì•å7bI|²œqŠc¢ñª÷àY|Ž6{2EðÑN½;šzÝ !ôüÓ³ƒD8nÒÜ÷QØ{ ÿ‘k _nÔFŸ<ÀÿE3ðí&í<òÞƒ?9ˆl ?nÒÆë<Š 9?­J4³ýnièc±†Myá
+†j³%¬ñêÞƒ{{Ú!î´¼6Gò„†ï¹³Ù¹ø—È#ÞvEÑVüO×ÑOÓiCŠwö#×j,ó,Ç°Ï!ß¾HIœDo“>ÑqÝ	Åáô Pð:RN³|$ì<Ž.
+åª¥@¢ä'X`W|K¢Ú*A×)ã­BË-‚`;¦ÄàNþû˜W«8°h¦Ê¾‰#›´Yj³õížóáHþiOù§·x¢¤MAud„†v!zÌ2¿¯£#ÇQB§³#¬Ç®€ía@Ý‰ÔÕÀ%íow®ôfIwA—óˆ…\ó§ÛuÎã">¥C[–Mám\Hdtóƒ¤O~„˜CÍñƒÎœŠ¼ÜBnA™¿ó c >9ÚKI…ÑuîóT«_±súûµ’Š`ÞÂQÐïE®©æå7•mÄ|ý—o,ŒûEs5ÜŠ¨Óy‰8äžj}|¸ôsS)Ç}¦…±
+¶èàL*]Žÿ±ŠŠòÑªœ‚bN˜ÿðL¿ÉWý Óƒ9š™‡§Çö•åìwx-ÞØs9~¤S’šÕŸfDQ¡Áøçð«±÷\á r;ÕªÃRzþvïÝ.Ûßó4àv‹¬×iQðãid³¥ÒrB¶ož4|+q”%ŠhÅ	V#¦~Ö0±7ÇˆìæÅþlšØ¦CŽ^¦ Ìt’…Ñ›WÇ¸Mã½Ï¥ÙAJxc’58)½âRY¯§¡ûïˆ]yÎdÅ!tŽm½‹fÆ\î“«ù8<úâŠÐ²ù£xF¼ÿ‹+1°ÍE¿X°†oóÞÝ©óa€ÙêY°Œˆp½ H»ÀQ9ÏBÄË7¯û üy£`Å€¸j•Œ¿x¬r¡Ä®;,îMkÐ	MH¶M|º¨ä{þî¨Ü7Cô¸-|Gõ.½¦ñî­¯5‰ë+=)C®h&C&^àAåºç	“W—ç¹À”?,K¢Ýs1èý j÷:æ}Uç)»J4BË[xïká}qEF~CÒæ}×˜*«œ^fó¹+è$EÐ[(è'ÁyÄ¸à¡‡|%½>eÚ,Ñg»ó§¬P] åÔåíR7ÑæQ°çSiMœ"¤þÉRqué¿!vã[còîû”Û­­íPÚTó—híµ"œ‚Š…2¹ƒnÄô9³ me-°Õ—mn?¦òR&ÐÅÊ*©ØˆýÏlÅ.â$aiœ‚
+MVy)…È2Á«ƒ ™åñ¯‡
+6ÜÛrvýä6
+9¸a™E]Îïöu«Ã¿ÚÈ¿‹È·‰e‹³<TW9Z^#T7²I˜³˜¸v,ö?à3Ôÿ³eŒ»h½1ZÈ:­í¬BòP)ýµ,m½§š¸ë”yO‚2èÎ(asWOÊéÆ(ožt»nöš—J=§ñÚúÍ½uÓèb¸E¶É®€nÍ¸ñ
+@Ÿ}‰?ýCvÜÃÖm©èpéÄ˜«ìª˜g Vµ-?ä÷!õTÕ]ZŠ±n–ùðOþ ÇÏrñ¤ú°·XBîE¤´çªr£Å¤´Ù-_ ëôßwõªÌWÇß;‰Ä¾ÎôD'˜Áƒ‚œèò_9z—_9:>`ÃúFÅ5=¸é½ÜVÿN§ ›ðÆÏJnZÀž·.×¨n6w«œ¯Ú#Q ¢s‹ügÊµ”ŒíØà#MÒz~lfèÂI#KD°îüP“<öèãòÊ}ãY”ÎÊùÑÕ7ÿœlU“£‡£„Læ’on…ÓZ]tâ·MijÎ¹YLc°U°éøç'ã™÷âÖ‰‘[ RŸ¾Œ/ûGàì’î9[—¿~O<]Y¹ŸCßæ0Å:?i:ÜplFÑþIÆ|9HJíï:„f9uÅ ŸfáúýÛÉO/F<:ž®î¥C;†ô2Ï¦q=Ä€ „äI™ÑY&uçNÂZ/ÈNê­/‹`+½ž»™:½¸­í¸khò–OºsW¥VùÊîÚ›ƒ)4ó9«°½·]önÝÐÛ¯Ä—¥×ÅçÜV6¯mÙd‰WR-ì÷¡8ðÐw™í;›ÛÍÕ.î³4kVfa`šR+í¦å“1±Ãe@(±l³ƒs“³c÷®ìÇº  ›•qçïì_d™zøuÅµ]ð·ŒhoT…SáGJ.`‰˜Òˆ£ÙÒl—º™¥Ù˜}qã÷×Æô‹Çˆë±Mó „f’™ü&Ú…wcI+â•Fè#zµqÈ,ºÎ!ÞmÌ/Ô‘GI”—#¶ßlm“Ç-°è˜Ôé[Çä¸Ž5¨×èÿ`¢i£¾ƒ$š¬#ö2‰Ð†c‘›´ó(„Ÿ WlN2Sî€ðóÃÛ°dßÈŽ}ãKuIS[^|>Æ»gÙ,N›ÍwõÕfmµº½7iêË‹Î»ß¥^^KÂPubs#s·³©nïGJÕ¾ÅÆâH^®Eƒóëo@µú?Hù-u7[s3èù6Õ6·ÒÖA?û ¶õ{;vëÀŽÜnÛ·ýÞÛ4®±ýa›‹÷8ÚnÄv:´?¡ãùìs3.ã[Gó-m×5&¶k k[›r'‹r³=ù÷¿ë§o·fPv-IWDÿMð`Mî²ð]ð6˜“-c²mJ¾]!D¡õêx°Á”ü
+#újýí’›ØÍ‘u²'sgçe”âUhk}Dú£Û©“;.¥—Á:É‚Ð“R“qS°Õ*Ùp›ìÀ·eVDt§"à©¥˜tí=ÜSÇaËle6.³®‹9øÃœ³6âùS1ÍHá¦å½Â:2x?æ™{ÆO¨"ÿñP&;úâÊ7™›÷Ýý¯9·i®´°™bšò]aî*J–âëÓŸ¸ÌpoÆšŒ£"dE0|^ÍÕÕ­x‹à4‰úH|MåÊl6K¢¡,~ƒyà5?ùDTYÇhŽfB‘<ÍÓU+ï=Œ	Ä ¤wV#ù£¡¼#µÔ!„r¦ÚÕ;p%¦’˜7‘ÆR­ºÒÚ{¢µ¢ÊUQ²œÇ{ôòØí‘Þæˆ€‡¿¾¼–
+Î%×,¹Ñ4EKßU&M_º1Åëð³8„19ñ®«ƒ‡hýþc—Å´QÅ§at¹ã‰£ñÞ¨bÏWO^2ŸGB–d“Àõ°í\ÁNY“òsž«ÇÄúiã”Ù¥»™°ÜòÌñ5;Ì3äîü£‹»“tÿ
+
+´ÊÕ%™õkßˆÝúü`¿b]Ï>ÿ4ëÿÿ   ÿÿì}ërÛ:²î«p¹V-Ë3¶|‰ã•xÇÎÉuMÎäVqÖÌÞ;'5¡%Úâ,JT‘TËUûÎßók?Ú~’ƒÆ…Àn¤$_³R±D 4Ýî¯««Åá¾¸ºÊuüª„»Ñ%½ñfb_J²(r"®~˜gû«dNŸÐ½ºV®lDßÎä­õÚˆ;báû§ê§ÏôÊj³­pªõÃC»F‰‰aø7ÿÈ°ðÇ/LáÚú…ˆ	¿{Ö{<ÀšPæ_å·À`¡Ayø)3ù€#­.¸„jÚ‰ƒ±x±•–L¥»×\‹Rƒ®:cÐMmÂ¬ÓEy„‹à‚´üƒL*8Ìz{
+Áe[±.ø¬n­kÓ~?ÕÃ7ÓC
+Ô'¨l°Í¢Y`Ü*Ì þÔÒ§ˆw·¾î­;—5½ÅßõHó2AœOîû{•OXîGòþÃû[›»´’ÑÿVIöè7q¼E^Qð¤d²¤ØW•¶CBûä=E]™O´í‘ö„#Ÿø))I 3p<„þ^@l÷Ü W\%Jf9âÜã›#å/)ã9pÒ¼‰ šÁšè6¸VF‚a‚áá£Å(Š³€u0ÄœE&ÜUDóËYÀŸ©m49Jðé—ýý³èø€«áHuÇaöy_b¬Ú`Ã]>—çL”g¯ÏÁ§²0€é#qÛ7uOóþ9¯E±ÒhGõ’¬ìh—„3â¨?NG2•UŒÈÀW!3›Ò6€„§è ¢çá0L‚W“@"`‘F»Èë¢cÊþƒµ˜³×âÞUxGý„äv˜ÐÆÉ€½_f;G#±›øóî Y›~â8QroÀoœá•»’}œ‡•(*W.5`_Ïf/©D4âe„Æ– ¯­´«à?¯ekvG¥D‰ŠÄ¿_À¼'bÞ_‡‹˜ö¤ý´« W;ëeâ«˜tÕØ™óaz¼røv¯ô$xgÅh®Y‡êäÙ0ˆ²íæžxwÂ;qµ$ 5|%T µwcá4šp¸¼ßø_7Ô<¸‡WT­á;QÔ9Ò¢i+UaüÕ}½REo„`o¬!p$½Ô/a8>xN‡–ãîJã$ŽŠO…{{uMåuZ}&ÚòäŽöäËhÜêÙ{Ú³ï˜ìœ5<ªÊCì|¦žÄR¿’V˜…HÈ|Y¬8ß(§cº3ÆÜ'ƒ1ú<[óbä;×poå¿Ohòf¡LºÝŽÓÕùœðåƒL
+ä'°Ù¼;›8™^Ó¾WÖŠeDœ‚¦¹<ÍRÔõ *}bgTõ,iÿSÕ·ÛåÔS¨K)žVCR7oµˆ›šýô?‘ØS¿”îÖ·Bœ	U ^a2¯&0kÔÔñYi€_¦ôg7ÖEâ3â¦fÍº1û†wp¸rxtž“‡ƒ»yä;5€Pé"„º†ÁG›s
+pb º‹oÏ‹¼^ä(qG‡2?™S¦Ô^át
+3QîuœE5:€.ÏåI$òô™.$íwi ÎÈÅµo¾ñ²["Oæ’„žâ¤1+'YÁ®’3¾vïÄý•Ã¿Åy\¤×*-„AðâaÒÞ˜âG>Ð°áq“êÒâ'‡Cq Ð }F×…W”›ÕÊ:¹D="‘®á^],¼Œw¤kXøæHE¢ÉxÔEf+u`ÝhSëB¼)_‹›´©AFPÚ·jåõâáˆ‹æ7$Í/$GÎ•£~¥Ï9Ð:|5‰á<ŽŸþ
+TˆÞ^0ŒOã²©]%›"ÆÔ…ð©†ð1º.,ŽŒ.m”-ùu†[,K¬Cˆ]!oDbDn“´PÂìÛß	“\’˜œ«…2I—-ÆyËZfØl¤“œ÷ïªÅ^XÐll~(3aÏ¢|Ê>DÜS+8¨û/Ê(™gš…¼àìÝQ„³’øÁm©¤GÂYŽuY½äRwA_ä.jà`^Q#å¯õêÁš^Vƒ{®mnL# <€I˜v	GÂk%‰’à‡ãpðG4ámÑ$Ÿe5Fsp‰sˆa{Èy$ÀÒGa„I<œ@¼vŽ4N{žŠ‘ÝøåM3ú÷Ì_òU3¤	&ôþýªáÁ¯¾ÁI`·ždYxÎ&„ÿíYÖœÑ•¿¸õT¯èŒOÔ‹,kí„(ždc‹ÍË	_³°
+D.ªæÎ–_™Ã‹Òò|SîÍÞâ.×eÍ_²ZÒG’;îVc š“c€¶cÝ™FN6Æ?/9Í¹ï8¯©-’œ2së6omïóÇyÃ]ì(ƒ·tC]é–ƒäÆóUJI‹Ðè6	Oˆ ¼3ý§U¬eSÐûB’è^îÒçøbfÄq§rÝ~~Y½j6í<%ß¤C¶iò­$ÖèPìxIô•éeŒN=¹¼u	AÁLº‘s[› 
+vîµü“Z­ÒŽ®°HÔ¼m Så*ð{íaûÜ±nùGíþˆÅß9ö–Ó»¥Ð)|Ô*ÚÜ©ç›ÑúÑéJ¯£ƒùˆÖÏq`àqTÐpHÐx<Ð|0pÑ8.ÈÇ‡¥ç:ãæø?¢óƒ½òlÑÊËCvé²ÉPehh0Üã&û+OÏéŸ]	q%È‘“=a®xW ´V!i< ­þF¡hZ ZÃ–KÎyE¼¢q^¸RÔ-Êu*Ä•o5B[‰7¶^=ÆUŽm¡£‘Á²¸HÖ.Z–D›¢CÛ…”z†º5ºÍÔû9ÝÜ	Å´5‡»Õô5«L+XmCQroÿe¸š îû«Q¢¦§ŽžùéQRÂ	äJô( ™2òLPM³*…ªMá%»D¤­`…}–¤y$FâàBdÎöGkí½7†01s˜$?§®Çë ~ò,ÎIÔAÝã³ÐÙÞ&1ƒP(-Æ§xDH5¤~¨›=.`ÒD;&‡‘jz"8Î4ðë"Žrn}”ê$£9HÛX'º†™Æ‰BøN³=d~ØÚà¾¤`DÄ$ÊG„UŸÀfS××0‹ÃIÁôÏQšôMÿ‹õ9¸q¢yÀˆæA€²Ê:æcËTÔ9Kƒ„Y]`ª5ˆ6¼ò—GuJ·;=ÈpF¦ ãÂÑE9²
+UÄ]‘ïî,)¶J²¹Ì…â:‹: ó·ãANÿÁáå%–îŽ;½žvVÖì‘Ú¯×²Èàœ»†X.©ñŒÉH
+‹E—˜eÒ%@ž˜ïU¦qcG¡Û±òfœÿž±.òDwYkÜ_ýÔ/úØ©ºäÔ+ «4×W<tÇ¡tçk‹ÃgörÂæë¹šãƒà'³¿jö›êjígˆÓO]Ø~êª øô÷òxp°?c.âj@FRW'Xýò€
+ÔuG
+º¨ê¶'–Iu‘Êž:yXêÄ4±ß‡RûÄ›ùâ1•/Õq[Ð6eKÃ«}ôû$©e1œAê‰F¼Anâ†æ'5fÑ°ÌÅ¯^b¼e»	¹Ûu3i‡²k¿Æ•óC¦×rN]e„¼ý9ø ŸFPtÛà<iïr½üïÑÇ,ÌG´Œy¯»ˆniß¢êé7à5’¿Œ¿mlµ?Bîb-Òä–$Æ jøàBñR›gê¼áÜfÈ^y<ìêh	ùg©1‘Ò,¯@”`›@ßûß}£KÃ ¼{7¯@ò€ýˆƒ=É¢Ð0áà¨_kÀQtìçžóDÞÞ‚qKjgsç+½TœC<&_…•‘ÓÕ7ÍÄÄ–¬GzÌ(Œ‰ÑôLûOÏÎ·¤Ê¾±&cT–Hùµ„k’N¥&aåÞÜ.sýÅ0OUA³œ“S+é¿~Q³=ÔŒ¬ÅÓè÷,si’=ŠÇ§.±;Ï¬ö—Œ¿¿’öüÛvy€³6a\b@:¼A@8a¼9ÊÞ§Lþ8?X™¤ê%«ÀeÌ6ìPl¾ùŸôøŸŒìØÂfóçl8p°Ò†Õêê)/ñ Ìƒ¿||óšØ‹$3rYësL¯¾ôÖdÉ*àx5€+HFˆvM-ˆròk3àƒ(Þ¼	‹r}N²Ð(ëÈ—GŒMH#1[–dü3‘ïÈ=¨4|¯×­l¤Ù{íòÑ&tëðË{7ý#éÖ¿Æ”
+Çã]ºÒ÷og&"}Ùé½áž8^ÁãóùƒHÀ·ÜæwÎmš@`ÒÀá3¶m—[¸÷ß—©çú4+rK¯3û•?msÇ/ëí/[›c•µTf0M'éÊa}«¨ÅÞ?Úœ:^&+ßÈyÙðÓpxU’d:+’xb@ ÀÉÖ¶k„”‡!^Ûm¥÷/>½{¼z¾òh\®îÚ@*åø¶Ð—èVÃ°±!•|jæÚ(éóƒãbÜñI„X®r5´“ÊË]½—¸Øx1êÀûa%9½;\ôšOÔ»“i€…¾7P™4(€÷ZŒmÏ®knÞÛ
+¦lKUzŸÐ}jçfíS/Æl8Z/–"›M“° W„ƒ‹A?‚Š.ËO·„[¼1ñÝëýáÕ¦Púíâ2–³â1_V¸<4E”Æõ¸ß-Ðî­y”‹¸yÈâ"dZÛÊáÛ4yv‚\œt¨îÃˆà®É.n¥rÝ^nõ~tžÇˆx¯-‚_!ùš8£
+—À¨Ô`nûð&Ç®ö'|m¼fäp°¯y‘EQÑ°Têé)§„ýÓ.×EKìñ‘ƒ„eçîVY¹iÊJxð1¾0š»!8£ ^Õ¾Yë%µø[/‹ht³ŒÅ*òðkóš¯ß¶ïY/‹I+[¨ÆC<3 hÿÏØ‹ž¦Ù¹ïß(Ó%`­°­šaÑ0KÖ²7çû¥\ÉÐôÁÒB¹ó-¡ƒçô7àó:þ›g;ìÎFqY/T³z¶t×lŽº)DXvvæT©ÔÔ[TÙ"0¯Y1dëp8–f§á’gœ§³LíºÌr Gí‰s‚mnz¯å=Ç{pìà&âÅü±Ø˜XX‡úhRùÍÕô¹@×Ý°1UË5îUÇ#}1Ž2¦Î×ƒ—á8NØß£(û¢yÞ Êí-ûÐ¿™¨=lÎj}–çÚâmX³'é`–o|óø8‰ö!4g½ÉÆ„qÄ’™@³uS}£÷^&^ô‡z&BKm#´V-vÈ6É1ñnÐ–äô¥ß{Çÿ†	…tÔL{¢nÚ{šÅÑI0ÔNO‚bç%ù©O›ÖD¨={´Ø‘×A.ŠÞÜ¶óûr·m%Z(:ø–pEBnÛ{\ð±7_ù ®‹O«U@Æêº”@’Uµý$‰²¾²ÍM|ø;#ÝÁ>qE>¼aÂ0/“Ž#þ8Ûô‹©*ñŸáþ<^ðˆU&êx:‹H;¸Ão§'!ï“õr&_‹G†üOXðòÏÂþ|dJŽÖËÕÏ\S7~Hœ8ŠCAžç €ÂoÂé'õÐgììKb´ÁµÂç‚P7„>(+§t’š‘(§¹q%ü=¶:ƒÿ4OÀ½™Kö4…ibõ8Sª•%fç@ÌÏ[MYÅ¼é=S÷´ð¶íJJªBÞMmÎívÄ-,œÉ¥?‹é@ûöùº›LÞ²$W¢
+Ò…è–õ„N\îîæ‰,Öz¶Xä-Í¥˜W÷q8 Óõ¯c%gÇîÞ³c#ž ål&‘¦ªÚ¶á&ÊéLô±tâ¿l>¬è’ô(5ó–/§µÃkV!?-m~6´·Uƒv¶øhNï¦ÑrP+tg:¸%¦˜¹{¬8éÊM2°¹4e¨1ÄnÿAl˜æúVó·\¡^ý}*‡Kµ”³Í&«K°\›†}G•wvƒ;»AmMÜÙîìwvƒ;»Ÿ‰@×Io€ÃsÖ0:lGá×(²ÇòÑž0ÇqB‹YzPLÄž”ØÏZqñó¿ñpŽŸDQ^æŽ-nYòÕ°7™%	+Ç«€…(€ðhU4(d7ð²?ãÃ=¶)Ëù!×ál„ÇÄmj;ÿôöïV’€lS_ÍR][@A¬#GÕ¿L¿m< -–‰ Çš48÷âfÛ6ŽÑ’p±¼ð­."‹~x\=JŒp=le#WãåÉèÐšåFiîxÊÅ®€DL8Ôá&šŸ¹ú"nWa9RÞ]½ü0«¥¡QÝ­¿“„Ëgkñ2 )_EéÈ!ØÄ‡/c&Å
+­ü4uëPé¾µ8‘ˆ!âo°
+MaÕ 48V¿¯u¨)®]5ðà=òƒ•Ã_O¹Hb˜Ò­46ù@Mos35äÑ8æË…L¼êA#„DFbáq`lÎ^ÂÂá3B0ë”ÙÔ°PTM!š’€.êÇR?pf=Õ‰p³Ó.$älª!ÿ°cë´2VZkì‘qù¨ÅF<_¢YH,qöm=(ëDó£í\M¢Ö[¶¢^‡Ë^Pe-×“
+G½[N3|`¸šT•w‹É±˜^‡ç}‡XHè\50š½	@ÊUªE#AIVÞ†0ñ$«1=…ÔA9Œf~ÛÀnÚËç]UsXÜuº#v¤)K„·Æ|ÓÄä:ž¢SEXu¼òFòˆAXÀL³?xÖéfZCRH¨RÞy§ËnVîi<Ñ„{TÁr.•¶õbÊ$µ	ˆFvoz$¢µ"«aZt6i*¾Î‰¨]gæx(ÝõmŒ;&'!hœÐ{Õ3Ö«,¤6†'_CV:˜ä¦ÀmLkDe§‹$FìVÜ“ÃÓØèAÃ0EC7ûwtA-Ì²<Í6¦i,¦„õeè144œH~›ñ#ë`˜f€Ng¨æ)[‘½U¹H7B>ê³)dÆ[e¼j ÷Ð¥AJj\Ð‰C ¡8GH=kÀ5ÊD@—ÂHŠLFã82.™–ëÑ#'«kkäP7Ýq¨5²ûüÉ
+H3HÉàêÊbG-lpO‚Yw£Ø¸â‰ckôÊÔ¶ñDœ¹—Çl%¦ÓbCÙ]¾6ñ«»^°`Ú‘Ïñ<žÃ,xv¶ñ	ñÓÔºû>šâÄü=6ø{Ú‹Ù¯uúî˜«ƒhm<´[™øbù‹x^ú;qîC”ƒ|tS¶´øºÛüÉZL}Iœ[i‡½h=Pœe¥ÎÕÛ`+T¶>„n~{>¯…pÛkë«M 7ðR àrž†ÊIÒ¥	8ü&.ºvGR®L®p`{þ3~è\W’ˆ•WêN”½Ã@IØ>Éúæ «á=ðtÇ¶§zðõ«á~°\~ÆÛ$´4j&ñD¡Á8`àÎu,NðDí‘o#Ä¹Á:ãßHÀl`øÍ8^—QÍáG*dg«4©ï¥(Å™5Eán€fO|æ6>(ÕYÓwdu8‚x¥|Í D6ðî7ï:õMen˜fá$&‹C$‹*u¢§Íµ³_~©ª:¶®ò¹Û,{(q›M “ÇÕýƒŸkG€—¿´ÍË¨7œ'm€¹bLkW«I"@÷þ¡ ;bŽëÊõÙÏ@¤úqÙŒ$mA«óO9í($ôêâ!¡gÏ)ZfSg\^¦3([]W5ó‹õ¥ƒU/Ÿ‡u¤lBj£á,I¹Kê6•FÓ&ÈBÊó¸æÏÛ;÷Ø,;ñlµÉë59å?¯KÚòêcãz¨¦†¸9˜¾ë !’ä¨WnuÉZ>1¶ðÙ˜Êë<È]M[®±_v¿aÓè‚¦ë@»)K×ýÎsérÝàEßB(Â(€RoÄU_Äüù»åk-_&x®˜¾ïsÉ¶5GÕõÝïØòò&œ¾'”é¥Äü±Œ,ÒÑP³®È;ë®dg| °±ü@ñ”eñ)‹N™­J0.#Ü?i)aøà;Õâí5ØÈÑ”˜ìËæVØi`ª¸•>t·ÑÈjn¼…Fr??,Ì‰œÇ@#Wˆ©Ÿ«e³T“Œj¹»-FÕpƒŒ1%C¿aÖ˜eLó‚¦øÎðR=³íMjÉ .Ì¡ÃiŠçÉ•ò£èbJã²^ÿ²j%–cçE]«’ËÅ©NÁ“B“Òf :å½j÷E/Ýk÷ò¶Û6Ž¸ì¼À…!„ñrQHóëZräïCçÅðŒ§˜ZØRàÞ@?âBà€û×µø¨ß-‚Î‹à·›,pCÌ¹Ä«_ÛR#·æØ¯•Ž ’ïG\
+"õÊõÉF0îw¡»h$Ìæ‹”ŽD?äbPÉ‡®MF’cÿ-6:ÉÄGpüñ¥¸öðS¤ Ž‘¸>´ÄS?âÑ2d]×*Ñfà¶-”…Å;o-þŒÎ‚¦ÿæ”.¦Ç@«Hh&ÐÙEýÚ‹ ¸Ûµa pÁé78#*Î“&i6f¼¦1.	÷E@±ž8"á—@b;•ElºÁšX•PÔ
+.‰s6?é*ØŒóGª½^Ê+ÍÆj÷„;ÞX¤¹v„]Ç;ÒN	4Eë	1j¢¬ij]n×û$ãË‚|&?œ… Õ›ÊÃÌàBž(~LEk 5È%ÜÆãà# ‡"Kè œLRÆp"ˆãL'Q}öàV8-Â…²™Ò›AŸ›ù´vyhü1rŠ\)«7y!ÔéþeœŒçH÷Ç_{qÄo$óQpòó{h…±ùLäò¥ã…¬°ß6ð9yÈG¯;‚¾V•|þ›ôkÌZï'L9ï•€l¨•"Ðyø#¨D7ñÄåY*Ø¼(îuèí¦ lì±š°šL×AeûÁWlP×6¦¢ñr˜\Û„ñÂŸÄC€`IšIt¼1ˆ+ÀpV-öàËZ.RÉÑŒ½ìóð<è±O]*P(å+‡ð)èÁÿ:ÂÅ¶’£Á,ƒó•ž¸Ó¥®ÿ§+‡/&QvÊªa_êh€CÁPZj*[x]Sà¤~y[ÿxU[´H€îÜ¤µ"·k›ÆÐ»ÚmÔâÕçØª½¶`ÆÙ„0É„S—Âwç,MÇ-uñÜ,ËI§³¤Ý9ÔÓáø;´ã(k}˜)ø¿Ùd†ña9uÎa7±¡|G¡á)SßÏÃl¸üfái´<)ŠË”¢m’¢Ão[IÕ3‹ÏÚë  Á;4«ÏíûQrjÁs‹?›µdL´v«!ßbÔ§A¨‰hÜ&ÈâÑ‹óèÝÉ	A•Üœñ‚„q	1Æ„õöÑ”27ãS¡Fe‡õ‹ýœ¥ã@Úw˜Øp–?ÚœÖ·;¯äè,_ÞZ·Õ2 áW žur~•‹AB¿g¢¼¶á¼m~°‰—±7‹.]úMÚe8(M~I4%9øµMŠzWÞC|ç[¼H"®‹Í?¯ÓÓ”±ß'I<[ X+NbFÀœ‘KÙåO›Š³ÙÒŒ¨€=¯?F
+6té–2ÎŽÌŸ¸çÈðÒ1bÉKý“×Îr;Yý2ÖèžÁ€àÎ®2=ë(úˆtž¾›yå¬¿f¥M½ŸÄå/MÏkHƒ³‡3^µŸ$¬1àµ—ô-ª¿>iŠdC<Ž'\d/Š¨ <ÊsFx`bÌÒ<ç?I	ðqðð4€ë3%”Ð”cè¥˜..72ie”fñ¿ÄÀá+04-²¬	ã¥mú™úóL?¡ ŽI˜|¹KÌlä¾ù`‹ËÄ‘Š5¸ZO$@[‰geò.E¶%×„¿š&^âô[·Öéì·œÆô;(©€õ˜.þñ„mÈrî÷óA˜DŒ?ØQ^Ñ]n¦’±Ôk—%"­Ä(ZzÁ†ôüleQMxdß³N¼¸µ#ÉW~	>ˆwà%–¾9ÕôeÖè›t&´ºl” w’|”ž=KÒ<}>¸àS¦ËŠLÛeî‹]¦„÷ÔÈj&)Sž†³ŒS äóË5Fœ›¯sžr$‚¿´bÂ3à~µA}ÚúÇÖ? _ÿÈNÃÞ½Ýõí‡¿®?Ü]ßêß[ãùXÕ#e7ÄÖ°L-‰Ð¯ªX²÷]ïÀý
+dáó(8Ò]‹¹ÈÛ{UgÙŽ%?ÉßØ«–Žî³£ÙµK×cÅ3mcÒ¾îT	DvÇQ2—„¢“‚‘|2O‚Þ³YÆÓNJÒÉ×4	ï	k¸t^ù5 £Û)­UÑ»L€¡¥^ë_£ó&ëLNb8ÏØ˜ÎØ!‚Ïž» ðˆ˜‘¢9²èøœ´Àõž	 lcÐöà½a|Ê¸åd6Ž²˜1ubWf[ø b;8S¯F<Yã+bÑöÉ®::ƒ*osl¢¿R Ìd›{»›0žéÓÖz°½ì¬÷ÖƒÝõà¾H5Ù‹ÙöKTýIå†„¨@G¦¥^|	Ø€qßà•mü,ŸùB=%àG§ì•Ï¡â®ë¶!¢ cÛ¯£Éi1:¸Ø¦šÆyxœ€ºçc„srÎä dÏÖx0õ¼¹Y…ª¼•„¨´-÷ 8+Åyö›±fÇé$E·PuÏ\IÕ‰-õMˆ, ûoB|5eyÃ¹Úœîomîn9Qt´}ËQ*À÷4ñ±l¾Š&/ŠÒô.oÙ'NèÄÖ7-(áåáé×ÐZµawOR	‰íÔ¥Í=#:FÂå+ŸAk4!á™° °}ìyz6ñp(äØ
+}ÆÅxÒ…U0ó}w ~²šuÑÏDq8J‚£Sœ0Ø¶âè¡«Pûo£Ï' ýÕÕ2ò¼ˆ’xW695×É~qû{oóÿ<ß<]gÓäè"¼OaÒ<®ÜÍ“»jªIéç³ã\dh`;›ÜÅþÌ;õg¬ç?ÛÎQVþ¥cFõCÙ¢lÛlp¯	=à‰ìBO«ÌçÎÈH¥±>.ßŠ.ôög/zƒÚ×xôæ‹Öà=•'Q}ÙÚâ
+*ñbXA‚-^à	Z$
+°„Àé9˜<”ç|ÿ~)²Ç“à$ä”P©§;d´¢Úo¼Z‡ÚD×r¶±Ãñÿ«´Ö¦Hõ÷˜ÝDÁ'ñz;Œ’ð|ƒi´ùgGþ‚%5º}É­¶O€ÚMkùW
+ÜaI‹¦–Ôï÷‘*G_¨¤xÿ<â.¸§'ØKÙræÒîW]CC;×ÂÍ½¦åà9g•šÏ$ˆi8l§ÜßZ¬Q8¥U†YV‰ú¼±¥}Kª ‘¯EGäR×¦!7Jè™»í–…äžÔ(¥Wº¶Ô\Fä}2tI¶®¿®Öƒ‡R¯dê7E&m(As•’=ŒsßÒÙ6IÌ^-5Ÿ.g&DÛfC²-ï—½åÚ2–sièV‹MÜÐ×ßÆIšE§ü))DÃÆÆ^ûRÊÓ¦ž	·›,Þ^©{¨=¶ürÓM¸Â<b’ŽcS×·ZåÈÿþì/Ž]·…´ƒÏº=ã<’"'"	ÛÏK<K¢0«q^IÒ>$;ÁÒäúi{»Ì×ƒl©ÒÞ·i˜RÜ•Þ¼¨M'RIð$„0Bà“‡ˆiÀ„oÝšÉ^0oZïñ¢…Ö|ÇÁuV·hÓ›ç`#ïId[-	LD‚l––‡[CoÊ—«Ú„äre¬D§†~Îž@¥ÜØ¦¢0Ëa=aõœñ#/wš8:hú£Õ½Æ…tîhöäÂ¢,yÐj¹U~É*¦QÇ/¿=ŠÚ„|îÁð¥?Ö‡aD¦i¶Ê´ú×éà¦QÅP8x9øp<KŽ…Ãé4aë“ƒ÷é{ºðY<¦gPòïüï/]|BîL(.³hîsò¸‡y,³l<âz¸q×|ÖêÙ9%šS eµ7j¤m\¾et*ð)àôôD¸âØÍò1f‡²Ùî^ßQ9IÊ+œ+b£O{[_GŸ«„ŸçÂÇfúÁ
+i•éÛöÞ…noˆ×ŸÇ‡øºXö¾à¢O\ëçgîUÈ*kžeš‡5ÕçU1Ü™;1Áãpº|ˆi6|$,¸Ïý=dóNIwÚ$í«OÔÑuD)É€=ÀÉ ¡°œ*VZN•»8§DVø9û+Šâb£s¦Ù`|ªðgÏÑŠÏ)íÑîŒ¨¯qT°ä'of‡K¾Œ¾aQ/ôçEÄ Q%\Yo &=áù$.š–góº¨,ÀŽw*[â‰WàäºüŒóÆS	€îÃw•’o¡Û´Î±íö
+â}ý-I#„K9Ìá¯Þ«¼„IÛ¥ãA¿ÚH¨Çm?Üéoï=èo÷gÑ(á—­5=wYeå^Ë .tÐiT˜y°¾[Ó5AÙ³<Ê|Š«#ì@  `áMô¿ËW¢†ÁåAãÕ˜‘}0ˆ<Žc2WAÙª7aw%mU»7e“¹‰\G`"ÑÒÝì¦‘¨ÇnKžïåë,<«ñ"ûàçÇg‘ñÿü×£ÿZR¶ju9”­j_"eßl†€äáø}XŒnÜzù«,m»\ŽøûðBK[1ú˜ù­…ÍÐ„Ú~ÕÊrH¿ªÿv°õ4+n‰Ei¾Óš«³·YGçCÕÀÍEjO^þÀá)‹smÖ Û[çØ¬æ}Æ·³<z5)ì }ž„kùÌ½ÍõUb5û•—[-é[®¤ˆæÒ)[Û€t¶òÚÏÓYñô¦«­­¸²}d=DçÎ¯HA%Á…g9ÐØã~‘	·DN=«Û«HX=\5L%™“Ë—rf5þºF,1	uÜ%l–IþÑÂä|šÛYK0ñ¹Heú:Î‹Çæ˜Â8~ú¼Ö?‰'Ã^¯¨Æ©èÇC}¼a1ôÚMÎÚš8Xßµ>“¤‚â¯L­ÿ|)mäSb|¼‡¬
+:dGk“c3q—*Á„×ÎËCvÆæ²	ò	.<1f5.,-ÐIü2c‡-y¢?'„êçf‚OgqÁêØ¦?äVé«`0WËùT‹‹gzÕ„^1¿S¯d²º¡Æë†ÌÎ1&Ÿ{d³µq“™œ=&ÜT’|nh0:{,/éùbd¤=7•=.ììWÂ¢uæv8ˆØ\Œ®=®Íàp½Yb”Á²jœ©‘ ™67C‰ ÎâÐb²+ ©Éw7Þà1 GŒaDÃ€ý„WtÝ¾V)„ñOÇQç&8ùÍ>Ý×¶z5;l‹Çø©(rù>z=Y<7øoÎça»hS:Ó]Ó¼UÌ[]#û±¬¾MAœ¹‘/{pežŒ€xŠøª‡Í\ï¢6¬ÀÂsë®1î\çÛyM@Í}Tœÿ6r_Š÷â§Ìc´°\»sÙ£ô$\$ýÀz³<ïÚ‰»Ò.+:tú7Ëš6ã¤RS7:
+Ï—œL4„ž¨`5¼P†°š¯:W¡\˜Uí<÷ÂApÐ‚é²ñr8?[c@²§ÚØ%Å˜;‘hUnd²ËlöË&"ÇÛÉ²‘ñ5Øqs<[ÛÂ8ý×ö/~×só¸´úÎE’S½‘†mŠ4îYœž{
+Íõuô5JÖnðÝõØ½:KDð.ï–ÃúomúÁC‹ÜTàþ¹á¾KX0fAb‚ ÜÛÃ*”â¯ì‰½-HX³-9k¨_8ÉÂ¢Ï@%^ºø•h™«¤1ßyîÄ)B1ì„mÀbÕX-,ºµÇí{ÌE#¾èŠ-"!ÁCº$¿›r¿émË£ÕU#BÀ"B}ù3wTÏ¯ß'ì=ãS#øX !þ„Sâw@W•ÛÙØýDê÷øM|ýz×iø¡VôqŽìãB i¿M‹h¿ÄEsŽ	8i€M–šäFXá`…ùhº­R!øM½.1‡ŒÒ3ÀÈ®Œ—Šó%ùŠ]ÙÍ	?‰ÍÄËàIänÌ4GóæÿñS€F#{Š¼m\ù²Aç	h‹£3!T6†¡AQ(I¡Ú… Ý!h¨ñÖÖ6çi2$[ˆ;`#[¤Åƒ«ñÛÁ¿6jˆûìÝÞMX	äô
+ÙO	,^¸ÊhÐÓQšãžyü/Öi‘/ùÙ°%<à8u*®sì³9×ƒŠkÇ›€yg¦Î;xúŒ™ÀÜÓ6 ±~A†rÆ3•Ù¤ªe?âqB~à»øZ”¿\3ihðªi×n¢SÏÛ
+þØ@=…–A"äÚ¦¡C"ª˜¿0<Ó[=	qçÜÐSñéóÐÏÇ,ÌG;  ‹¹‰Z¦ßx±ûŒ!æÆ1ïX;µbÂÀ[™¤ÂÄÁE-ƒ¢¤MÈ4t+<ÝA“µö®ÿî3Òå6ïlî›8¼;íLÙ–]Ë4o.¦ºáØ+ß®/´U£Ioðu®H]«-q@Ìfšã¹˜8Žþ©„.ã©ë]¹\PRE½f2&\XcJ>g²ûA€˜ézYu˜F¤ËÇA‰¨ÎMž!C
+kÒ‚gÁ%V1mhŸî.å?¢ò¸SVVTCñÁ	³ð(4
+žÍ®Ì8E©X_µE+‡õs-·º£O#¢ì@%Øc&=V¾RšÒÛÍ'«—í.,REÝ¥x¤SLË™]ÖìŠDnÃàé¹kn›ç÷4* Œ~â€™æ õ¢™§ç|ê¨ß–Èóœñ^ÇÌ8gç&Žï»É|ã‹Ù»Iðø÷8,  3xÎnCÿn²¶¬¾?]]ãGNÂoÞ>ê*ƒY3ÒÌã5ðóŸ='±LíÙâŸ†ÃÓ¨’ÇJ'Cd×˜ä%xêx«ì0:	g‰iÁ¬‚®`LÝÜÃÅßâ<>N"UuG›ý­XU¯C&.¼I‡ñI¼|ÞÅ+T[83K|‡\Ìïó2}ô|šYÞäj[Ý7¨ûB#7ÕÄžhcÜû˜þÁØÊoÑD¢¶<ÃÄÇp§ô±Š´3óÉìpJ¼÷-Q¹à´,o>¹ãš€ó-}s†Å=nXÜÃˆËW®-MÚÊÌ¦ýÂG †¥ná»^M uÇß@.6¶AºpíºŒŠ={Û1óóià*q®ž„Ç#_Bm¼j)zöØˆí5©ír	2È—OwãÏcP@g«OÏÒé¹€á*8› ÿ(š²Áòð$ê¯
+ãXô}V# 
+$AÎ÷¨ f#|*˜K>—âïX‡jóÙ¢Ò4;÷¶8sÑÒH¢©(ÑÜ|òÚ?Tc¾`Ì
+€Ÿ:Îèw›vdë\~åàYâØ8ARû2q$áòbûÑ·iœŒÇRí¿ûŒgÁ˜÷$¨~=°žÔ¼>Ô¼ú(éï‰<ÉÖ½©À‘¢Š6Dñ@…óü@
+–ó˜iNpÔVé­*¤_MîÖfMÝÝ­ò³Å“	ê_›’BÌÁ‰š b`éS
+msra8ÀNõ…+m¸Á¾Áú £³ñ@WSÌ•lÊþjîq0Ä^‹¸JF9×q9ôáÇ$üŸ†EšõI<=NÃlØ?ËØ|dD`U¨ÕGq)“gû¹€Ží­YoNcáÁP¶ñÓÊÎ;øæÑÞ|M}\Þªß1·:¡tb­v<æ¾f¤Õ®§Fè¢Oø ÜåinÐòÁìÉÑ K“ä	ãÕÆ¨ëpŸpòƒa|zƒ‡‚H»|P—ùÐA±ïù#¸­YòÝQµ7E÷#=Èáƒrë„È£õ°¸± tDëæbæþ‡ŠÔsäÔv‰$&X‹ô›7,Ï˜§¯üüAyÆ TŽòÆíeäQ'l]Ãñ¬²×ÑðýGÓY7Ã•j6­¶,i	5€î¼,žï+‰UeJPóÂ8Ÿ–ŽìHL)wº¬è!Î•Ã×ñWð~–OìÖZóbA*û½€ìeI¾rø×¸Œ˜ŽÔS·ºUø4®²ÿ¸§}èX€ÐÂÿ²"ö©[MÏÂlåð·0O£ Ç¾t«åcElÞÍ
+ ƒzü{cU7’M™h3'‚C½¹Pá‘JŸ¨h”÷¼sËbIâÕM¿•9ñ¥ZrB$4Æ´æerj;r3çÓ–l¥ÞÏ®ÊûžÒUC&_¸„Û×Â$ê3e1 ñ…ZàoƒD†Í¿3UkéÊ6c½ýòóÅ2Ø
+þ9žÄY^ÀB¸¨"pºÊK|ÑÄ9Ñ"E¸àtÓ%¾Må’)—ÐwµzêƒÛ`Ï8Hš³V’æL—4gÞp;ÝÍëtê8ÌHEU&M	7—Òë·ôñu5Á‰Ç§MÕólp@f<fãïYb„¾pYÕ&U¡¶*1F†…Ìî™ÿÎ04îLö°>O¢,‹²÷iÎØ6Ô-÷£Ó÷^ v•Í&¶ï­6Khôq;bÜD©ñ¸§®‰gUÙû[åJIN­S'ñg³vîµ­%yØ ®[¢’X’+µ#G•\NøÞÁT$ÎÞ‹óèÝÉ‰%>õÁÔÌþ)o(Ü‰C
+°tÆòx´µ›’8J5Ð…¹›û9cù¼‰îQœ£ÙŽ©Óµ£3P40Þ`Ê2jì‘‚„„†º©ü#Þ+¸8÷L<\
+t²2OÍS6²¯ú r[½k'z«²ºë¿Ì!jõäFE…Z}k<^Ô²@‰s–¸&€N8´ &QV²|r¹Ïf‹Öq_mRo~+¤
+Ï„ƒÂ§ª—iw†w­¡ªÍ7:oJ¼iãÊÀfŽŒ¬bMeih(¿þT{¦i%xˆâÜ×1o‹õb]æ(ã\ŠM¤üýc*"AíÇ0u‘O¿(® {ÜC¢¹´e‹þÑž5tŒò¼âÔ¸þ NI[óÆqÊjW7ÙÉÛ¾ÎÍ¡”ª»ÉPù p§96‘üå÷,Ç;ªt›øµt›èàIE8ÖWËÎã-O3CSÞk1W÷Ï`)ÇíªÕV†;å™#\Ù(x2nÓàF¦'¿dÝ%Ÿè5­YænŸ°Êj
+¸Ÿå7ÐðRT{ýÁ(Ìž½-Ì’ç!&ÕùF÷jJßŽéÈ­´¸«•CÇÈØ?i6‰Ñ=´u2&Ëòoç¦ºÌãŠvÊP†­zOË=òãÊ§ivæyb,Â´ü½Ù°2Kk„ÔíŽÄ_iãé'Ñä´‡ÁÚJ5v²%Œv1Ÿw1õ\·C\?mõw¢ñgÊláã,ÿèý(P	ƒgéx<›HjF8»DçÛgPºèÙ›‚9Ä&B;Ó×›àÙ¡ÜL_Ò,¬R¦k®0PÝÛ²¬Rü¶&lÞ·pM¡ ·_Ñ#Ä»eÎŒ4ÌSYžx¶“ÜÝ½aLžù©u»Ç¥™àbØÆ¬|£)ÓÇÔÚm¼Bó€/-n„ŽØS×Ê`ãÂË“TÍ?:ÎŸi¤ÿvùH5œ/)c¿'–÷&œ¾±So>³¯SÁîò%ó»°Jô[2ºðö3:4²Çäca_äv{Íd<&©„<“`Tø¬¢îÁ»
+n57ˆ‹óËuh˜½6{Oñ9/ØÓû /iQ2ŽA˜+*ëÖ”i¹aÂ_‚ÿù¯ÿ†ž );ŸïxiiL¥%Tb£T|W·¹ñ,KaàxxnYQœ¿“ÆQù37z–?ƒa‡éÖÊ°Ã'ZAi4©ÊsäT—+õJ~3êc÷K‡n‰Û¨ßSe7»¼Ãol9Nõ‚Î·ÑPüÍÐÇÃ+ü1O«â ›­è¡4—Øö3ô¸„ùùdôŽ‘ïíY­¿Â-ä$N¢à Å>¦/Ù×ê™õ`ØÓtƒ÷ ÿÏééªýo£³ªCüi¨ÑY
+^µêÖ¿]ÁnÁ:	³áY˜Eª1j]•ÅI³?R¬åÿ·ü+[Çƒû`ë°!¬ØÃ­¯gwP–7çh.ï¸>•7BÎÇ	\{™fcGBžÒÁ®šNÚT'_aóýÀ~ºo“«ÒA¦tÆïÍÕ%@¤tmúÏÍ•1p˜žÑµ¿7W>¬teÚ¯ÍU©wº:«DS•T~¸FÕ w)Ÿƒ3*õ¬ûtä,õzÁRý¹ /°.AÐ~£/©ÆòÞ4‹¾Bqø«àëGpc>à¼Z£c ±_4i.#™ÌØêÝ9]»sºé¬h‹8£³WÉãþH~*êÔOK_-Xûãˆiµu<M' ¡†ÜÇx˜Â§UW8Ë„éÆ‹e©Có)¢aºŒ‡û6¢©u®X›:P^8Ð3&'û2ƒWÚ Õ¼ëc´ÕÄ+*#Ðî–n]Z"êª³FYK²•CÐgÀáŽ­hÂ‰ÃjxVZ`3ÉéÊaŒ•p‰úHºÌ&·j EÎ‰àÕó`38ŠOZaÚ6:»­¤ÈÜp[š	46•Ëv Øm	?AÏä«!5¼m·0ÎgWl¹È„âè›ˆþv5ÔIJ6õR¤| ~mgõÃ³U6P{yŒ=~LÐúÌ¨ÕÒQvé
+ÉÑBúkäÄÎôsö ¦ì3w…7„¯ã„¤\Ë*MÕVÿ¾ŽÃ¤–‚@"Ô‚ê
+6{eöžô‰»êk—E¡É\ó­ÙË[°4ºtN!fBÉHX¡‡¾eÕ§ÙÁk6ê ¿óFGÙºø2â „güÃqéç:éÅ¹H_<V—8ÍØÀð,œ0ÎÎv³éŒ)]«§˜ˆ&ð¯^~¹<tŸ;¦µìÝ]{÷öõ«·/x7Þ½|É?;Ï^nÅ¼OÏX}7T¦ÐKœZ}d‡^*YXÝxÿîï/>¼x¼û+ïÿ¼ûýã“ßL".¯'D—ø FÉR™ ^ÀÔ%!ÛåÁÑlÌÅ¦×q^´Ñ0vA³‘$—Àçi‚kˆÛæ°$ŸÜv*"S£Ø¾Z†›¿šœd¡0iÍ˜Òö&œâ~nK³8ÒR67wkïì}âõ”í;zÈÆmYÆ+'¶Gn]n> `ÍE„ÍU‚öÛXH÷qä©%oÏ²p*%"®Oö
+Ð³áL1!C
+XÜ_b(ã‡ë˜óì'ÃçÐ‘Q’œg²Òz0Ÿ—Ò!“˜xÄuXQB¨h¾H|Ü T~û¤RCDŠâBü•Óù3~"ƒ¹qXcQø½nþ`äm”¸>ÚFN©¾GÂÈ©ÿ©ú5lÂ(Qëg†Mïu iã#i½ÀõQtý¤ô{$èDÌúwHÏÏS8Dù%xÎg—E©[;v¶ˆ{·që‡Ømk¿_i×NÚ¿GÊæ€YâÌ¥¢ïÛJÌçŽ(ý> `Ó§£a£ÄõQ1â|ò=Ò18°…}÷LRÁm§æÒ5'ß|2û†Ñ´å»cQõýTm{atm•¹>ÊF]—¾GÚ.—Ì&q1/]{Ý^´»·¼V¬'Ãaå$ÛäË
+ëNa¨k¬]¦_¬Èêt}¨öÝÜ;`ßFgå@.Òwcš¤çA@&2èzÆ&œ1 „*8Îâá)À›9‚(œÀ±ÄYÌ˜€LVGKO¨c¢ÕÛ†½Á<6¾T8nŒÎæA¨¯Ïi‰åÁY­¨ ¶4Q|)7½ñRµp“Qÿ´èøµoaòŸÂœcÏJè>uÎ¾Äu'#õC³7’• Ày‚oë^1l_c{5?/<)G}í{ã75xM‚¿äOäØ¬IüJÛËP÷›”‘„÷$èl˜O¥¿ÈÀã7œœAx²µNã—Q1õV7ÕXoŠd­¥Ø:á£9ŽŠQ:„ãß?®âþÁÇéð|?øßGïÞBì£Ÿøäœô+7§’"ôéK,TwÖ„	È„ Ãþô‡aRþª¨ê§’öÔãŸ	§Pl/rú—Z9pÊ5/s×ò8;;ÇÓàÔWÕe0¿­e*g8EiÂ$¨,K³ÞÊKé­—Ê¶ËéXYX´mÑ{QÁNC<­:¯i?øù‚ýÒgBYžF—_|`k¬2—F äõƒ¡>zŸÌògq607zOÌo–Vf²„¨žÈES:9C<­§Q¶Ö0¨QÂªš'ôèá–3ôèÚ±£¨ ˜º¼ƒ4&Ré<ìŠmÅIi0çñ€Ñ xÙ~³bÆ>³‰§#HÎ–—æJé[;š/K<kë7[OFXóš…Ñ“ˆtŸõwž¥JzC´Ï'.[4$…Ã&ñÐ|7¤ß]¥¼+’óºf0ò˜ÿ®­ØÉÎ‚¦[sÞm1ë~Þ=†ë²åÌ9ä;Ž½¥C’È\Y:òVŽŒ+‡8)Ñ¼Wâ½KôÉížØÒ5ÑÑãt…d\KÜ–€A‰üZ36Êçàzô>°mdãÝ$9¯‹ñ·ž’+¿ÛBÆ^.¶WNÃ˜½îâö1==eûþKaT:—â„ù¨[`«Œã	“L‘„ÙˆÏ›í]ngk§Â0L'7-}€ã%…·[MPEs?JÝg"uã®’·ïƒ¼Ý‡}fR3¤y¯	ÀyPûêî†®vŒàÕ"upm“âí°jAyÒ¬Ê!Lí™ˆ¨5Ã©ïMXŒúlø{[ëÁƒ`#°V¤ËÃÉ6$”wžÛ n·ƒ	.D$âÖcG]É7K6¸B‡ƒ÷Z¿^ðè Ø"ëƒ´3 ì‡€$ÄõuÞwñõAå**nÜÛªt~qÇTúËR®\û¼A•Æúþ–™ìú×ªMukGkUÝ3ÛUw-»‚A?äVïe¯Ó;J–æç¨ŸÑ	¹Ÿ	FÌ8?R¡¡AÃ@äé8ê}ƒZ¿A 8$b­@l8.SÑË'P‰Ž8eüÂº´ñó…hóòKCŽ%\h¯ø8XF'á,)¸ï¹Œ"²•UÍ“³ò4Û˜¦1çŠÂÐ•2ÆË¶–÷ÝIW¼  ´fùü°3Æ‚Áï¼i‚Äì»3:	“m5".uù¨”uP­ã
+c "Ÿ*Ò…³©Ï—A”°¿¹«ðrzÃêðü xàó¦¦Ýuåu<ŽÁÌF`uýtÂÉ$eŠþpŒ™PLûfLD[‚E„å<õ©ëæ…ŸS ã°¤¹3¼6lëÁE³3¤Ã·òQn•¸üì5yÎß`‡ê¢™8\µ]úbÿå—`õþßÿu®î† >¶“ÐèÝ°àÁO¹sßI}e|J©ÖV®îúÖ}¯¶uÓ~ï·Mîk÷nwB¿¼…¾.”s£$> °HqÏ‚k—õXîd=|v®SÐ³€ân˜”wo‰RÞ½2îææ‹xÖ,yËwâ¹#ÜUÝ¹Å’iºìJÀ¡¡p3Eº½ÚÆLF}Ý6‰®Õ«Ý	tüòè:ÐÍ’çdüÛ"Å9s ®]šãÝ¹“çÐé¹NqÎê½aÒÜÞ¥¹=tzó…9sŽ¼e9þØåÊÞÜbINÄ?ÞIràuÑ€lþªP}?Þ­íÇt|èmäÚ½Û$Ç/oI®åÜ(QNEÇ.R–³†àÚ…9ÖŸ;QŸë”å¬<	7L˜Û]¢0·[¥ß|iÎš%oqN<wcä¹ª;·X t)Îý   ÿÿì}‰rÛH“æ« µ=¿¨Y‘’,[mkl+|þ­]_a¹{w¢£#" 	Ó Á!(Ë…"öYöÑöI¶².Ô‘u ¤$Ê&fâo,UYYYy|¹Rç`ö\MH™sÕÜUÎýe+EŽ^s(r!®Y*5.£a‘Jœöùw®Â5+›œ»Ôà´ÒT?”þÆÖÛòkoÚEënðÔÒhn‚˜{¬·Iè¦•ò–|’‰ÈDûV”‘ÕVšÄ#k7ö[Ý7=®í×­t9zEërÝ¸g©ô¹\JE§#7çÓé¬a@ô:Òæõ:˜úŸ¯Ø;Wj
+aw7ª]n–
+ªwœqnI½{tƒêÝ£¤Y~Ë¯âY3åPóØü5þO.…ªgtÔ½à­&9Á3þlþ¾iÐ1X¥8Æ#mm%Ÿ )­xÈjÌäà9mG~ß·!‚[ÝÀÆÎACé™„©[‘ b,ë€gËÏj9ôØc< ‚,Ew—º¯K9Š~…’þdõè+ŽáïUDÜZ]:køûn«?'à°¿?vpµzs€pûûj$¤ÕŸ4¶éÓêòúßì“ž{Ïµ§sýÂ¡öäúŠ…Ç‹D‹#KýmZ–Çd¹ïÓ¯þç›/ dyð­N²óöÍªó5°¾HOOH-?)Æ´X/Ò«kø0€ê~<ra—QtÁ6#éGî{©”:DÈ^P^ Ÿ>ðI˜ ÞQ<\nõA´‚»t7¬*0@Àø¯8rÈ1†è`•žKù¦/õ¾W¸7ð[™ÎU¬€Xˆq¬\’û$7Ö"¼}Âë‘×nùŒu`‰h¿HÆº@¥²ÝÍ59ñW€ÚŠ±¡UèDà$€wÕ)­zÑ[?b¸xD;Wõ¬Ñò6Y³(½an¨^‹çAt½é¨ŸëÆÂÕQ?×­ç—%Ó ÷)-(BÿÇši<u”~ÍWúõ"ñ4ùJ.l¶¼¤^6¹xÄ‡M®µé‚M†`6—ÖÌ)FØ'¶vGšå„uŽ5} Ï$k¼GnÖg)‘ýßÊ»ƒáüœfE5"ºnƒo…ˆÞ jª':E|J†ç5ù%©Ó“|v™ä_ÊéÞÂ¡Ã¨ƒ¡+:2Ÿm!ääÂ„Lr» ¡7ßdÑ‹@¡§5ù¾‚VutQ%Ï‚.v1mKkœq èo”N¼æ¦þÄ€c*£/\ãjœƒ`ð˜ŽÂÒÄ´âðêœg ÂÚhc-gÙš9Ýºµ²¸ñC¢±ÏÇ¼GŒ›h'Ò!w›!DalÆ?ô0;Ìª#zŠémP~ƒ)^GìÕøwèIòé7Ä}è¹A²$ú«¤l§z?£‰hüÀ„älHôú#~@›VÕž–Ñc-Âï@VÖ/Ó‚M…ÀøäŒðz2×B;)<ìrÖ2zèDèR‡Ï¿ Ìé2ÂÙ §Ž_~’3à4˜$½@šFÈÐg½šò9®©\Æ½GfÜ8 v(Oêß¶Ž±á"G÷•X<#ðÓ-eq£­6é¶0”D´Í!Ø\cÛP(ÞmðN®¬q…Ã1¿G™c,Ô·S†4¢¡¹¥ŒûõsyÆÿ:L#¶–šQtŽ‘hàÀý\´h±Ð]®ÿZòù¥:F¹1‘ÎäÞä9n„÷€.Ýžµ}ÄÓn·RÀÈÜÀ´‡àÉ&ZŒó‘*ô»\7¥N#¾ÀÙ@|ûu~8ž›ÉÎ6jsdÈM™:ßF‡Å9^ØŽ7×~g-žåØì(Yq;›k›ã·#÷8h­opS`–ihƒ³—&²»A£àÖœ½Äû±©Í¡ƒøŠº=ºæîm…«ë‰°®"òˆÍD‘¥ zÑ/··Á”&1Ãö•_È{Û´²£€÷,v}¦\
+KsJô‡[PÌ¦SÍÜŽwOe
+º¸DÈ]W–$‡…¶qÐdª5Á|*%ÒT›à!Ugâë
+½©-Á…kLl:–¯TäŠïéõÛXÚ¦K`œøÎŠß_Ý„êŽÜòZwÜ…(ì2]+ä¶°=~*Ó9«W¼ƒÊ–³*jÔ&#Ý"B¯z©}PìÕNžiÍ)¸VéF€©’Hœ¨&lS¾êƒùüòœH^ê
+õ†ƒúA9Hv–õiäñBAkêxb ÎØOW¨gt'Õ¬vg( ³M(gÌYL¾xÈ’¯ åyÔfÙŒÖlI(z6áå¨C×,:"g†šOuÄ:Ôlgô +c	Ø˜ÀVFExŸñž ;Òx?§ïÁù×&ØÏ­ÃÁ$½,«4s„ñÑ·ñÃt¯Óinƒ¬zyGšª:"
+ãóÒaTÖŽèÓ¼®Ê¯y£àè¦x¦vžü‹ú×"Ëò1H£Ñ'p®×”¹WVTÏ'oØ–Áâ&QLø´"¯Ä"çUbÅŸ7yÅy¨MÜ•O!}…sâ“½ÆªøÉŽª`æ°÷pÕBH8ô‡„ø‘ôÕ/Á´’’ÕÃ¢
+hH–kÞZ¦¸½
+E¡yãùŒØ±7ðø€»Ìõñ‹‹ C¢ÄìÈ½ÑrG­xK½‚ùH–zuÄÜ@œ
+ÿ„«ü^(‘Á@hŒT±µUyGÑµ¤>«.^•U³xvE–ÇeªÅé1ÂçdÒ§‚ñ!áÎ	ù_\ÏßIþ‹èëfÉÐ¢þx1&-È6bª¥È™Ú±ÏÂeÖeCš¨¥Ú0M[=n<&¬òX-@>Þ0öUƒ]šÅÀolíl'ÔBKCkÁ‘^MkL™RdA{¨¹* Þ!`=é±ÏÛLæ¯JDŸöl°7`/‡÷ìêÓçŠOÃ8ÿåŽ™ì7¡X|U¤¨rež¦]˜‹Úh>½±-çYÚÉ_vò:‡ñçAMúŒœ/7Ðã&¤HiaöNý‚ÎJÃôF€3?`åp#yqÈ}'ž.+ÃP>d©¨HúÇç|Dæ?Ã¶t‹Â(-®€º5åïôG±Š?—Ek1¨“+tÖd"$6ÆäË4­Ï,@ˆ[$ëeò³\‘}ëï ½šæAƒr±•ÃM&<Ï®Z%o[SjeJE|r‰|©•þôÇŒ´Ô¯à›=Iy8W¨©ùÀT»‰hWª^†¢]©h-ã;èPžØXužÕaÏ¡Ô<¡jÎ×¢ÒÀª;Ñw=WLló‹õ[4×“+û0‘1´‘aˆÁèE·a|JqÁm„×UãÃÑìèkÏ¹Å<z³tv^»QbK+3¤‹<+Î]®z¢‡‹9¯Gvxã—Y¥ RôM¥ãààú“s²I*ßêMözÞŒ†®è±}í9¾qv|éïw¾ Î)pÌÝ³Ì¦5~šVD­É[0L˜1l•¨æo;@&Úö×A>²-HsB&Ö3‡ãTkÝ~®–oª¸Å’FÄ/t¢t‹(<f-àMKÁmì£,¬î°–oŒÁM<Ï _ù¢Œh¼ƒµ*¸Ù›<E"9š»B:>l½X¿n7èK8Ìðœ%//»NÃi>û­Î)¢ØËËC{CÙ+^^Ò8K÷ÏR©bé‚mwyÆòã¸ëXºçã˜r¢ó‘]¹iR¯ÉMç@ol’S÷§Éú†kÏ§w?”ïÈÁ¯ÅIq³ÌIœ‰÷¸8TosïÙTÛ2«:Nq«?¡³mNÎ®\rr*ûð™®¸õç÷)ù%1--z„“fÁô¿ÆcIkî_%þS²í96Øó†:DSŠçHyJFbÆáÐ<….R±ƒ»bdØœFcREÆ5XÖbªÁÂ ›D ^ã!ðØ‘aßv DIÀgþÅ˜!ùo?Sjœa9”ô9Ð—ÚÐPþ¯G1cªPøP%bVÉèþGF7ÚßÜjlLˆˆò’°+Ý £Y1k²núRPO Õ¨¥'ð“ÖßIÒzD¢¬íQÎÇÃB‹ŒÌk§ó¬…Ü•Ï^\^pWƒLºI^R¨¹d’Î€jd‹,™ñøI¾ön7Þ²ÚÎ‘OfƒÆ.ŽÍ”x< Ûb­1©QIt€9Óê!²UO˜çbáÃ¢òæõ¯·¨º¯iðQræf’å}|ÄoN NÂ«d‰ï$Ò•ª;Ž¯ZÂÅJÛ<r§m"Û5š«°gàƒV‘Þ `«]Î·öæ«…&Áln®çº!?L\Ò ¥†òfœ“m\™EMÿ9;+êÆIC—OÈè?ÝšDè±@a+ìå:Xž<3¬°Ì"™¦°Né#r¹ò.¢­è|_¼[©Ë
++!¤ß²aK`òÝÇ© &–	Rb@‰„“ðñÇr¤ÙvÂ”pesÞžÄ
+MÂ¼VhâîB$ú²@JÜ¬$§éËŽ$ñ½âHx¶%öZ¾³-j„s‘,ÇžÖ:M5ºØˆh¿º*+ÀˆÛŒ¸wp+°ˆäãùXÄ
+,b9À"¸ïôU5ëƒo´+°ˆ¹À"¤ú¹B‹X¡EØ/w~´ˆ˜bPºŸž.ÛFÄ'þ¹’þâ "”šOÝô…%A–h‹+³€ÝÀ›ˆA›0ü£í°&ŠZæTÏ*¿ÀÐ4EWÂ×ƒú—èx_Ø
+uáº`U?d@Å¢k4y0.ðTwî©«¸Ž¹Øñú:Þ
+;ÑÜã.‰¶Èù÷M¿_$ ëù¯fÅó¹¤,2½Dî£oÆ8J)—ƒõ†e×»óŽ©¿Xk%2¿WËíµ*eåúÛc²{ÍyUKg%ì&¾J!Q+y›“ù
+Å#²¶´ŽØƒv†ŽA¹ÖxŽµkf“ê<ìY•³È£ìA8êA5»''ä^o[cr~'òús>$SBþñ)%*lüJCñI×îðHŠ6y4frï[Ifï'¾^ü™4‘”ìïQ¶ß´:ëÿñøÑ×³?“I;–:)«‹þU¤)~·	öi‚#iê8ùfžymdbkÌvÕÃ;¦¼MÓ2†Ô­"‚®ù„P³]z¡$1°_hõQ²S®ÿÒ/[ËZ²: =VÓL·Z !bµ”‘ÖC^îLjÆëžÙ/7<dð g\ªÔìÝô<”™I[¢Oëà+ŽÏ¯XŸå%ßïžo9Ðÿ&Jäé2gËX„kÏ|Ò% $¿‘ÊÓÑoÓ²y¹éƒÞÂbd=³½ƒ³‡ýdíl6›Ôû[[Ãj4‚tÌéÕ”èÁiU–9QÀêùqëtöµÿµÈòªîŸÿÎg[u
+á‡[/‹Ó—äÆËóñør0š<\ÃÇúàŸ&ÈÊõÌ÷ïðJ6<Ø“Ø `í€½µ±À^9OÔ¼¸=!MÌ ýá°«¸­HÃ
+¤ìÊ†$˜æeJùÓ'˜±‰ˆwP-BÙ "ÇøH1s8ˆ­Ýíÿ¡{âºYËõ4vëKBž–§z¶ËŠð”KBÎ…ÿ ¸mÒO=Öê§:È¥ŽPiØö 6ñìÒ&TJ%­Å»Šä…3ûÅS½Û°­|ÙÕpì3¯¯JÏ½“Ë>w[°˜Êj\¹<"vÍí”O)~ÉèP	H÷ödƒÖìÁöˆD¡‚fØè‰Ê3"üÕeoë½Ïr…Ñ¼þBn(ë"Þ79þÔž§[gœ¿Ùq°QYjr¾<<yøz?¹r±Sþzõâ}ÿg‹o©Ñ8ùÿçÿ&;Û·'	“ÔDC…[VkêÚ9HÚ¸û•Çåð'Ãÿ>-ÆÉ¯çÇÎáGâzÅñÅéÙÕYh¢0{âòÁíÉ×x¼“n„4qE ¥‰+€˜&®e‚åW´ç .,1™ßþ9FeeG|¦bÚŠùf²ÎV¤K\èÁ+„R—/‡Ða§‡Ë'ãÚõÉ§œx[²Å’²æâAýÄuK<È ú¾7.l÷&³agø·æ-ÿA¾äù~¿k9YÆ*ð0Y;¿bBlíaŒ–`RpR£ŠÆË*»Lþ	AÑ±'5²÷Ù4;Iyº¯üùÀ²<Šqÿ¬¿­Ÿ,Qí{—ŸÌ’WUy>ï'prß¹„Ú ’z8…Sá? âz•LÒq^¢äÛ@•@
+¿$úéwÒß£ºÍ^Cþe2…æ=åd—ÚC—>¦=R¬o2Æd5âÄqò¦ùÉ³+úaòÏù‰f”gð´ž@Ð†v\WsøÌ—VjÛÞ“01†@œ»¹¦ç=]ëŸ\WçÓ!³@œ7B¹¾Ûž	òÌÀKÂä?ÿÕßuÆèÈoÛú…évE$šfËÐ’©™6C`¦lJ^u\žO‰hñ*JCGÎ3B`ŠÀò]snœæô0˜è vü\8¼$\ûÐòón,(F‚÷GÏÃÁìä©âóð†Þ]Éo[wøû›ä××ÉÛ7o^ÓSæ§w/þýå‹Wÿs?ùüæÕÇÏ¯?üÓ{àt£0¸¥§B2)ˆÏjË¶}8†Xö>dBHó(kúÏ€4KV¸§!m2Œ¾öõthµ×¼‹¾‡£™›²7]V\ôTÇÿâhË^È”kÓËùÀûoI7\œ@ïüßâòT2Ò•àSW=aÆ	ÍZð4)«jâù™êžßÁø[Ž!€ÌÙÊ¹@}Á¼Î­X—ß¨•ÿ©º%'°IÓEÌônlœ ÊWONŒ@©ØÙëf`®t_0]îÚ¢Ò4]2+éîÁÚsnUm`Ïv½/°P^•Rd¦3'Û·: œó©Ì©À¬NOË<a$‰í¨|ÉIîe%§•‡ýè1þ’5à‘„é=I~;lÀx;lÓÇÑDGÍN-j34;¶iÃ×xS2ã0ã®Ü--çŽT“tXÌÀžK5™>SòÅ]j>mô|~;ÉÎ§)½±‹8Ð•Ïv¡i5»dÃ†dAEï‚ðßÏ_Ž>%¯‹)dõ0M‘nˆ/¦Ã3øù%ùP¢˜	•·ó¦ˆZ÷ðYmçá}„M!âÄW¼öëüèmkNŠy!ùEÁ®:jžHÉÆÖç~=LË¼ÿä‘ÿÕòÈ7“;ÍæÛz’d;ÏÖšæ¾wùEÌ•±m>}_u‘µã0	ð·ïÓo¾&¯€=ÂÃj„Z®=ù¬ÁüE1,ÍT‰h©ÙfÜ':´šæFÓÒà<ÂN&ÀŒ\ÙÞe[gHU³n?ªÍÉ³˜íÂ¾âga?WèP~2Íë³WðP2š’ÑçšzÊœW€ë3ób“}8ÈÏ<\Ú5	Íç…õ=”h§C0T0\|·µ…ögˆfÕÙ^p°§µ
+ž×Û{Þ¥×}rìucj›ç£,3KÌ@¡dž¾ÆrRœò­Û¯ßE‚Õ¶6ÝõŒ!-ÒÏ!ªH®ºf›Ì5ådMÔW_~O^}üðáÍ«/‡?qÓã!:ã¼v€Â	@bœÞ’XÀÂç˜¹»ƒ«<ÎŠÐwtí9g
+©3üõ­(Ð*¡©éÌi@èÉÒ²?wôÙÖ’™
+ö‘eðËH¸l$*y™§ã% 	õ–ìÅÀÑØòšGïÖªaÈž0K§ä¬É¦ãxæÕ}à’[|ì¡8Î…_È¦ô‹¦R‹†é*èèqXè–Íç3E6Cv¬]q¼0ÊÔ¼7"€Y¡g¹úÊãÛšÿ;:©`RS+× Ì$˜sMS%ü†Oú¶»Ñœªq¡l”)>•‡°,áçÐxsu ž[>…Ãçúÿ¸¬†ãaTtCxB±í4ívíùá'(ŠIfÝ'í¤	Iî5uo¦6 1@Å„¿—FŸí<øe°Mþoð¹ýtäêr÷§Š¬ÕUæ)Qq#£=÷Â@?ÞþÎGÀù!rë–øœ¿V-äñ2?ÀAõæšGi–e1©‹Úv¥áèdÔ”:Ó±5çdø½YqÈ–b£ œc©àÏîí¶QjÇI’wöC(ø·ùi •x,¿aÛïý^îQÕ«œTÍ5ãžWl7­àö¸òVÍÌÌ/<?9-Q/²¯éxSÈPKJ½Ÿ¼'R.™åFPIX$^QZ5`	Wôgê¶Ùzq¢IIP+èêsF½êw.ÊÃÅÕäl!êër•Ã“ß2·'„æ›[.FéVg–š¥ÚNn
+`ljÿ=¯ãæõCõ#ÍhË-¤ûŒÞÂ~1ÏŒÌï¾»9Œ)íç¢Ú_EÉÒjüy~—lêi’°û²bbŠÿÅ¶sôÐšj–%³}À{7Öï¢«Æx˜¿K»L`¨ÑwËéÚè/žÙËPA;O¾kÁ¨¡¥"¿Àyá3Dt)aødÌª%K’­?Â¾¯Cþ#$Ÿ˜†“ÍÑ©	ú³GÇQ~ò¹¼ÙSÌ™Ý!ÅšE\";¡š`Íõk€
+—Ê´9™ÄíUJÅ^3ÕLHÔCìùð+y¼¦X5®˜I¯W=t6>N«²¤Ìü…þ/ÍnÑà¡¸fÖÈdê‘mø'Rƒ‘¯’¥ƒå£€	ó<vZfi}&žü²ý²ùÍenÅ³¨»p4ðCü@FÂ†y(8¸[ò8'NAwr"~!ô˜ÅYÂa¾NÊjH•²¤Y9%æ«Ì…Û*š›Ï…2;H&
+”î|Êd²Ò7Õ×F¢v'›§³³<Í\’œÛ­¶bb¡%](6½E¼ŽÝ±†ÂÔPŽb+ùRÕæí”žgg]ºcM£ž™y…VÈ÷EÚÈ‡^ÈÀ‡&ÐUšC‘í_¶É«ž9£BËŸ6“"û‘ü—mÄC¿À’r`èP&q0fs”»"Šç6£5e5äKÔ¼º`º‹¸Öì”Q=PdëÑv ÕE\ŽÁaé_Ž4˜ö".?òGs=eÖòˆz0´ÿÐ(³è¾l»×¯+Sín˜ŒF“€ ªöÚû÷ï“,ÛL~ýu4Ú¯ëµ`B~TÈšçsU‘±µø|¢€xF gâûoþ»ƒ¡ijÓY@òÉ–k"ynF•(2b¡£FïQ!rêÕ. M½”äúOu…â’1tM0{¤WŒ(t†ÚÛaù?i1|mÆ°Åº‰ŽÆ·7ÄVoáÑz´dì˜%ÁÆYiƒUGå†[H•pˆž~}—+YX
+KmCO+àóJË|:ëýu8&*S
+q›ìØ•'K{«‰"°¶ÕÅ˜B½Ã±ëç+›éõ¤,f½õ­õÁ¤šô¨ÝrÜ íqòõR–eïªÓ7ãÙô²·Æ£I_P@âµÍDLFX’Vˆ“¢$ÌU1¡4³S"€‡ ï0 ¼–Ä{Phì‹K€×â3xV!™ÓÉI ùª•€ëF¥€í¤,v	*¬PÞ–<ØÚJ~¥Aì|%D™à äîKâ3#@÷ÃöD1¼*3ØTL±|ÃˆVöÅªí¤ üÃvZ•x¥8Ùï'C8V«_5•‚–‚í#JGë7£Õ¼´lÏÇrØî=Þ"1ØÅJé`úéF,xÌåßŽŽè¦™%“œœãÆ`½ëFÙ–èf$ò#’tF6£È“¯ròKN¦Õh‰·1”vó›†Øvó[ØÃvF¸‚g×)²^†H¯Az‹Z¤»šÑ]Õ–ÚA¢·‘›Ú€\oô”×k°¿i¨å„¨­lÉüH¡*²¹³ÐœCš5Ä¥T?»¬ððÍGuÕPGÂ‰û!p>LWpX(,ëÁˆ@ .Øk”^¥kJ6pk"N\Wù,ÕLÅŸn\Mçy!5ç©/Ý
+¸Õ-gïš}Èzs|‚b¯.?§´Wõ°Jg0UDÕØ«„HIKÔV(ºüìJ0¦É…*ËÝ5*àÁXß…T*÷Høfm?±J²†¼Z„Zñæú§ýfV âh„]ž² o»øB(šF¯t 9\©v-ï);b8(Íè×¼Îëá´˜À4˜¯eh!d¦hî¤fUjrQu=@ép¼MüÌ&CýÅîŸnßÞò?¤)-ÿc¢U‘â+²#Ûñr?Röè	W)Ðâ¤u:OÓ#ŒšÕÐC¶‘¤5Ó	CÌVeYÿ]Z]‚—	8›£òc°ÚÃ­B'o$œžØ¹Ý~‘°+I8°[u`ª"©Ö>ªÆë ¹¦§ÂP¤5Qbƒ|ñº8Àæ}¬ûØºmÎ%ˆEs	Y‚W©úr9ñ$Xxbg“a:)fiI6¾µçÈ`ÏHÇ®¸WÇí+L‚8€L(ÚG)ßu®Y·Ül¨–1Ë,œð¸¼³ŸU¶À9\¢|²û<wñùcçÎ“7&çsS‰â³ÇîóøGfüw|{·‰ý]2ûõ^°ä~ÒAƒ‚±UË«Ž·$ÀÝSˆöï‘qb“;%Ti#¦â-Ú¤RÝ›%
+FåMaãåKšÂÛ·Ê\ún—8?#»s=Í¾+–n‘Øž«có=µL	ôxÇì»Ö.€<mÝšÇO¦8Ê^WÕ4ÎG-ýî1½ÅÊ3öãyÆ€:8Åà1æåÈÈ¿ËV^°¥÷‚Åðê [B®Xy¼V¯V¯w€½6¯Ãx[9AÂŸ7ëæ’º²>æêjèY¸—‹ª#A´Â=\\føœ[Ð„ûµ@®èýÞšá.-þVÒ<À“–;‹¾|åÉ
+ªú°&nÏ¥ñ–æ@`Ä<[÷$û··Á7"O)6Ï¾Î5„_ººM‡ÜÁ×žÿ6.#zŸß%v÷œC¥Ã‚Ý]”+`9C¿T¾Ò,õ¢rðb]†w?`q6ôö&\ŸítÓ¶qóûÆŽòC«1æ<FqÙA¬=œOÖÁ|¶pÞËÜfðnŽg±»¯|ÎØeŒÒÊÝ|?ÝÍbúî½§yÎ›Ë1ë7êïSºº¬¿+—ÀB½\ÆPù¼ VÓ•o«#ÓºÝZx‹ïŠ}íÑÂ†,†¿c?ûÜXï(Tf”‹6õ;²Œ&+OÖçÉ¢,ÐÁ•EŸc^‹þp[èœ¶òf-½7+Š/PwÖrrÆÊ£µòhµóh_Ÿ—Çs»µhOŠIˆþ}gù[
+5÷j1í$èÖ¢Íp¿–>ÇmÃ=[TÂèv»Þ\è/–ëÊ˜‹÷€q[¸·º;¸æpqµ?ÜEÂÖ"}\V_1I[Œ§ð„-f$zØ*]Ëdx¬ëcÚáÇ“Gmµ¶°Ë1×/©Â>Uõóô±ûš–ç¹r`‹û`p,ßõŽßJh³}ý/íÇmI‡2*í ‹ùÔày<+M±®•fúæò­ˆncÐžaàœý’ÌØkfW†\¥§|7Å±ú¯ÌÍÉYÕÜášébÎ¹{÷LW¿=`Ëè£ñZßB?.Él¶)8·°¹\"‡Í÷0‡mJÌužCO¨×MS8·).·ð¢öK>cñå:9äBCÝeö¯m÷dMÄ‘‹ò:˜cæó8Øm[Ö»ÜÎ6/#»]hŽ&ß!K·ð¤µåêXgšãÖ…â¼®6ì>²wÜ.’¢Øc£|kÐˆ?àt®™mVÞµÇ»†XrZåÓïv£F—UÓÔ|Òë:GëÍ¦ç.×	ÂàÉ•niýp±4Íÿóœôâ|vÖKëËñ0	¡¦ÏÈ
+ðáƒ§i1KÒIñ6ŸÏzmq¶˜·ÿuÀuÿÃìÙÏW:±ƒ"»þk3¹JFùì¬ÊÈŽñé·/ëD2û €	{òÇëÅ\ßËû†D^ç`â½º¹_“Q4qëõ~îÖ+[E¶ÄA}N1³{kb¿ 8ÙDAâ?€íùrÍÓÑu2LÉ¸&½|:åßâ›ð|Te> ­«ioí-sôÌ*þ^q[ÛLH‹úY?¹ú¤É`D>%=õn»N{®‰^¹oWîÛÛsß¦—9ùÌ®¾[]¤(&g~çÖÝ·Aóßê¸ü¤Às?¬°iVþZHiÓÊo	lµé<É<¯¹Íà®\´‹´ú’Êè«ÊÓælÙ0À˜%q&7¦‰òêýtx.fÄ3öÀßc'Ó¯¬Öp8x j”ë8ÿD3rƒ¢æØî	Å½ÀÚx\e/êâ¸¼QÔ’sÀBLäÍô[Fò÷§i5éYs¿™¬KÃøúÝp¢ÚBÏë7ds$ûHFì%w=!sYÔãÖ#ª^˜S72BÓïiÉ‚ÅB“ôqìŽ6eœ­â}nEšìýÏ…NÍpñÞLÓªx›°¡ú_$Î‡‘/‹ ÝWWG7—š×wÅÞôgt”:º#BôØïYþ,ÊýqG"H÷˜¬·š\¨“ÖQrQgÌ}•]Äß¾ôZ*•â¡ú_äL]]Ä;¨X{¯JirÜS·@À%àq,‹)èP3tØÜáÖcgÚ{ˆeç\Ðãká§‰Ü\†M×Z ÑÎ!ÜŒ{³¿XGÐ‚§ÍÂZ†‰Ž7Ú;fº£±~e‹W¸{[<c­C2ÄsçR±®{<»qgÙT*=O§â~0ŸŠ´Ã³©¤ð¥S±FÜŽÏD…nÆ¿€W_ØOÌŒ*sF.ð”*JãÊZ¿0Ü@ä4GV•Ár-Ñ“[Åô#b´´Å\X-àåà'ØÓo›ŸLÙr0(jJG.jñh¦ÀC`èt¡ì¢Xÿéfzk¬²¤Ü3ožZÐcÊžyÖ”.b3Ö+eMösÿrÖàþúo7i­™ìUÖÚ½ÏZk&s•¶¶Œikqö|Oú›àMKR¯Øî,­Yshòów˜ï³à6kÐ|‰>HãUÛÜÌìÎbsµùÙzñiløàÅ±÷•È†¹_„ÓÔ”&íÜ€¿lƒ0¿Îú<Ùþzö'säÁÿ€µ-+ÏIY]ôÏX¸Q˜W1¦˜;OÈfÔç¶ãwi«ÇDÍZ€Óq:÷NÇ·ïtÜÙN.àT£;t<ÚÚ‰ê’záÉI"<Å~~KfH¥Š¶Ÿè}šŸ6ÑG³Æ˜îxV1·S¹ºŽwTÔŸ¦ÅW2´ûÉO?Éß\~†ºAp´G–¿âÏ
+øn&· îãˆÈG2XŸÒË²J3cÐš~Çöö>ýÿõ¤W,åÆ–CÈz¾>{Âe†¡Ò˜%šm;ø{©çg)ü½î…w£>_gÚ^÷•çŽò±2ú^¨	}ìƒ´Iç39ºU:Ÿ 5Mã3øR¸‘ŠÌ=ëM®Ì=ëâ‹LKÖ[áÎÕû	÷‹G§éiiuoà?ì5dýsA—Sg/WËÝ¾ÑÁßÞj¥YþöG·èoŸ¼1Ÿ»kçö¹ƒB§¦Fr/Îˆ6âTŒŽã4¤„ºòÅ‚Oÿá¶¡–ýÇy=+N.¹Öcª:Ñ	Wh ;E”ìd §˜áßdMôg#´$CÑüåRÃÌY5¦gÛTÒ(MŸÊôRŸ¿=2{Z 6ÿV†<PÔúÝj€XƒäåmÕætÇÁ”^LÓ‰Óq5Î±qAz„÷8ë1Jv¶½øI¡ô›Ò]rkò2!,¢Ì0ò«qÕŒösÇÐf×®“¢E7 )tA!?`×ü  ¸ËlK;0æ‡AÇRuo+œÏ†y†¹93ËõpQ€Lhˆ¿¶a<vSr\&ƒÃÃyˆx]Ôéqé>½#gÜ›ž%Óš^ÏÊ‚0ºòN
+«rµàÊíÁ#…/hX1ãRã'Ó­Úô%ìÅ[ùr`wö´å ýÒBN³¦œfwéQvŸ¾î¸<×Äôoõeô†þ.zKyýÛ|½	/Ú°ö8”óµqàÿ¤D~:?&êëfÛpxÇox¾ä!‹ÏØä|:)µAäwÔaä·ôä7•¡äwÌÁä·•yÃ-†ÄÜÃe{x'ÿ¥Í¼iã!ÿ „~ç}8F¶™=ëôê*6žêˆiN4ß¨RqKG%dHZqW]qË_qÿ1ªAÐÐèD NˆZÎEý‹ÔŽ	D$ÚÚ¤9è1{Qå`§1Â]öÓóY•Lú“ÉL‰¢ÛKÈË«²<N§`¨3Õ—B¸,×kk-Bó<Îgy>Æ•³‡.Î16´f§óÚ§å6÷ÇöàA>úÓ¥Ká’Ä.ÙÚvÑm*IÞ|#«êzG|G–ÝÙCLbÎvTBXGšÜŒ§e6l–fyš@44¬ÚÎFÒ*p4Ë'Ó 0f¦yï l€Ž[Õ’ä$e1»„ú¶ûÉ[å¯Á‹É¤$ã7tôôgáÕÎ— äž–EÍb÷j§p7[F°Ó
+y3´•ÇsX¿È²føýXa±ˆ<ŸÊóúU1ê?ŸžŒ¦ý}df¡&B°íÅíá"0 kÜR	ÒýLn:U9òõ¬’Ñ^£tÒëÕäæfRdß(O£›Þ«tš%ç—Ï® 1XÉô“ýÃðy^nþ[{Ž“|}–fDn×#¾@ùß#Í¤‘ÍNÈ¹d|+]!‚QQžxp4ö¼m·ùVN“î=ÿÙFÊ7dÛxè˜ô1‡ˆú‹–àvT^fHþ{²Ó¡0¨s_ãþEß¥‚ÄO¾sÉ>Ì£:¾ÈÁ·¯hƒ•EK„ÐEA©t¥¨ÂÖ~Æ.º‡ãò|_&¤â–µù¨û[5_˜mã¾xTúâeÿÜTœºW)h—iCúw{ºØs’(Öm'Š DbCoO<%i;QòæáÙqZ6ÔäüN{ŠÄ“’*Ñy'Ê(òmCRX(†¦¦êPSé©5,~¡!ËË‰¡GIÚQ²¥ÂñXGIÀ:K/>éËÖåkƒõ‹Œ˜FDJäâß¬ˆÖKÄ(ŒêlþaÍÍŸóŒ‚w§‰Ý2v“ÑŒ~™<~ãgÃc²1yOƒÆ—ZGÙÑ^[`= mÍÂ>Ï“mwà¹üª–6ÕˆgØë,Û\sÐ	Ìj’4öù—_sý/þÏð'“Àå]!1£Ây!
+ö¹Àxhc®Œ£ë$#.¦2ó#7áIkšnò4ueËøføQ¬ö^Rp›z]Y´²Q:D>b[S¯¹§ÝÖœóN¤|DS‘T~?¸„'ŽÁ¤WS]“³ÎÿTØ„ß¹C>ÔÂ),ì†9dÕmšøgKw™žãblmÓì"g*4OW¹ŸÏÙ4Íª‰w’‚S´¸Ð]ºgSüßÙÐm/W„ÝP\´tqiGÿ'ääÿD=øË³¶œJåŒ-%º®“y_7·ú³5!£&#ßÔG"åçÞ¸j‚Þ©”`!–Ìd0À“ˆs+¦.lŒb”—W[FBïvÍ²ë4Îñ'Ú²ÅsŸ¥§ð Ô×ž?ç#ÒU[FlÑWlØŸFfÐW\8 |¢?$ð©lÈZp#¨*¸IxvIþÕ `§8Ÿ ôXÝ×‰(hoExa­à4µ})|–°•­½z3±Þ½¯{~›+FLÏM€ä3,@’ìX:•ûIê/w _©Ë»žÖMDxH%•{-â*Õ«e)•_¼%¥©M!Nßtá“ÎÍÌ+ž±€ÍÅÈgoÚŠ3¹\ˆËñY[]`.Á¥¿—hFË/"„ù.8XÄ©¾hŒ÷hRˆå2BœÈõÈ4	?¨#$Šˆ„Ñq·…¿øéáø¤Š-S¡¸ü­¶ÄO'ŽH/$ÀÂ«D8à4/ÓoyÀípÁ)$ÚL0iÏÏN2ÊöMdž½`TÁ¤ÿÈã\s3Q lVú’ÚFOÎ–ÀYíL	Àp;1é·óx†l'žv¦ÇêusâÔå „KÌ±Œak¬þÒù]_WÓÕÔ0 p:°ûY7ÖjGx§•ŒƒË¬ÑyÆIùtðî¨¤6b×ÈœuìãXÒu„	 ëj9Ÿq-ÄnLË3·êÂÝ!C<÷Tä—6)ÔŽJH?ˆcÊbóGDA•lüÝÊÊ£|Šo•ôãå±Û•v|KyYPêß¹Ðù…¦zÜÛ8B(ªÍ#¤­8U†eè•¡£;–¡H´­©Õ¢B–IÈ™GÚ6Ù:¨p"gÜ]Ì f9…¨ÍŽ`½@ NwGT­ÑpV×€5Æ!œ›Ð2dÑ‰\ ·h\ððA ãNæ'¨Ìkµcj£íEà½ýT<oòon&÷‚CÙ´Z‹u¾L;²vlP)Ï:Z{þ:?)Æy’& ìu0ä~xž&:ì-GÚØ{HfXÿMØYä³³}Èü3ù£O¦V¶­g—e.~ùÇþ~ÿ"?þ» C!žýsŸAu8‘ä]Åó29›Ê·ÕôÙZ“=é×h¸Ó­öEmµ;®BƒGqü*íoá÷áüÛ`žYLÇÅ­Ãñä|FùëU5š€%õÙZur²–™>vÖ»&%á’32j9å|p:HÞ“Ýš|ñÑéº°ùš–çD€¦£Ã“ÛJ=\âörVsWƒ÷Ækæƒ¿65p|0K§DUÐ·’-Ù±•Á*50grÖßÙ‰<Ž¹Mƒ')@ÿDˆneÜö±Y¶~§O>²=ÏVF¸­Ot_6
+ÖÉÒ­›·E™!},víø¢ÖŽ6€þÅÃÞ|œ'g)±³¢Î„¬ÊkÂÜQK)s[K;­%ífµ˜æßƒà¼³tké5g,t!ÏòìŠ4Ùhðí‹Û‘ØHÎ.'0ˆðo×ò°€Žhç=eÕ8’(;¬— ´’¾‚6–g	5@	ÂO5ùn§jx^÷¿²J¡ûÏ¬eßlôjj–#Š®ªØÓ2ØÙþ¤þMÈ,ÆY1LgQô()Å˜¨†´D]‘FUAA¢Ö¦wqS?8Ö*KílJÑ–…%·÷:$§RY‚¯ÒwÖ"e™náó¸ÖÀeo2ä—ÌÌ·Å—8ØDØê`4‰~.2þÙÚrˆJ’í€ä’3,¤ž†À›bHÁx*Š™œ×ùÔò#*sóˆæY=€¨jÍ^æg9ÄíjÛ·lŽ#ú€”I¼ƒHÉ¤ÀÍñ1é³ZeŸóIžÎît)à	^iFƒØŸojµ±]?¯ˆ†áïJˆNST ûËòòF]3‚‘ËN>pOkl½ô|7˜)çmUÍtSŽ34R‡?&jñßl.™	RF/Ò_¶ž¨p0ÐÑè-ùœX”êJÆW5Ñ.À¥S²Šªc÷jjLmÛ~›hIw¼#s›L˜âG#ùÎˆŠ¹¥tÓõäkõp†} ¤IrØì	Ø&ä~Láh|¹ýâ×M÷»àî#¨t]•²@öÇú¦{šˆÑG2êhÆ"IÿÇÑÇƒšW!<ÚãÓ¼?äŠ9Åãy@\(£í†ð‚RØ¸š©Œ°‰~Ü‡ŠÖÀð!tqÆï±SOëøây-é¨, ÑÒjÂŽu¡L¸<Üï.)Œñ¦ïê°Ò±rQ•Ñdå²Z—’#ÑÖgEÓS–ÄiõuÀKë%-fY¯\U‘fB2Ì³þÊ_ÅY ƒuÐÀ•Óê‡²³Óù_y®ÔáíºŠVî«Õ²Bö¥•Kõœ»ÔÊ‘µrdýP&ö;vdÑ¥·òfu0¬#·riÝõvç.-Î7+¿VÄÍðò[9·VÎ-Æ‘ íà?|ÑN­$ëç€pgBÖÙ†Ó»2;l±Î.±¹œb‹q‹9cn×³Ô†]c‰	§âl×Á;æö9AQœ¯·ÁRœMÓ Ÿ`6wEW6+æa³À¡Îd3wGzºß~"“ç6³êðèãû^kF½5Xš®`4XMJŸÃõ®]®pánfþ½qnæ89ˆï–¾ª­ï¼‰)3òèR‡þOLÊQú5O˜~Tß¸O÷jë_2K‰$+--“ÝºnÑÆ™Ì( ßü	²Uq¼ãv@_Úi„¼;?.îøÂº¤Šº,XŠÅ:l×žÃûX!ážV;«Týmøf÷tßl”¿Ô@å±KB´0gËCéâÌÖ`£^{.Pm€µuž:Ÿ²Ý¯¬£xA¤£†žKöT±¡^c=Tãß¡y„#=êÇ7	‰áôª5“tZç‡ãídÓ.Kƒ[zÑc6ûä/ÓâôT_ùš1¸µ…7ÎÆ6f7fFÇLwbñIS¼õô
+
+=ÀwÔ¯idÃ»¢žè`Ç*DþÉÆûdF4e©
+7ãƒqÊÀó5úpÀ·§[ÊÇ¡³²¥M‹gâA¯XQga§Adq–}‰7PöØ°¹À‚9…‡Dn³ú7t|¯¥ŸÄíëçpFñZ|><ŠÓ‰±w3lÆöm7py–Pp±z
+ÉVò…zrnFtf·'¼@>iâëGUE´
+!½²#v‘‘IJ¼2é0;PæÒeIC®YdAóŽ‰¸[Û^1×‰A½»³2':LÌ¡oÍÓV”øñ|ƒÞÓWæÇóX¢QˆŠ9Yàç6sTQ17:v\þû±C§yú·¯‰³FÐ|ßÅ
+-ÏGÑ2Có}TZžz#ªÍ÷Q9ïfy>Œ;šï«h©£åù$^1i¾obå’îæ£ÜÂ\l7Ô+Úh@†»+.-³®êß5çÜibËÉEo#Ò<j)Æ©ª§–Zœ"Z±gkWš‹Þ$€ä!JòP%yh‘<œ—d½]ä äf(¹™Jnf‘›ÍKî«^]dç(Ù¹Jvn‘ÏK¶QÌ.V|Á%Jp©\Z—ólÖ»‹Î@òJò…Jò…EòE;’Í‚xêëØ;ˆ†dE—yöüCÅ%sÍÄ¶ö§°ÆñN ÃùÅÈ-¯UcÉ9þÿ  ÿÿì}Yo#I’æ_‰dU¨‘"©3UR
+yUWîV“Êê‚Ð$CbL“ND0%[@cßƒYìÃ^ÀX`ßöuOÿÝŸ°fæî~IeVõ(z¦RŒÃOsss³ÏÌ9ïñ&xþy·½cšm,§«;†	UeCc:árÍUÕuk@?e$’¬¼Ö"Õ
+„j0zU Xv"Àæ©ç<Ê4gÀØx"T•!ÅÐ/(ÌùTÐ!;kSãIyÜ+™î	‘ôqTÏÆ!…²Õ|±ž›+¾Pj2”ºŒ¤†2£’Úûiû·˜*
+ÿå¥b“óÎ…wD©•xMü›“P»¦±“pz²è¨?Åüð­æKyIÞªS²«Àbª	¦—×šIªÒ§œ«õ‘1ùÜ2`@µúF·Ú;J˜}±¦•JÛ³~›×¨n¹¯d^CŽôrzå˜nÈyÓWbäŒK–	Üjj,bÞ2ùµkÕ	ùf\°¢
+#ô¯kË}=)$q9Ù¼áªªëó-´u|ôg±fÞ‰ÅÅ!Œ±ÏŒ´ŸeÍ0hÀ=®¬à×K‰„”'YzþôÙÖbíÏHæDá a_y˜j²¼g«’VÖ]ëZ‹ï¢kôÅ²Ÿ'«Â¸W\ˆo?aŠÐqŽœ€5™0áŠò6®Dý:Äµô)ÐXÌÖ±Y–•XY‡5âÕK7dHTñ@‡ÎyVt´ššuç¸2´ÄŠwCgWQÝ_eþD‹Ÿku&«[hÜ­`>Mi‹°3u-¤`^v5ySªŠŽ©ŠÊ¡Ï|ô´–—Ë¤yØü1Ûž•bùCÁO4œ¬¶ÑáB§£2[$„OES¶&É¨
+›ùñç|7vr\ŸQ‚É_—±ñ!ô¢	ãƒb>üÓú©/ÿ*…âOôÔ ‘¢x¤‡×~:jOü›fgw”W9­æF•U¥Y~TXëum(ûšë~«¾¼æK]_LÍumBü/½ —\ÎË.f-¬ßHÍË¦¼=¯’ž–ò¶Äš¹ø¥ûTÚ÷CÎÜZæVó (Eo«•÷¾Ü –ìVEmß—'€ÖËæ_Mín	÷ ô÷J×ñ»`
+,~ñØ>'ÊŸ¼±n%ˆÂóQ
+-ûã¢{€ú?@ý þPÿâø<@ýÃö õ—¯¨ÿçUPÿìz€ú×éÚÔÿêÿ õ_g— þÊB þåëêÿ õwnîÔÿêO×Ôÿêÿ õ€ú?@ý†ØæŸrùêÿ õ€ú?@ý þPÿ¨ÿÔÿêÿ õ¯BýqÃ/ÞAšùe8 „0¶Ýÿðxð/Ím“€ÿ—é$À1ÅK8
+Tà×øÑäþ—¹¯A‚fÈå<5H•Š* Þ	–\¶nG”¡¿pì~u½<xÿË…ïÿY€÷u1üuàýÏÃ¿Ê‡zSîkñøÅ7´Püd]?GIÀÚ|² ò¹+€í>ÿñÞ§ë/ûcô0vŽàgf­É¼&šãZ1J³Ø,½unnyLà¶IÜ­ØY˜õ2¤i³Æ[’¤/08I{L¯Ò­á¬ÙâQ_©¹Ê:sÝÂåƒ@ÿÄœ)€£V!æêãZ
+âÐŸ¦'«Q”¤ŠD¶IøT”ir¥fùý$ÏaÒh'ÚŽàßQëÚxX>Ì²ƒÝt9QHG“ŸÐd&¦;­hVéQ%CÎ›Ê+Sqèý[ÕRSMº—t¾¹0Øÿö2¸eÜ:ïæiC_æd1ˆÆÆsàLLÿ-œ=2ê1îª4›åÎLúP’íØ©Ö±¼f¼õìæ~\òQêá÷
+ùûvªêM^[òbÔ«¨Yz&Ÿè[Ïs Ïœ2O>Œï{š$ÑôûyYršozŠæT•>ÉÄAáÃøÛMÒxr–ú˜5šNaÃÆì:rÍa~ƒ NÚÞ;Xž¯¤>¢í#¯\…SvUBš ¶B¤Caå©Òëy#ÒaFr%¦ì@}Œó¹[œq+ØÏë¹iaöbòâñ’AÇ}?ÆÚR‘4@¸Ã¶ÈŸþ6¦#8	¡}ŽB“ä-/ì_`×À±üñøÇçæ2ÃÐ4çÈœæ(§=B!½‹#x†8&¦â=£A_ÃÖÅE ,1Ú·ÊüiëE#&h˜Z¡1Îâ%s„pŠû/0)ÂôëYÎ½‘
+¿‹”ï´°Bj¥"e[ÿx2J-ö–0Ù>Ä•ÐBiÆ¯ 3•I/L½Jy9;“·,ä.»^Þ2Þ¦]ñ‡¼`J*/Ù æzÄ«ümêE‹fx†×öä>ÓŸ˜4M½§^…“+/‰'8Å|x5æýc<&ÒÀ“Ö; kL‡ £N7í¿±yçùã”Ó êÅË0NR¬»â¸Ñ8qé&êÿ=Ð"Pô£<ãÄsX,ííIcµÄ-å–õBgcâ“™_ðE¤½!	&a®ò_ÉLúPé-ÑxâÒÙãm¬®Fk„gäz¬Þ$EkÖRäKØ@àtCûŽ·ûJq‡]:ß#õÎì˜>¶rkN³%I¹xÚþ•÷[Ü…ŸÎf1iï<°r¯å!ÎûM\{ÍÎ7°sGí2fºõFð0ö ŒkìÏ’`¸åõö¾ÁÇxðÙ”¼”³Ê«;„
+uI×E•ÅÙ£Z
+ËdAGžWbgÃ9³÷E
+Í%ÈÏŸÃ“ïYÿPFkòì½o.È¦Ãx\4Ê¶4Œ:Ø¹ì]î):˜uI¦;!,t»žf¯mÌw'ÔNÔnˆ¶ÎÔ5þ§Àå3ÞÜSñf«½Fkd¤"vò#hB`\ÝØ¨ö,›Êœ[#¸H¢É©Š¯fì¾rz•Í¸‰ÉÇa/i¼.&¶_÷^Qe,R'Q¾Ö¹jÆÎšõUÖ`˜®¤«òÁ¤¯G!Ø×´'!f’þªÛíö{Ýå†g8éÔãû«õÙ=27ï‡è*ñ8‹ó¸æ£Ê±©:^/«n/£~¯¡<By\ä||÷v÷÷ö/+ã»›	²UnR´¶¢1U‹x1ÛTÙu‰f"?¾fÏ‰__%âUR¨^¿SRŒqÒ 	ãs¥’·5D,f×ICJ_dÕÃq4V:}LçšåW„‡­j8jÅ$uáåDaxY©¯/Oixñy}‚òoÛûõ’g©ºQl²5Ê8ñT1“s.Õþ8¼šž4‚é°QTGìí{’·Væœå(ô”¥'í¬Ð(r›(™w¼Á6P8âF!)à*ëŸ-_š•×Ñ0†væ§MZÔZ…µ7Dœ¨‚ †Vpe©êÌ‡6å©ŒŸn¶&¦'ó=T´ÛÎ4åý|3Àzé	ø¹Ž>‹GÃOŠˆõŒñ=­ÓNùÅz'OËCkg!WN?Œ”¦‘qp™ÂÜ …¤»Ýó˜ö…ØÂ-Ý(LZè¢4²{:Õ÷«él´>O£çÑd6R¨;º¼l”#.°ö¡Ì¦dã21ñPCÇ`MátÄa†_#7—B`‰(9˜'­OaöÇÁ‚AÐW½	’ouj*Úm~–Ð)Ö¿¿›ñ­Jðˆ2ëd3Ö¡çÅÏšA;¥`"m*v5@¡Õ–×êtäÙ¡î–©«áü’©£«Çâw°ËˆÞ—qŒ §ü/ÁvŠóú–„uÆYî¼|3ÁWÑÉ¢Ü@ÙN4”)âs•¡°}”6 KãÉñFÞê÷w¶ü)œû ÔdN½	W×Oú­.¿‡]õpm£a#fýd#~'~®¡_BK|/]xŸ5³Ýnó¶¯döàæø[„&¡?ýÉk>ùô›`¶)H­Úœ7µÇöªÒg_/˜|ÅAð"Ê0FÐóICü”íN	ôY»õhO¾ú£y“zÅ!>š
+»9l?*ñ
+­A¤jcc³F? †û9Ì{s³ä<žÃœ7K_ÛÔVŽöúÖpcx"|éur…¨&ú“ÙJ3³Ñ¿Ÿ´ñÑ+üÁ?Ñf¤>±BAIð¢1Æ¨¨é¢›MËëSó¦ ½¿ ÒmúíVÉÓ”P–›¨žùN Ÿ^+§¯yÇØ )¬Rl™ Ì'…(>;W¿ÚòºèFH£@Å²3Õ&o§ÀøOÆpàïÓöÄÆp‚¼’QŒôjF ¬vV ,¨Y{F*«WJC’¬¾LŠ‰ÁË4•ršÕ¨î–¡¯>ìpÐdãÜ§·À‘®Hr<çÄs-ZhPh¬ T|Þ|KJ6¶=&Ír›p.—Ò‘ÇÀ ßÂˆ J@|ˆÆ?ý–c®Ä+Þ¢qŠ›†ÓÂ>2R’xéÕ”Î›'¼!Õ2á7¿’Á•©³ÁÕ„çð?6¾¯†MóZÏ¾)‹4†í‘aßü†IiŸVµƒ—Åy)¿„éü G5ÉCA˜ìwr¥ÄùW—{—û—û¥Äö~Å Â´› v³Hn\á2ì87ºJ!Ñ>SùåK³!s_ä½AÛw˜™BJãýVÅ"¿´¦ww3tÖíÌ$SÑ«šÀîhò…‘ZDzE”Õæ‘›úÕæÇ
+¥¶Í˜bœsÃ¬Ÿz¥ˆ bÖÅ­sU3¡ôs¯vi“/{h<v1^98Þ
+Ó0Ë+Æ+^0AÅ†©\æ–¯(’Ýw+ÑòJ]0ÇÂc—5¢µ@•Ëä …bGôY/œ¡
+ÛÚ%âÒ3ÐBÓKBJUéSãlS =’fçÉ¢8wÂêon´>»l8ËãZ¬Fœ ð¨lS/1>Sƒ‚â‘¤ÉXŽçãêÏX¸j'¡¥¯4ë˜ìb¦½ ›¶GZÁÃ¨Þ+=+ÖsÞÝÏ|VM:AØ çÓpIýò²cT²îI@,¼¥Ý,à¬Ðd-ž €¨Ü¦‹QÀ|þð9lq)?°ð:¾êíwö÷¢‚ßÚß?88¬ÊnÕ	²xÙv ÷= äáxÆ¥òSØ©t‚£Žñü	OSÿâRy‰YdÔû‡|÷@ñI~˜%¹UÂä¿ibÒ±s™V„——¯ñhƒmhO£k:áËuk/é‰×Ûõ~åDÊÿ´ßqÙ«2–/*Çê÷ •ó0‰Ù@m:ì}"ÖÏOiÄ¶¼×¯_{Ã·oTßny·pé|säË¶ÑIÑåZ¾ÿþh2±—oÛ“pÛ±ñËÆ´L<Àèb"»—J¥d[œA(_‹Ò±XÌ‘š¢ŠE°+ñuÎÕ¼ÒÀYºÇzTôµð¸q3ýçlÇHk‹©ÕììŽé˜¦„	•nøÜ±¯ o£5±ØDQ‰ð)ÂhàÜukz­{Ön·7€¦7˜*Ù)T¼D¾Là¡­ß+ô£íH4ÌÎ^ÄáùN‘óÖ7‘ÊÄ»RV+ÊâE<û"@+Õ0/ô&óàÅz×~âÙŽ¥;½„Á¸'Iæx–m‚í¿Cê_÷î<’
+û›¿ÉJóÓÔŒ&Á”iÝ·%•ÛÎ€W¡åŒWþë<Ÿæ¥ ªi*juàÕxUBÒ¨/ÌY\†7L ¨3p¢q {€ üNh?OŠÚÏSR¢ºO¡-¿æ°ÂûëÀ¤¨]òaË½f®f§¾üH~^Sx|´½¹ÛöT=Ž“$jÍpå¨NÏZ Ájæ/#¡ã‹ŽCTÝ_/r8û‘÷q­dÅ!Ñ¤N¯‘×ü·Òp«Sœ¡yiù²ÛÙƒ"»ÌûL¹ÿvö0…ßß%Ä;.õÙE¼\¶›@cW¸{iå¢ŒV*»pf×2¼9—$M7`³|#)"WýYàÈÆÚFÞaÔîM¹añšP×]U6W4Oƒd)ÀjG;Òº£fE¥Í<ÿªÓïîvý­WŸÇµ5\crV(6-ÛÚT!Ì
+è¯À…¾ó§úC#ôe?òGötïûÕvy¤¾ŒÆg0’û5sÝÒoýö‡ôo‚1[áÖeMZ¬M†nS×¡g<ïœ
+Â|<ªä¤›Ý`::„¡iý.Ð¡÷"6iôX•Ì¶ðT‘á4ììW2êÉ¬ê†‘rt¨vg—Œ Ã¸‡ò<Š[Ð‹íÌÿZšxXÖ×‰ûî¾â‹¢BÜÝµ;b,ƒ{6ò¤c·íT)}„À(*šÌAâŒBÖ'ò
+=Þíh«®Ü=ß¦(ÑÁÍ¬Ù$×/rö[Ùò˜å™ââÍá§?Âz†þXËÍ5;¸Þoc5‡mr%3ÊÜcî€0/Y­þš›Laa=
+œº}n¥@•u¤xV@³——|å[ø:5,G´\ÍcAo˜=æE<¿.{
+ŠÈä£Ç‡TÀ¦Ð®\@’•¡ã®]ûF(ü¢œªûÇqßäSGIP%ºËÙ¿DMt{_8Ro0>…J(†Í*4ò;­ËƒìÎÍÚRj¥$PÈÅ‰aOÐÓ…ÖakÄÓ¤*e”ïûD¶yÅ©‡'´ä¦g¾Fp)#WZô2I.Ã]ÇþÌ®¬Ý‘¥e”Bo?øýÄÛöÞ…ãq¢ó0sãíí½Jh
+ë‹#£ßÎºà“
+0¹Ä¸±ÅÐ˜ðë)ýàiéˆ6À0
+ÓRHµw:Ë/l&I0”Ê{-n(‹d¯[KƒA ’³\îûü–²dñ‰CÙOQÍ
+eg·4e³çÖ²£yz—–Ê~›ßR–->Ñ•}APÑÔï;DþÐJ7„Cƒ2jÅýRÎ”¿ã(<úÑ|WmX/Xå;HËHïUß4À–,…¢~í”\ÍÖÛÜGÒÁ±~•æSŒë%ntâHbBùîó¸œ@ó±Êð/çóJÌö`LÔ•¹âU	 eô·{¥(·”>&+ö26†OÁ™¡uU;`†%"á_í©ü$Kyiï‹¤ˆf¶{¥ËxÃHRî$ÒSÈ‰,‹B¡I˜•q÷^D³_“HÂ¢[F1‹•Eñ@†žð[iûîÙNîêp.²´§1!¸tlP¯4xÇÑõèä³¢X¹bå!Âp€Ô9MSåà7½œçt~6É!°m"ü½ÁÏÉ¤â°*/>ÖË‹j]Þa•åib›—VÐAu¦zâÊ®&˜Íø
+¡F=eìø|cãQ&3@×˜Zp&EK¬æÓà:HÒ<`n¼¡¿A®áŽY‰^-=EAoéï%ºPVÔ†4M½ânÝâ;ð‡Oá0ˆX¿Á?él–,Ù@V"âx‰)p-Ñƒò||Š£).ÖÒRmãÿ[b“1Ì‘¯LZ€Z.ñµâ{†ÓY­pny¸4ÉË1Ô°8
+í]-}\{\¾$Î6ž¼‘o[q<Yx*í;f>{TPèc¼™'^.û½?#† î²9yß™2Ø?ÏßÃÛÙÀHÉ•ªåŒõ4Tj^˜Yô£/0Nv†°²`‹Qf{Æ…«ìÍòýgóË÷_æÖŸ³ÿ‚Ñù(o2÷8
+k^Ü¶1Îw¿ÕGY/ ¬:þÇlS6íu²ªÛ< Bªlô.èÏ5“x.*ü¬‡ÿÝ#7˜†¿Ý©3öe‘èÆ^ñmlnŽ!fˆ=jˆ- ™R9þ,ÞzBV¢Óg1Tƒ‹‚œ£L!$÷F“·lõgôÉÉ6ûá8¦vW¹­cK(G®oBe T~YŽB¡›ES‡[0E§ÐÆq°[ðù‚3	š®‘ 
+LM¸d©Zäæi-]køê‘V„ÆXó`ËÆÙŸñpçÁ7òAn·Ûëg7ˆ
+æŽQèEh©šåÒ&ÀÿÈŒé^T­Å&œ¿5BG=ÑƒÜ\">ÏXTÞs6Ó€ÔHap‹#f°Ó/Å>ÚË‚°¹›1@ya’ˆ¿ŽŸ4¢ »»šÀ°Ê ÝuÃî.µÁ@›l²¥ÕF©ÒÔ¥ÉÔ	'o")dçw8Hâ‚¤Ð›³'8i}$m>YP‘:ÿ÷˜~y™ ü“låxÒ×!üð-Âf=‚åÓ6ëñQ“ÿ†èëb›îržÂìG”øÄHô9åK³ýÑ¬Š2âKcðHŒ<Ìõ¶–nU´º–÷3¯å=›E“:a…gËL:y@lf9Xùl]{OaÚ2z7£Eg‡—¡#ÆåkvRÒ%ÌUÇÂ×B¿!Pä# Ö-/xãàyÄCEW<¢YEÞ¼iyODW<’Åc‚gjK‚˜eäea
+Ðù›Éî±6–]O¾5{,XÆˆ‹Õò·ÚcŸÈµü#.Âül}ÍoÞ}D†Pº?_Ñ™ƒ†÷Žß¦,èÂ‹7Ø“Z€•4Puü)ÓS®­»Éê·îB®!»•ÃÑVq¸•l¹”„EƒÉAÅ–a±;"8â˜­¾öì¢HÖHúO?ù©@eoƒ&‹YúÐÍá¾!°†0ö¹ÀPöÈ'°†O à.n¯ìªå‰WÍˆ*¼EÎž]5Ã«Ô/~É`*ùµÆ°*¢õkŒ¬’_.k§Ð#Þš%®¬]Ejö¦£W¿›Ï1»\Ø"êwbNZ|FùBærƒÇ}—d~…Ã¤#×8íVÂœH™B†6µÃƒcEeX¸Û?ç¢¾÷U.¸Qôñöh×±ãÎ Uwgæ€‘ƒoÝ‡F–ÒÈ»³IO¯6j0sÝñTRIÛŽ.äBýøÚÚG-ÜŠ«;±Ü Ä˜Õ½&ŽÂ" zÍ÷l$ÜØµÃ!’N~!½•Ÿ§†Ÿ}ø?ß€Æø¹èðçeª^ÃgÎ ù’¤[™TCÒQ}ÙI¢ä!'so%9}Rö™cåÔ`“ÔOÒ`½½¼T`×¼¼ƒB³ËàèŸqî2xùfÏŸôa˜ŠÓÇîÕš?ö‰4ìF½dß”§—´ö9Mêy6¦Ÿu¹»ÁùœÞÓS6ÿ®…ÿÑ ¿š¢	Ù44£\5ƒ°Nßã8¯:–Âü¬=9®}…‡v©IbÅÛ÷5„®§×€ZmoÊ³üä/þ×z®FÔð*6Ñ4*…°
+—5&õäç`
+E¼ðoíŒÖ?ôàµ`ñwÞs«;…‰+¨Þœ'Oï_Û$
+~s d„;Lh÷ÈW;kTv,'WýÌ¡Cxl
+äW-¢Gƒ?Z¹¬hF¾M\ø§?ÄxÈ©N<ÌuÚm&¹Ë²dÈêXlÅx|³©o?´˜›™KÝhbz„/b#\C5Z’G8Ä¢ÅÄ×äVBqÌ-<›Ì6·¨yþ4¹&3FÍŠaðslÄÞÚ["uSù©Ôµß‹êª³Îâˆ«^Ô¸<<?S¢xq½Æi¦YƒN?z„£"0Åâ	i=ªO_Ÿ2²SåUÈb<õj†ÒŠýk,=ˆ1™'ì+Rx²ÓS¯Ð¤ç…Çµ+{•dB«.Ìo”«Êß­WC‰°drÿ(Ïß%Ù‚uW~8ÅC3Ü3Gé\þ–^ä÷Ë&³Mœ…Rßàmrò·˜Óò‹…wedMÈú€±ôÊ“®¸·Tp=1`Q:‚É5œT+à©*š³#š\|<¤T0…³vÕU7hõ4÷•&–2úpU6Î {ÁŽÆLùª š2ƒ9÷ªpÛ"Kñ¹Ã¾¦ºÕÁ!4›©-oöjxsCƒóPÓèÃ.F%³Ì”<»M7»í>êìÂHŠ¬”ç»JmØ‡ÎÅ–gññm,ßP1‰íä;|í’ŽggEy@šµ²h€\E~½[¾±ÑÝ¨ÜÊ¾Þ¨gÜb—jBÖ$ÓêŒÛU™µö¸z¥ùùw2øÚÅH!1í³ô"Œi)M@¯2#½ê$‰×6G¤<¨jAùì˜ô›²ª²<)ts3":|¿sò&¾)õNeðwªó®m.´¶ÿ/ÅÀÊ“½½ß‰`‡°ò0ïVÆ}·:<ºÊ¿•…Áº[6–ÛÀC
+-«‘Öê¶•IxÌ`È# ‹ ÀRä_!þQXcIˆžÕ“ýxÃBÿÎÚhåzÃCûÎ²d†M©QÖ À§ÙWú@õ~þúgC‹FmlÜ}l§q8i¢n¥S:,lHkfÃùˆ ®%ÄVv1¡îfr‡~ëküÅ°vâ7HŒŸsÐ†q•”PRM†%{KóC·ï9zü›»dNÖÂøéa•#${Aää”„Å­	áŽ	óo]½.OŠ¸"s°Í»'‹œU,Ýºå¾«¹.ïœ55¬IÎ˜ZmqmCí“¢[„kçŽ¹"ƒ"Æ/f™$€ý{ŠÏéñœŒ.8!G˜¦ÓÊ;~æ¯‚; ÏU4¿cß€sŠ<ókº"v¡ýR3Q‡²Í¼eY8"û¹Åõä~¼±¥Ç³ø‘¸E³:´ÅLb—=Ù»–¡üó»†ž‘?lÃm½E¹4ÀF·^•¼d~x´bÅÍ/D\5¤/æÐút0f¤yoæù-woü2d8-^[Ðc\Ÿ;¸â¦‚=ªÄ Ý/F‘+	-ÀÐx^ ÏaïÐ<`åaò\­;ÜB†úÂAuûÜÙÎ¨rA'cÚe8·„W“462n«Ž1ó	v¤žqÄî„#.w¬C½¥PŠÂëø•”÷ó,¹3´[å+ŽVÙV¶áÜûzÃ(À5¼ê††vðbX"@u%^¯Êá¡ÞRe"Ñz¨e¯SEð`Ñ¬9^±¾³ç®HæëÐ%ùŠƒ`ê’)ÄDÕæCÀ"L¾Ãð°¿Žâ,ƒƒ¥sºÜWzW^µh_ H†VÑw%¿{[ÙÄš…7ú¦àï”Ô6mæiy¤Ÿ—‘Ÿ,1Uqp™ÚJØÐ½.ïª£GŽþæ!ZÚßSý!Q!uŒöKÅMÜ¹s«ÒâqµtÎ€'†bn¡”©«˜\«è*×­\¬”¿’ÎÚŽÁÂ’þvŠŠ{ï¤œ’™ÚrªÄ"$Ñ$hÎ°a³vV P¤x|TÌyFºÁ#S™ÔY^¦©”Ó¬F¥VÍ¨9[.·Ì
+‰eÎ¿ºì\ö.÷.“Ë$srê„Ññ¶^¢i•¦ÀX&LãP
+ôÄÄ‚hæÂô¶uò9E¨¥l)ÚìH]S¾x‡¨!ßÕM‚—éË!4uzE¯¿ò¯mÇ,øîMpMß¼ÙŸ3¥u£áþõ‹ Ä!_d…óuËÊ¼Y„_gÍRÞGÑ„•Ã_¯†˜¶ôŒe—#…wƒ2â¸—wòÞ%ì‡¢T‡Yä`(Ã#š¬\£AàD‰Ïl
+èrÙ'^¨d<ö†¼J0õŽr€P€(£D¥}¦=5Â•ä(:«n|M–©Y”ßnw]=¤ù‚µ…Ó)<)ûC;LÍÂ¯$…º%î‰#¼¯¦ßóÀÅ+¹–«³S‰–ÇK:?¯Ñåy°fgÛ±GdÁ´;6géÄVód¶™	VI¥èS—ÑsEú²óî~1Î/»ûU·Ûí÷ªÙ–)¯ƒÈ¶Ì‚ÃjÃ"ØÎK>&inˆI¦Ùþ\*Nzâè$¬'ã`êÓ©‰áróð]+—Èð”ÇÖ4K¸MdwÎÅ„ÜlwnL"5ßÒ
+iS¼Í¤Y®ja³Å‰#%výÖIÑ€‡FãÀŸ~ë±´ââïŽI×,ÿ	vWûÈÊs©°æÕDŸæƒM9bµ¼çz’So#L¼¼_‘Ý¡˜#*&Ï¢nWôÕ°ÖëÒ&ô*&O;Zír2Âµú|Wš™Åá¤ZF´®®kY+EÊ>ážßO¢ñ¸RHG»¯FÞ>t~Ï8$âÄq íYÑ'(ë©Ü’RŽ¶¬÷%H½Êë¼»ÈWÏ”@*‹|m¹YâÜê²r[eË¤ç8£ QC8	<–}ÿ:¿ë&&­y9žµ¿ppXÝKË8ïÂZ¬l²‡Æ#}ñZÈ#P¢7œÄ’ÞwêsÍµó@ßÓ0»EžÊT°?ð¿þòçÖ¿itùÐ7Þ^^â#‡v^ËàÞ§(i~¸RfV¼µò!ºº,¢—"Kõ3;~Å’©/Çlx9dìÄ«²¥œ–S‹9µîíîïí_*©U‘a¬b‹“áqÕ—fèK˜à°ã¨óA§â¨Œ“6#ÙF(þöà.»fh‰‘r•™Q«nÎâà¾ðÿ0–Èu¿O½Æóh<ög‰‚	®Ba*«ô5OútÕŽâ›c^ãòË³ü–Úg[I&’-QeÙÂÏm[%[°Y6¨iFô­0Ò•ÂäüÙ©*Ësð@U÷DUOçÃ°Ue3²$U)€
+÷@Uº78Ë>üx0úM˜„ýq`32O"Ü
+ÛÖè²!ÓÜ,Þu8LGG^gKœáoî†Ÿ>¥Ï{=¹€®­ ÙC4FèªP·¾²úÙ@ÎÈâXŒ1])±^t¶ÝóZ$6ßÒ}B5{š“WÓÙ<õ0bÿóh2)&tº¼lx³±?F˜Û)šdÍãêQß¦à*æ3œá?¹ËŒú0ó	Ç•ýL•æIë£˜#Ôbµ:ª›ÐF/Z¹±‚¾æÈKÓxÆ0ÞÖ·¿›ñ­í ‹^d„ˆóºRJ3hÃ†S,ÓæY0<–ÀõùšÐ¿g‚R|yYÛ‘]+yscËÓ0’BNØ‚Õ©QGFµÚ‚_U«o>R´Érèc ª_YU$j
+³ÚFMC`ànFZ¬ò(É¼²Â^qœç‹âYN@i8ðÇr•ô ˆÅ°;<ö/ÌøK@wzý1‚(€Ä¦1ˆ¹]äÉ&¢‰ç¤×Øîð›Ò)|{0Žã^Å‘çøŸ–A~÷<Œã’"EÎ?5¬E­fÍ«¶½zV^-K¨–£o3¨ê©bÕ1uNå¶&ãU"†£)×r³ä8Š…ÜhÆ'¢—o>¼|„Ù¸àÓ„ëy~Ð…Fa®©Q×uÅšÅõkÌ,Ë>A B˜Á!?¬#^BÙLÄCÑÛò)8æ¤Â0Fô;WdðtÚv±
+1Üó‰È¢Î6Æ†9’œW¨†âÕ4Ç.Ž§²@LðK‘‚á©æ‡(¸Ã
+G˜"áëSsûóE#ùÛDí“^564Ï­ÅÞ©Ô
+á’«ùlºœñ’o|J…ŸxÎÃ¢ýdœßT¾ÈWÏINN¶Ig±¥ò×ó8[¦ºàM6#öšØ{P‹íEêÔåÝ<Ž€íMk6|;OËýä´£ï$Å{MAmü8ÉÃ£5UcUi	{¨/ê§Â¥±<Õ×$ÅF«S=q!´›¾9œòD|¶³`€{í§£öÄ¿iÂ—þfÅÍ&k|KŒÑ¦·íu;Î¦:GŒ[[ÚVdÅsÑL@nÕyâ+(Ú,W}˜§?ù©µÓ±§ÔXÝYÖjÏáN	>~FVñ¥,áyw‹uÛ+´>7æÒËÝÔÏèVLñ(;#Üux"[z:þŒù’”=Šå í’˜N=ØÛ®b8ð•µçSË´—ÙX1äiÁ£Æ†*ìV§ÞGÁwŽ¼¯y´Hä[qSÁš6)&Eƒ±ø#9¨Y2Gm¤µ¬u½e¤ýÝ˜ëÑêó¨ÔKŽ¼ù¶ÅCÌ3_)¢&¹(X•eÝÛM)µU‘WTÜw:AtY(yô—Üx'Ú îE7^úic	gÞºÊîœ=Éž·¶D‘™g--H;µ™O™–ÜtuÉˆidYÒ”ˆ˜]UR¨ºr³.=‰ØU¸WV}²õÒšü-¥¢ë•'¥¦YÍ3?ó‘ƒEú,ºáš»óû°V¼åø<Ûn+yTr—ôr?¢ó¯:ýîn×WƒŠð þ[<?Í¼>ìpW4Ù —¦0/:Ã^yË•Ä¦fÅy§ÝÙ¿ð¸×O+øÓ0å;6m›£4%GÛÛxVk‘ÓIÒ¾
+ÓÑ¼w,Ys{M¶»{ƒ½ƒ½ÇÛ½Ãƒîãîînëp8è\tZ;ýn«ÛZ»]4T:— Ú^·=›^ml^PŒ¯`ÀÁý'­ÿ¼f„ÎRXW·ÞwãÈGW
+¡ìý€	„½f6zIz‹*Zõˆ-—%PZ—vxÑ¦³ËL</¯Fø/­¦’_I¹ªQ×¹VõØìŠ|%/äKú¼ó`Ý³›?ôàÿã«¾§ú_»»·IAvPŒïfŒd|Uˆ—^A¥EŸ6Œ.UßžIˆVÌŽš¸†~é+¹É/[û,ù<®vå{•œõÙ'ê÷õ~‚_Ü²¤ÛXw+¡’ZŸÂàzÅiÎ]¦Ö÷cGÖŒN‰vg­}o2<ÂÀW=ïfŒôvóJ~j	7¡LbwIþpO.Î2K1›-	^Ýö¿
+Oªï
+·w;Ä)‡1¬Æþx#õ_°U'h|vËÒj+ú@ÖÀH¾kY›¤®ÒoæúæZ¢W¤JŒeÒ±@š=f©Ñu^qÜ?ÿêòòòñ 6©â:†Íëpxyè_H^®$"óäôìRŠ=£=ì|s!rË›~?˜²dœÈEÔ dPj‰¿	Œ*èM0,&[â€çÇ*ZiÔ‚àÏA|;Rh{o"™z4OIS]zé(L˜øÀGí»?ô¢Ø‡	l¢°}Àó`Òöˆ¸ð'4 6yŒ6`0àrVr$,‘Vy—-z#†ÔÅçfÍžñårÙY ›fC?…ÃÌë0'²Þ· X–ñËæ£*ø ;%2é¨ä!Ó§ƒñ|$ÍêwÅ7ájKJáˆ¹åõi¤³~;¢™ª±³‰á-)ËË¦×ÊßékÞ1tÇœUš'«ž"å´é¦oöNÊ³ ¼ŒZÒHþH_=&¡Tòªªx†Åoó}äÄk*KD&
+VnÚ“ÍƒcM›7Í“}Zþì¼\òR²±Œ#½íI\bðÎG5Šˆ:½Ð3¬o†ÔÉ.KÀÜí±Wà»£8^Di"Ú;F	ü¤‘M‘ñFö€+«¹±îÊ¢ e	ÓëØ=*\¦eVÍÆ4‘7½ÆrKáÜóWl6³/:?Nã«ˆÏRz¡+¶bþ×ÉÂOn§o]ží‡©ÇŽ!FÑÑÜüÖ»»ófPPïsÆÉOå9•dJ:¯ÐL;š’´ñÄ9€PÜë’ö{JC„Âü²)eu‡Çìüú"ÜKO8· ˜JÔpküU÷ä?lk!xJ&©'G@Ä©r_ÜIöˆ¿ô"Î/ÐöŸó»çZ™¹dâN¿ô£æ$¹rdÇÚLdÞt¢I0„¤âhf»=”Ê÷{·pÝ¢è$yJCs^úïê]‡A`l6/SáˆmÞ!`¶ô—kù¼€l7™ÍP§.óØøn••{O5qbÙ’ˆäjêpk€õ;³Æ.Î Ë-¤\2Wåôåä9‰<€âŒ_ås{Mê·†¸Lévé©´ª¹î";3¸:&»fo[ûË»%‹ƒlé´ºfUWãIadî+¿ÙU‘æižê¶¼px³Tæ³×ˆIác˜'	+„í9)ÆÎA„Žü¼n¦/tq¦ Ù¬â,l#§^ò« À,yâ=Ö–F§¡z¦?@;½ü_óÓ¸î$àÁƒJ·
+’_ÝNQ8Þ«¦¶[ô–¾_]ç~‘þ½A¸°rÇª·¤Pu»õÌ·µWø’¾S»ÎBâú}"Ï,k§˜ÿ–¶W=ç^}¢8Û÷ß-rE²v‹ÞÒwkÇ¹[>tïÝJFÑ5;Ý¿?‘I1®#Òh\ë¨•ãø}àÒöw±…ýbû%oŒ0aÇàììZT»gÙYiRÝh«¸›æªa¾mÃ9´…;û…§N¦Ñ•ÂýÕÎõaµ>VšÚð²ÏÍ¤p‰çõk­ÖË»È•×i®Åt‚ÎåÀ¦4VVQ/!†º]E¤YÅ2Ø­—¿ž×¡”~‚îå
+@\–étúÐo¥Îž†J-	iy’`U6ô{Ã>Ö¼,øJ}-”ª¿;ýüNýð .FŽH(J„SüÒ/•Ÿe	Š©ýI½œ.®~™ÅKòÒÌ}3·<t°ÜÛòú7Ú÷Üã¤ã%yoæ›Tl'+ÕêÁY¼r£–:ÌplvZ Ã‰~ô¶°¦N{gþ¸Øò†°,¡^†°§M`êÞ¯ày‡ÞêmÖkÅ¶Š“ÆMdÕøÉsÜýb?„½[P
+8xÃVK|‰Gæp—F²ÿ)tiß“‹·ñ&<ªUO4}5M‡'‹æàL2½Œ–H^ÊTÞ¯	xE´™WhUõ­½Z¹rÙ¿fã[àX"gA~I‰ô©öÄû"íªñv­yTˆ5µxÌÿGø¼õ5/äîcÚKŽ¦´uð=œ´ƒ[‚FbÏ„£+E¿	ýŽÉ¹*ðyÇàûŸ0©Bæú„%˜ÝL‹WÖl4ØF¡&e5˜O ª3)C˜Ü÷¾¹ðÆWGüçZàoÆâç>þœI‰›nÆ2zhvó‡!ˆŠè¡Í-b	qÑn©Ÿòk¬hŒìH3uµ÷l–9ŠÔ@{‡Ð]o¯»»sá‘ûyýãch.Ñ2(ëy·ÝÙ¹`±ÒàLÆœ‰sçGC¤Îüˆdƒa€€…Ú}9âÜQôiøør8Ü)ô©³7Øí_dÍL¹>´µÛ[¶,Ã“åUõ:½ÁÎŽTÕ˜W/_Õf]r±-ó,_áXšÐëS¹¦„…ûá‡h>‘I8‹.°\&o{ N¿A›Û>ÐÚ©±£éÕ;tE@ @4OEiPrÂPpÓÙR¾ðíQG“µºvÎPO¤b3Z»´»-o¿Ó©»·.5ÓLô¡Á fGŒ§nÔ—£§×Ñ§à~«yÍ“àEt=} Ú:×/ji¢œ}jú!ðï“jë­™_W²ª béObé”5;{¦vIQ6B‹“F­7ˆÏK&Ÿ]BI¡SªPËZ{Ùé"y`€#UæžúÍÑáU‹˜0Êc˜úãp Te»”5˜©Òä),ÞÂy÷`Ï=\l©…ÏŠ4Rp>Ì[$% YBŸIÅ|@`*·/z×~‚êÝå³/¡)uOTX¨j)UâÒ»^l—ù	ãa7zôˆø}Œ??DÌóOº±Äž‚iD-Ö¸®Í¦6”ÒÔd´ö®ZKû!"]è·†Aì/ár'%Ë2Éñ¼™ò}Ša±T›zÞñ½ögïƒK±ÿ L¶©¨§±Yg¤ñ^n¬—Î/Ï®úê	ù’#çõ%LÅ9qEn·Îw¤Ÿp*¼ô÷ö.r½Š£œ2Uö~W™žR2X-Ý¡Ü­c9áW¾‚v’F³wq4ó¯H#â˜P]È
+8MÖW8/YD'6Àuv¼ø»«´³rFƒù„¯ª—ã ÿ|µ4Eý+
+OlÁäö‡Åãmn3¯ªWÓ4Â¨FÍ…×Fþ§0Š¼dEéhcËë£Áá“6Ñ_¦‹Ût>¡9y3GeT6å«'”ïÊµfë÷M“*ÝDAJìÜUê“õÔ¿êiÍµKÚ0Au.8…õ:µa•Rê õWùIÚâ8Š›Ø¨Ø¥ ø
+qm1ô2Ü
+§z
+Ú
+Z¾Â×Ë[ó›_Ë€ìRKz (ûÍqûe\ùCžïì/+é‹k!‰LËœi
+ýZ¥!T@Ám@‘œ7ßÈåÂcŽNªx>^æ|W½Ô'Þ|¼jª&Ýµ;<X‹(:ZˆÄ!¥LÆúÁ>ù—Á”/‰–@ËSIJ¾jÀò?ž½Þ=/•E9±6žf(¯»‹Zv>åà­:þÇK}ÅµÜÁ³P¿ÂÍFÒK:ƒ.1Š·qxNýqÆÅcÁØW‹ÖÂR‡ö5|¼ÔneË¼¢»0`§nšO¾)H¾¹¸·S,ƒ!Ñ§×ëû/šÂ¾<D ßæ;‰2©-[m-ð%i<WWx Ã˜ÿTªô¤R'w·…[«Hy9ºµP˜VoðiÄ§,â^òÛ0573½Í`â‹7~ç§£â[èðpD¯n,-<IHcS³3ˆ±±Ù„vk6½º|³¹7â>°Ë¶ì1ˆ­‚ø¾¬ÍþeÒ×#6Þ2vE
+ûbª2Yã•bD,îõäâ­»e®ZæÛ+ÈZè±„d))ßV>E¼¥×Ø«_ÇË vŠÏIe”j!ÓTW4¥&
+ßÓ,¯E1ÁWéÃ"Tæ•Þ%`UV­‘rY¾ëBêgyy¯¬Á‹¯¥¬FtÉˆ—4JÈ×êZ4ÒýÚôÁo–§`­U°©Ä¹Æ G-D˜ã#oUÕ¯æl¬÷E”$´Ù]O©¯’wq€z¢RèÁ•µf«W:Â¡Iq"È¦|z}á ½±*;ÅËêÝ’Ù)vÊq¨”¡×ãÿake¦Íz¼W€y2ß]†“_­¡b¨óDÌÇ~,‚ßz3þÇÉb>C=¥xpÎ 2¤OèÜ­:ýT÷*Ø5²’>jÅúW¨{QÀ™£1lõU×gÛ§
+¾‘&Q9s‹4ŠÊäóè&*Ó«Ë‹Êx1?–anEñ`E™W\yŒ r	(Ù}×Á®žŒ&Ôçwcÿá8QN‚Ú`êåüWÕVâ…4À`ú‚"ðaQq2k¬,¨âÅÝ¯PkË<48­®£'arÆöÇûºŽúÜ¶ƒ•+Zy;YÇ>°
+Xe¶·½Á¥?§Þ¶G~úÄþš/§É<æafE¾¾<ª0ÆáñÓÁÈëÏû˜Ïl…¬…ó¬OaWÎ¶VµÏ[ÓM”3!–üi8&¥/ƒZ0óÎ…ØRÂÂ0d7%Ÿ[Ž¥YüÂ®
+†¶#ÎD79dâ¸r‘°šÁ–ØÑ·¼2+Üò77(˜ÖJm[y9—Dâzª\ã¤X00QŒI!ÉXg•Ösh§$!Ž¥àd™[{ =B¸/	÷,Ô´qY†Œg[Çxè#ØñÌ²©ÕävÔxRØ¬ïÖ`õU6ï¼ÛÉrs˜Â÷I®õŠD&í½†wQ•ngã0mn€L{Þ½@ãØçC’r±SÙÛíÍö,š57l|÷ê‡—wÞ_þü¯pŸŸ…?¡ÃZñ7¦&êíò0ÆÈwáM0lvÑ»lpcóÎ{ýlgÁÕMúëXj‰UÑÔÖ/vì^ÝxNíç‰=ËÙ;å~øøácEZ…‰
+¦\Pw4îw[‹
+ET®p XÛwIãêv­ˆ»Yy}­ _ß-Ýö/tø ¤sçòšÔÂv¹„‹»¸ÄN»Ëbû,Õy·½{áà€L"3ßÍâ uû³ÚîêâªÅ8õÐvØ#/døÃMÇtm.ÍhVW,¹³.±àê£ºjWRóu÷°[˜€åMb¦b±ÉnbN#¢Áuy:‹ rúE¤'B¡W•–®vâá9å”±k·¼ï¿?šL6–"˜åÜÕ™_èò()"´²Þ¥"fá]N¡ËÕ)ÇOÇAœªqç	Òhzcvö:’”¥£œ::.µ­{T„¼ê°<WÓ„$c~ù!á2 ‚žñ±â:Èn³ ¯è9·”Ø@ž1R8Þýñ<X}°GÁàôãˆŸµ·Óý‹‚ƒêç$»rï µñšú_“Ø>g×kÎÓº»÷sDÇ«ùÁñv Ï9öôv1>¨ëwŽëÚí¨âØO{hx§óž-x¶XÔ(Å‰÷ŒlƒÀ\G}Ñ{Ýly5Ó¤£€Â·g€÷ùìÚ‡‡‘ºþóø¼i'hý€6PFßs9·Ï#Ò‚,îìÁ™¶(°ù¶ÉÑÛŸ|`©I³\å&nwo
+K.O+&¨G^?ŠàÀ2ý–šŠÁ	Ù+˜a`S@\	–¶ÅG´Â>k#3ÝÓß[ôÔÝz/ŒçïƒASæ–Vf›µöTx#Î^þ…ƒ@Lò†…×²Iñ+WY€>RZÌ°Õúz#âžî¢_®9òeùH"ÎóŠáñœ
+tæ|œ‘l÷RÇC{™[„99g\Á¯ÆÉ£nÈ†kX0²Ÿ2[A½“…[„‘®Ø…E¶æ}q$ËÛ”Lj±X<…¼~O½F¶>IïÀØac‰p1•¤~aW`úxÿðä‹yúfãÚàJñ#¢kú¯”ÔÏ6›æûpØÏ9ûvT×š·“Ôù|Ÿíéî}¹Õ¬·6ñ×‘¹j¼\W8sØ4íc'yèx»lÊÜ8³ZËÐ ³Œ]ÌXýr:¤ÕÚºã®}¤} ¸…"â³(M£‰ÇÒáz¯ýäºÌê`Žæ”±Z,nŸª…3~)3ÚP`‘\Åþ0&Œ);Sï2†W³ÄÜã‰Ôdt›Ôd÷(ò¾,¡;(5®"‡³fi©IÇ(K[ÍG)Ä°q“Øu˜Ž¼q8ñ-C \Ÿbxð
+D5]
+ð§l½c€5t*UÏ3%"`Õ~ˆx¥Í¾½úæT÷i)“™ädf­„`Ä%SÁM˜®Ô‚RŽ_“äLé³%—Å±³HÛÕ/L¡G,ôHÃÂ°ôý1tÕ°„öùÚÙ‡µÓíâ>Ó-î+•à°lÉd®îY¥’î¹o0‹­ÊX#=a¥»Bq&CV ÿÉRÙk³‘óF³Ô¬ÃN§Ò˜íŽXÙÇ’YxõËM€åPúe×¤Òi˜ŽaüsÀ&@÷{BgCÒÉ–ð_+‡¯S±5c‚eÎ‘ˆ;)‚ÖÁñ6úcÐ:ïµ÷¬¹šk•ÅL8Ü»R÷Í¥Z2.x¥ú5å^~¼]aÝšã}€j¦„¡œŽ7©÷:˜Î½q4CT‚÷7Þ3îâ¾íÊ™ÚKOáD‘Z$ÜUœâ¾•21ËñÞh{¯Ô®ám\ÚcàÚ¤ÍzVÎt¦}—¥Ç"kO¸d²÷Ôn#fýpÄ4ÖlŸE7bŸç³]ãCkQ.$Ìí9FÁ?ÖÅ£±,T³ì¨no#Ù×Ëuz}ÞøãúBGN åZVg›žÞHÃ!Þüä8¯B/Øø6Šx^«8ptÓ4…¢ÜÑLSl
+OÊ¥Â½Ú:äkñ·ásÌy½Þî·8r×­½} $ü=»qøþû€¢ÄœäÔwêu÷:YXx:0{éíîÁë½®Î7ÑÐ
+Ú(žãèi²0(#Ö°Ëõo•ƒÊÞÕT/Õô´›©w"OSí&Ï"¶‡ÿ—©Ôþ''å1ýÓŸäþ=‘š€1Ñ6úx›²ùx¯Îš"#4©MdŽc%k¶SÏu@áá¡¦£B!­r×[Þ¡Nš42Àß ’÷M”“9fÎUÍrHúÙai<IscÛŸ…Û¤=ÞÐ)Dõg£(NYhQ3Ñãf%WÎBx
+8Î±·ßÑlsíkZ¯Ç%bgw1-ÐÁž‘ŠGÑ|<ü.ŠÆáÕ”Öm>hdCtBÏ §Îüh™[i…^Vk|«Ä’¬„óƒ–—jˆ„v˜òèOCÀÿ}Ì@®ŽÃŸp´Çã[¶‘cR–NÞ>;'þ%ˆ©þ7M¹…Áciü›fw+Ïñ¤šÜòø´<ü$/LG›–`ÐË³4±êØ×0å=ÄÎ„S2ŽåûcŸ%6Ù¾9‹I§À~3 ™,bÃ–Â%œVnù[ À ×ôq´Ñ
+YkXkÊ¡Ó ¸óJ‹ÈÑŽMBÎÅÁû·P\.ÃðØds´9Y|¿‹*¢óÇ–“ä˜L0%­ƒ2³ E¸ÔwÀpd1avjx;Ã–&k¯$½£Ç¨#m²lP7ÌpLÅŽ¼_/²íõnvóÑü	Ë–}ƒtkÿˆÈŸ¾*, Û‡FÃ]%Kõ ÿw¡UTæº|LfS<Ñ—ƒ'KYoý=¾È”ÿÀi.ý!þ‹j‹Ÿ¢h‚>ÞËÓ6¡—Œ¶å¦öB’KÍ–\klÊcvf¶C3p˜ý ½`\fyÞrÅAîfÊ(Y­SuÆS8•w%T™µUg»†*¸´Ëwzvâb§G'<<¿H£#ý†y9ð¶7`Õ€ GL¤¿Ý×\ˆ;ò*Û÷(&e£Û7ˆû¨ô¦@ö.å8àKD:iL›ÙPoyÎÙd¬ˆ»ÝŒYßSåÜò‡É°õüº¤>#ãã®ÊŒ-VB2§öÆãm“ª,¿,ë{)8³›/ÍpŠxÙW‡À¯]Z¾›Y!ŠýÔÿÂQÜŒÃY?òãaû:†ñÂc™|${äÆ¹Dìd>`®¦çÑ,Èe=«À5ì†º4Å“ãb›f«ºq›­1ü¡[^B)}Ð)…v2å»..+ÒðnÝ`{¶xøí=—íú¯k?†¯ŸK
+ö&±Éø¯@æúöGYnD;tÛËÒ”‘ø‡ØOF=‘¯m—° ,¬«-"êò;Æç^å„È+®ûçk”“ å’˜„	¡î‡¯I<z \Õµá~ÅcÒR»kBo
+ÄÈ?_"ãÏƒúyû3úç¿VÀ_Á
+pøUý’0ïêZå|:øÜ‡¸ýÏcá}–ƒÃºÎänê‡Óº¸ÖxZwû2ÉýO£—Ã0uÞÄèSü‚þœ­[…Ñõ—w6ÇneKèÎ-½‡sÇ îgx‡3º‹B•Ê)¢×	0g—¢—+dN£mqÑu0´»Dm:D†‰ßÃ–dÚNˆ¿ MIû:pÝßevÂ î§ºZIó
+©ñ~Í½?Åtx,{±çgÀ´„B]Þzþ”b{3?NÃAk;m»ñ&û„þUëL`3V}U¹Ú½…—_½EÈiäô}l'›jç²w¹wQ‚¥Ã¶Íwö´bfUƒÁ³p?KQ‚ Í€k–G\`iJ0¯{>rîùxï›orÓòç âfhJæó©jÛëpérü.š!›5‚­ù;âðêÊÊ9&$î‰m¹×WpQÈ=Ì.	»U1Ov¨ ü·íû»‰%XÖãÙ$,Gy¡ 6¨ûvqø]fŠKm¢­N°Á4Œè¤Á|†åV ùíô(¸ßáø‚n]LáFëAÃ>éÛ3ë”©ú
+SÎàpõ%­}ƒiæ”£gq¾ñÿþù¿üycËÃÿÿ÷?²ÿ‰ÿû_ÿ‘ýûŸÿ'þû—ÿñ¿ØÏÿô¿Ù¿ÿø/üñ?±ÿþßÿåÿþŸÜ¸ ¿ü`ý}ˆ{¾“Ï{#^äïN58Ç<.ú“vp±8D¿¥•ƒ_Z4ÝŽÖ%F
+µ[]¡U!RËa:›§ˆ÷·‚[TWoU>²Nóæ(×cPK.>²•\¶°<Õ›]W·(¥•ìoy¦ó$¦u#Ù^[Áàöø¼/ia¼ó§ÁØÚåŒÑqîeòÔ±îZúoÇ~? O'ãï¢vM`Ê-PµÀK~^Æ†‡H«Gaå5¼p¨/™çåò&óqJ> ° F£:;90äF*ý‘>Çx¥X†Ò5oÕ Ø|«´®þÂ»öUÁ,Ûå;)pÎŠýÙ‡îì[·L#©ohD7z£D$”çï~¨D[´ 0f)qûW[,Ïß¯jÓÏUøo‡€(¹Tß¿.=5+x”õLöç‘&µA×)!43°êô¬•‡”7‘ÊÆ.»ùŠi”\m[cô³gŠˆ*v‘RM0íBSÉ	Ÿ»"ë¸J»Ù ð!Ò‡ªqÛõñ`²óÅœÝŠ€™l¯k<‘œ{ÚBÎ«dßz³¶±4Ó2—ÛdË
+Î_3g—Êº0d×vÚ‚¢n<pZ§R»ª˜(a„^;¿+EÌÃxyZ`
+¦­é JË¡KÕYò)P-·L©A7e×w—äž‹,6K(´N™Û»98½&÷¥Ö¨.øÙ¿!wG"ïÇUòî–ùKÕ­¿Ôù*Ò½3Ñ÷K•ðÅ¢qa—y×yæt¶+¯Ëëò"±¼Zf9È½â9ó›Ét_£Ö!ôõ°¸e;Ÿúl»‘6ØEVgLëÉB\¼¡ÝTÔÚÏ3gî0yîOÁ˜ùy#*ÃÙ®)šüÃƒR¸¼´Ž¹|1óçI Â†"1ƒÇšÞÖ7ã’"k^úãÄÝBÌZfJÍœ!ÕüüC8	š.ÙXá#Ðò,âjAÃÊu8~çT	ÒÇlìßbÒ-r­M¹º¯ÛD n3«-#‰@ì†>Ôe`Þñzx¶YLñè>ª¥ñ§;	YL1V‹‰Êä‚»¹%—Œ¯•7Ý2W°§„±bT³ÍÅ"Jû‹‹A1ßbêA1Ä^b´ÜnSðË.M­½Ñebü„|©µ)ÔQí²“½CÖp–R×Œ®5ì"t)ø¹ØÏËpQ¸®üAÃµÌÚ§¯ÝÖ?½Z+”í0ö¯N7.$Œ¯>Gg½Ø§i‚aÐ˜ïk«»ÛÙb½,áÓŠ…½ÄÀÍá /¨ÓîÖ-'š¾À,šØòÂéeTcuå{,~ØŽ./áNûÆMŠqoÛËép©æ:Bn˜wìÁiÆ}¯.Ï²ë¾¤Z{+?«lË®uñ&çû®ï-)óf¯"ùVq–³O—‘‚³kÈÂìZ]"f×:äbKIîÒ1»jÌò’²®ˆzò²¸âàæaDcBƒÖ(Â©Àû70O£±näÑ¥‡a2ða]1žµ^ËPÕš„…<v…wsä%Ô·ïª*1€ä†Ì¾…w+¡%eu»
+da¶ç:i×HÆæÖ©«Øï‹¨—Ò­>N¶%Ò.‰8I[ŽÈ§šé¦ªv©!æð¿åø¥?ZIäV“=´<Ë±M#‡Ät<KôÎþìæÂ9xú‚b÷\Ž£(nÆ2ç÷¶½ýÎæÝÑ¢tû¼KúŒòN47KÏêÓìmy×Ô[îqÁu >E_¶åýÖÿ`†0ï7a2÷ÇáOuuÌ[xœ±¦¬˜„6³“…/mmdØ\Ú°e;r~GÂâÇbG:¢&Ç:Y¿µ»åu.ÜóHäVS,$f"þ«é%u¾ÝÊÅyÝöÞ–øIpä5ðŸWÓ·ó´±TÆŠÂŠá¹èŠè™òœªq^@œ»ƒà¾K)ßŸ#»^„b˜	J~†¦:å¼¿üóÿ‚ÿk¸®iVk,çrÞ¶eUtIè‹”ŽÉCÉñ3&ux uDsÌ0ºí•Ú¸dÅàrÜE“…Û:s[ß»®¼Ø]çFW}Å]õ´ot}Fœs›2]›ŸÜN^ýÜ‹jpVžk§xãA‹qk<aŒ0Nã;ØépÞÁ\éh8‡ƒíˆ¥óä†tTx_£e¼ÎYC®<ˆ¯‚á³qÔ‡&`^Lü³©mË–·°Õö4ÊJçñjûñýíì‰iÀ²ZÁïfÞœ¬äÿ  ÿÿ îIxœì}ùvÛF–÷ÿýeeÕmR$µØVKÖ8vÒñLûó’î>::1D‚"&$À@Ë
+[çÌ³Ì£Í“|÷ÖTjE9îžð[B-·nÝõw		úqùj]_D£_^åñ‡$¾z—Ï:Ë|¶óç?„µÀ?É„tî-xSO–ã${Oz£ežÇi¹CVíZ#ÄÖ9!i|EèåNÛNÞ´»ÝÖ‡^–Æé8C_:;ääqûÑ5§¿&éegÍŠ¸õ¸ZÞoX‘`P°ü›jh½LöÙ)óe»É¹!1Ì'¥Î§Ü˜Ú¿Òyo-‹¸õÔmž´Ønp\ëPÄFi‚´cÁ÷ÞÞù8´Á•™ÊÈ)9~…ÔAF³¨(~ŒæñÉÖ´{@®º[d÷19‚ßáVËÏ½<ÞýfY–Yúø÷³ÛCÇö!Ê“(-O¶.§YQn…>V$¿Âh’Q–?¢ÌÂC˜…‡¤Œ?–Ý³/ö'çdå¿Ñk¿&é¨;ì÷Iž-‘Ãw'ËÙŒL³q~tqÙ-fQwð;}¤ºN{Øï÷)KŸÎ’Ñ/'«¨¸NGkœ"e~ÝrOÂ”%)Ê<ŽæÀã£«()I}H.£2Ë{óxœDÏ€ÌFqÑ»ŒËwEœ¿Àk‰pÜhä¦åVƒ}û:eù÷M	Ó×ÙÎÅ÷íöm=•É‡øE‡¦e#=
+6Î¾7Ë½o÷.ÿt®’tœ]‘¨ Qz½ÓƒS¾½^àÊÁÞ&óç¬a/Í®ÚŽ-Z$ßÅåhÚy¿û".Šè2ÞemŸŽ¦Qù||òå*¢‹û”~½ù¿e)\ŽÓQ6Žß½~þ4›/Pô*%"2 Y2gMnïÜ¼¿OVðµœfã#²ýêå›·Û@´½Q„ïæ‰xÍ/}Á&6È›åb‘åe<¦K×a8­W¼jFç\¸¥ûî5¿Æ©œŽŠ¿ä¨êIÛÝ8—[V¥jÑ‡–«Šƒ:]¦¿jsgç-§X¼„ëqTFÑ‡(™E3œíN¼–”;=îacäë¯	û«‡yLúkˆj–ÁöËbÊ_Ôz¿·ÓHnÖŸÓ¢Ìkë+ŒñXx›g*:;½I–ÁŽ*ñ¶Iÿèák:;ë°=…³§pì¶Ý£lÁ;Õ^\,)žFé(žÍâñ:‹]{^TGØzB41žƒIÊ^Ûc?”ëý˜•ñ«(/[¯m{y\.ó´=õ®±B–]4‹ÓËrºîÖäÒM|9‡¶¾™eœ•âŸ–7"G-7eÛD0Xò¬Íbñc]Æ+¤n®Ñ¸“å¶kj­õ3í0ªŽ¼½¿ÎÚ}"Ú+âtü“X˜¶çôÚœ·(Ú½í†Pa¯<o;Ÿ¸²YÜƒG³¼³õ"åÙb
+BYÄù<)
+©È8N“x|´uŸàÚMDÿ×2É©Ü«;ÍÊn™œ¸½Ó£ÿ‹7?Í–³1I³’D#P)
+^DW¶ÚÍÆo¦~Ãìth¦=æ €"¥É•ÂÅÎT¯Ûj×A7“þ;Co+Q*‹Ž§˜“I––Ý‹–ëÇƒÁàb8hèÇ¨ÿÎ“´{Õ=Û?X|<'Å4OÒ_º}>3Éå´Ü
+ØêETN{“YS	ôTÍØ%‡ý›£•vù+¼tRžÅ; eßÐ6¼O¶û ýLß×»cÏ::_äYçÏ;äˆtì>OË•ÎQ<……Šó“-z^EBÚ"ŽŽIk¾¸î’ÅÇî~eéH‘I\P¦+Éÿ ³e9KÒ˜}™d£eqd¸„+Ò/ÝI‘€ì..ÓôJv7£­Á!Ž4#Ns‡‡<lÒÜ¾°¹4¡?ãN¤ß.f(Ž6	Öe™ùÍ–ñÉŠª¡8¿®µ–e†jè,.a³ÉÄÕ0»ŽçQé½·X€„út£QˆÊ˜®^d)(Éé%t:H5Ùó©(*°a@’ïÑa{X1«@Ûo¡ø£Œ€OtCì		,]å­{þ»ý‡a:ç;€Ö5V”ô¦P„«®åwžtYúñõ³ì*­ˆ#îý_“““²ýmZÆù6ªÃ@?ãY³2æì8xš•Zž±²8þCã—c¸,³§É,þH’2žÝQŒ}®ÎëÁ²ÊõŠÜÃñV*9u±Uv»Xge°Q qh½¡³/>½”ŒmØ¬5!B¡õa“Ô›‚ò¿\fk•+þ¾Üç³ä¬3M5©Žæ®•¤èàZËp¥íý/í"Õ‰Ñ@|…šŽáÂx4gÇÐêì¨¤ÄIôðààœ‹BrÐžæW«g¹D0“æVÿÏeQ&“kñuÑ­¥ì$%¿fÙþ·Ÿ¥.Éíž*ÓÂ¤’I2›uÅQæê}r<Ês•`Ñ±ud³¼¨'¤2R“él4	b÷ÀF»d!Ë~AkMßàqÊº1Éò9a›æ¨E³Ètc«ÿ †ü@Yý[/÷­ÖVs‹ºn•\¡aBÿj”Úû†A¸Ý¥ûF¦á¡‘z#xUÃc°¾ï}ðª;MÆã8Ýºïì¯ûÄ!g^;Ž‹2_Òkl WS @Â(i0¨XÑìÒ%ž;·ÔÞÜÿ­ðØ‚~ÛÚ÷¶¾·×+popˆ]*M3n|p±™Ù½¨ì“f	ˆ&ËÅ"©Í*üITºþ%éÓ,-ólþ °é4gOa”GdòH¡&øVåˆìi÷½Ïø~k³&ˆE¿ÜÎ	¿¦Û]~)Òo§òˆ!‘;ƒÚ>ÚÎq¾	Å2|{~nÎð[ÍÍãwîß€üþ—Ûyí<?oÂ^»Ì[:Ê7â÷2ÇÍÍPKwø8À×uyoÈÉ½¶[ûÖŽìÛ»®C†.Â:¤kô†Î·r3Îü\É¤…–âq£ q;§ð¸7åÝ]Ó°åÔëŽZjÔ¹&¿že;èòñî$ËÛXÈ	Yíþ‘¼~þ—ïß‘§(Têb#OQþ>sTÊ7É8&¯"PcœOäM<‹G …#ÉwMc:~Âlk 5Ã é1IA1fÂež 8Ð&¾œ¿ûå"NQç¶™ŽçŠ°=žuQªW¯ÈU2.§G¤Ÿd‹h””×ð·‹>¸…Pzto(?<p=LÊu^Z›1ðéñ2çZn¿7<€]ÀÙ·ð¿çéËe¹åjJ"ß«îô]q¬sóé,ÐºzqÉ­ªu÷ Ï,pøOw”¡‰‡Zz4«‹°ˆ|,jÃÌ¯ð2›}Ä¾Éd¿#dðfâcÝûCýÒ‹ëîžîEø¸Ï¾˜ô'ÃÉÁ¹eìFëãE\^Åtà|¾§Ý³C\gƒßiu-ºÃ™Å“’ÇMØ½Xæ–§ÝGÀÐ©Y	0´xçÑQªÑŠK0`4Á©Fyñã@›@qçÐk£¥ƒOŠ–”«ûÔÂÏç²¢&oLÈ±`cÊÐ÷{v³/¦ÑûfoN@œŒ¾ aËÏM÷‘5°´ÈFÅ”T‘5e¾LGhÎœÁÆÁð‰’ÅÓP.3ûãÝé¾·?‹FwÎ”µH9hvvõåå¼êÔÖã²Ë‚ž-å4)PÎ ÞQP¶w¼»¸å¼ûoÚq¿³˜7”²Ô.S)<AÉ—¤ìoÿ
+1ÓºtßÕY§¦4lô‡ë&2i.(ªLä®Vúôú2)g0\ªÑD*Í¸ûãÝÓ8
+ò“ 6áÑõržtCý ƒmuDÒ#|PŸÜ×]´{ƒDÞ-@ŸÍ."t¦í‘ä˜~ÅS¨ZúƒÚ;#[°ªoèÃ'+æSÄuÀî±«I¤bJa*òˆ
+ù	è5ìÏÞ$™ÁîÌ°YB©ç_6…,ÔöÈÛ?ëõzò+Ï{øs§Ý'´Ï¨¤£é¶sÁT±xü¤Ü¡¶´Zïn}Gd¼Ãg¶AU4ìý?d”¯£¬\÷SXp¸ö¦õ:\âsüvšÇñ³¬¬^;‹.âÙÉ–øŠ³OfØƒ^/ |Õ«Üy'âŒÙtJT2¯Óý|ÝYX$åü²]œ{øqf‹@w§QX]€–Êe£a€pdÙ$tÑö’¡%À#\Àcì7<‹æÝaP‡¡Ë¯¨ÙÁœŠ2ä° f£¨c“¼4GµgÞã3MÀò4ÖŸšŒe›È²ÛÎó¹¼» sP—@æò
+}W	ô)Z,bàéÓ8{¡k‘‘ÍÄ–b–Á¬‰.b²%õãP8ÄÅ"hˆí&A³³KÜr{l­ŠxžÐõª·†b©˜×;ë­9^ù8ÎxG>]îS@ûkz®ÊC
+La6ÂMÙ§Ý!ÔúH»´3BS‚öÐí8;gÎsŸG‹N–û$r³°³{YÄ9ú–s%bhÎ»ÆZÄ{^åñi/ñÉmŽ_âë“¼Z&§ä}‘Œã.|í~É/Þ¼'GËxŽ‚¸òàpoøÅJXÀxýýbç@‡÷lYãh‘öß„ªž¿§õ©¿ÒmªèÔŒJ \ëÀò›`¨É$ôl	S‘ÁêïUËßDãË¸Mì”üá‡À#<(Sƒ¯yD¹ÚØx>Š@É–‡=‘£ßV‹=‹Å®tØ@öA’Cw•¨*Föj„¼¥Œ³	.¹FÃ¾Ù¨´o3øXJ[°Y¶$ÕC?ˆ-–=i#4j#Õ‡‚oì8õ³òL)ýƒŽ²î­Ðd5àÝH`¡Ø*d%sEJ²;ï ÃÑ>šR³¿;ê½Ñ'c^7ir”|ÌÛŒ0jf\øœz2¥[åŠþk·JÉx05ôXeöð)JöÔç}kw9ñyVÄšé“^ÚgÖoú·¤ÛÓï|×šN1×Núˆn fíôi;–õn·ÂTz9™ä!i ÌšK^ÐYý„Ë˜ÇÿyÇ;(š_À¼ª+É®ñ¥d_¤µdÚ-&{F_MÞÒ§\N1¶ž¯ùô~ÒÅÀ
+>OTµKù„ô{lÂWÖçÊÙøê>OGÙœZŒ,K,	|‘ÙŒßá"ßÍBºŒ²µ)©®Ç‹¹Á¹,/3×š]Ì–5—wßÕ‚…	G>›¹r¯wUçYši†¿_%Ð}TV›`Ïê³~äZ¢ø±Vt{ìÌÛ	^FûE0 nªž[ÞþšÉ—î.>‚æ³ïáõIÞmì8fø0ûü3BÑQ´çûµ~îðÛ|±sŸv4Õ«8oûZ˜ |XmàHýý†(Mü«Ô™`ŠÝFá{£½âÝÎ9¼()§ã¬«T9›~&UZ Z¯ïêz'{-ªá[–-ökàB9Êr¶\¼ ›W›Ýqg¹·žòÑ´³¥™?Fãë“Ñ(^0ëkm;cû‡¹ý'?ZÜÁCb>Ü5e±až>4›§ç²-:tàágõ¿Ã‘n5i% µ¥ƒ5Ñ[×oõ™ïk¢¹_ÀÖ'Ì–˜Ì¡™û5H§‘ì¨…aIñ5ÁðÛ¾„@KÉOàëÔVÙQ6Ëòç=±xù/žpŠú³1CÙ1ûCC©Iþ­0‹ùžÆµ6Û$¤ÙM"0ù-ÎßovÜÙÝ«¤ ‰ep’¼Èò*‚Ã˜Ë»nšîq¿iþ#â|h¹©ìsÅ"IU¥ñ`q{î™¹gŸšiT¬1[y<9Y¡HŽì Ye7ÍÁ£¹Ò3BG÷C?Þ­C«Í÷[>ÞÕ"¿ƒ£×Õ+¦sÆ®‰¡6¹#{ýØQ4Øb~´Àø9´CS£¦×>v)`[ËÊöP§˜ H UH¸U4Øv–×ŒÙÇ Âý‡¹+Üµ"p·ÎÏ·n~½3ÑE‘Í–%2qÙÕãS˜Z°/þXä0ùõî ò£b«™=C†ñó°_üŒ¨cQþs’N0W vsóÌÚ7ÿµŒrí\â–ò(ñú¡µMûhÎˆÏoz<6UÄÄWŠj&É%m±ÃpŸ3ü=ˆE–~¿¼ \s8Þ-h†±ó€%‡	‹e¤—ñØJ.,/…Dèò/#øk’gsr-è€Ÿbð"ìyLâ&Sšå	Bc€xÜ³,™1HÆº`kJï~µï÷÷¥%+ l“›¶ùâ#®‘µ?TŠßul‹Ö–Pƒ¦ï¬]ÙÙ]%ˆ¶±õ˜¹ÝÈ‹­þ…Û¾±á:NJ{\àU-tîçDXÁ‘‘)UÔêu“%†Œ *.¨`|J¯ &îôï“ýƒ¿ã¬˜/VSÁ–0&ÅqŸ¬ÛèY‚¨„ôDûŠd9Mè;ôFCÚìBâ¤~Ã”¡J	P©µŸr	¯^¸Ä¶çç¯	y©gR™fá Øì¯Q$L·tRÊGW½o=â9#—Ë¸|¤›¥Ïâ2JfÅ³2ëA;—ñ»|`<:Næ—¤ÈG'+hè;ösþlÇÛúÎ‰få‰½“$/JœbM„¦³Ë%¯ìè°Æ0Ù^¥!Ä
+bEÄ­XÜÖã€.ÃÔùo:ëŸC¶O·oBÌ¾·Á™ÝÓÝTt{u%C… »†A¢N_º’²X<gû„…s6ÜÓy¼{áNøÝ–¥Qnxh“Ü`•îZ‘¾l¨nv†ÍÙÏ0EûK&Õ5åQôõœ#+&˜ÎÏù1À0ºúü›5îWGéd‰IAê}‘crÁ.ÿ_áùGó”Š’-?×*º¼š-‹§I>š)êÅgÕåïG©¼c-Ôg·eµK9o\TèÝíYRU~éÁãÝgI4Ë.lö¸¸K\Ö<fWIS~²JŠŸ@À§‹ƒkp«‡ÿdcºFêu'Ž•×‚ü]=eEÌ&K¤®7Õ÷ýxŠœ=ê¸:§`ƒúÐá	¹9B0âú1¥=˜ž«‹Â!ø yò´3\mÝ‹À­kç•a¹;GÕ¦;ÇÌ—ùEÃb`hpƒÃ?@çõ0òìÊíeä†°y)M{ur€ÁÆžóy¤M;£ŽŸ§Í^nç'6F`;¸m½E@C:¸@…®M¾²–¦lä ¾ì@žÈ fh¢ó	M}Aí*wFøìu+=½¥Õñô’òG¢ OÞvÚKØ!Aì.}ÐÐ^Ú!qÁÜªÍ,/!kÇZ<‹‹Qž,h ‚!‹)0Y;E—ö¬Z
+¹
+Û9„Ì•Œ¥7Gé˜Ì™Îî‹Ô×õŸš…#Û†5I±˜ÁJˆC:ª¹¢wÊ8jVŽFBõaßàt«w.:¥sð·°[ž8ÃÕgLÜËå\Å$b–¡KÑÞðLŒ@TÌI±˜%%ÙïöµÜb—yž[ÄP¬jiæ2æƒ<ÍfËyJ:ûý¯vÌú{°bHÿ«sjW•õ·²J©'"9üØ³ÃÞÈeå[×fß< „Úœ½iÌR{‹PB›ŸE…~Ý×·J¹döÜo8°ôF¸}€1á­[š \ªÿ15Þ™Åiÿï9,†.“;œ^µùxº×<(f·9¸«¥ŠöñîtÏôÞê.ùÄ²­¼Ã¥PfL0‡ë |RW_Ã‰`zçÅ¼o_ss~pRF 1jç Í–ÆEž}H`ƒÚ^Ú¤×9¨]EVú-ˆ.ôø}ceÂŽÁÂ 	a7b£ìÍÌœpæãLšX—ÝÜdj¨â¿L?6º§Dž5Ÿ‘y·*-ÅYÇÇ`Q¨mŸ†>ÕíhªšN<Lz;®X}»…Ù`Q0nglÎ2á®jdæMÔî÷›´Åìf…6â"Ò‡(µ¦Rˆ¸Z» ‘ƒiwFlã¢ªð"G³ÍPÅÛ<*¦v²àSà¤ÎP°cm‰ÁÀÃLŒââRÉ‚‡²à!Ê‚ªØp ¸0kLr“„Ÿäqd 7çìëÇgLÜÍá¼ùÈèFðd=Ïˆ_}~~$? ‚dk<¯Ýð'ÔÙ«Q^&£È¡¤<².¬üíÛð^yKÔXÿ|ŒÃÇ¦¢ 
+¦/#®´¨ÜãhÒxè„„Å"¿R{-w”zU~ÃATcÚlAî›ëÎ"=¢P´ØÖ"s»¨aµ+(/xG¼DòCÛµ¸U“Iñ2E~íIÝG£¿~z*¿VýaQ}s¿H\zk‡£/<+³ÓþNg–o›9ö·m-º/vˆd|$ÍŠ=ï=…~©s‘ò®-z¨ˆŽvôáè®¥SÅ{÷þËU‹nHÈíX(€Þ ÛÌ¸Ä§oÇ>Bá/ÕFY9iéH,Àà¹tÑß¹‰ímG8ÕØï@Šp=ÿd<OÒ#J€ôO×½/byåéöÐ0>,[@˜ol\bG½ˆŸ§l14>Rdó˜1w,{–A}Õ­c^T“y±·Ìñ-sÁôöE‚¿fÇÇ24¿L‹i2)Å\p«©A*¾í&ß²“<÷«ûÈw³º‹þž-]”[ío—Ûn_1Ü×šYèË«X@Àþq¿‘m¼Ç¶A,„jÁó1Òª‚–g£)Š¤ßÃþìNßØN¼ùB½Ùz¯ ï¹Œèk dÐGd>úJõjKŽàÁ:vD´Î±›_XÃy“-ðc\1xd1C»ç†Šåp7•‚WÄ#,"’_+&8ÝJiF’k&ÁÞ8\UÿœŠýwâ¤¾”—9peü•’¢;dîGçL# X¬û;îp¿ªÎ;xÌk£þ|··*[ŠVv”7¯‡2²s)¨ºˆc¸¢NÝð(øXq¤:.¼e|7´D€ýoß†€*Ù×½Ï7‡± ÇQ¶¼© ßYø«{ÊI,èOÝNî"K¨1ª¾ô3OJ–/©Úü`ðfóàÇšÁPfÃ–µÇ¿Â€Ï4ŽZUÑx%ÌÍuh†æBŒ	7!G^í›³¢ét…ÎÇnëCòá¼¥Y‘hì·¾]ßSæ®š[í¾“4õ<â§¢Õðð[:#VšÖž¸å—ÓFÖÒµÌ1¦î¶ç£LCõjäÛ†À÷Ó÷úøvR‚ÅŽ¨Ékºœ6ÊÙá³¸™ƒ6j}þ›Gä¹  !£•=`¯úË	4g¬	¸Â20ìÄßä¥5?f­À¼vsü³‚]W-ØmAwœ˜uò€ÂµT˜¼0Pdü°¹›‡`€‘pÌ KÌ¼-a¨ŠQª`xîzÂ-¹C‡Úü·™ñÉä.¦<(ÿ¼ÝlhafZ8,Š#Yb·¡µ"(G7à ©»âMñ^?IÚÅaôÏÃù,>ýÚãäáR.„ÆNÿe–]D³×ñ<+cŠJý]±6^`Õ#‹“•òõ©š?þ9
+kÎ£¯;EÏÒ“Å´´ë«¹=‹®e¨WnM=P»ƒwiê%+"?Åî“}cå–&ÌÖ-ÝÒˆð>ÚGÇ(ïŒòÆRNô’+Þ{Ï•€zjd÷ÙƒÁàb88—¡bœ±lµ¶#]¸1›óeÀš: ÝOr´²C!ÁN]$WÑ‡¸ !"xPÀ~Õ=¬Ç¬™1.
+Œª˜]¿E@1ôû·/~8Y­~þyZÎgGä½B¥ÿ&ÞYú"|OCÅïuŸ€¬òY‘iŒzÐy¸øøç†z} Ü²?lÞsc{9È\I«ìû;08ôu ‡¯í¢7XcµGZ×Dê9-ïr~T;”±ã<nüç°Ñ"âQž,3ÓP±((jåˆPuÄ
+Õwú½G;–ÊÒõl£o<;è´g‡ÍgùìÞSžuÍçû™ïàGT±Fö£KmËjÅ¨¬%ãy(7Ö™™s@~¥v@ìÅXá9Ö?æÁ0¦Ê<vÈ$?8’ÉX\Iá¥ö²JV·_h*³(<UÙ…(?Û¸"£yŽb72ƒ#UsùÔxŸ1r¥z&8BD°4
+,æ¨ÛQ+	©é¬»+ž›+ÿ~ñ¦úBx¾MÇÝ2ëÂäÛt”_/JŒD´Åò˜M]á¢\BŽ7kAPL,z`@Ü)ÐßÌ†]‘¸!š<Åòø×³¤X€ƒcëˆ_Q“Ù’ñ/úÚÈz¦øW³®&h4KçIòµ™Jx‡Ö:”0ŸÅ %Ñ4xkNÔ¾£îTI%Þî4tD†S*æ÷õz=—¾áçv¸~h‹Ïiïe8
+·®Ea|þ÷¿ÿ§u„%Ö{ZÕp£ˆ>™SÒÀ£o¨®Øñh`V­Æ›nã¦ëö`ezF“¯Ã“[?¡Eª:KcòMÖ]ÓÉíàG›æF"Ž„º¤è„œT­Kéd§„Õö²rç,0á»<›‹ÎU-É±)§¬»zpŠÉIgáHå—ÒËø)ZqL´Ñ6µG»¯ÖòRXh£›c óèJ ”–J‰áá,Žp@tszâ{Äqc]@ìS‘€Ý5Ê›Zè|Rðj‹Úp4Q æÎ8§Øû{2ýµ>ÇAúšërf›1áG&º¯ãD1@¦os=Šø>KrøŸFë¶å8:K«r PƒÊãÎRØœ±5ŠŠ-üñž™ÀŽñlóü<µõ%)^€Z ‹@IÛ~×Óe‚oSL++]· }Ú›z3°b¥™´1ÁFß ã6c¶íé\Å[‚á@èX˜û]šTê¦]5´P6Ù©åyÝÒr‚Àv‚	[%k5\ôîÆ¼SÔQÙ–o‹žÀ¢1…nŸÅdÐv@ÄóØ\rŽ‹ïvü;ƒ÷CÔÐ`]qˆÅkW0EEÁœ`n¹µ®º‡û„bHÎÇGWÝ‡}üÚ=¤i7f¤ž~*©°»{j,Š%³”bz|íî8+fŽV˜“×#ˆŠx4£KÆs«×	Öb}ÂêÙ1|äFfœÑbþÚ:•V¬?ŠS
+Üšd“Iˆççv€¼ŽŸœÁ8{Ü”µg¯Š4Ëì÷H¿ðÿ8‡/fË£b"žUi˜pIm3S˜ðš9Kþ Òükwè­7¯¯DµûèH¸jî'½¹ì‘ WÑ[ÙåMËa.ÝŸ[z»¶‡yÿì£’{ ™™Bõ‹‡½0èzËÏú–¼zýíOÏ¿ý«ÿ)Äˆ•*/²²Ìæ@S`¥Ëa{ªl8¥M†[#hŠEÛ˜±08EçØa6ÊÎÐqj÷*r„•ŽÇ"÷Ui/ë)™íÞ•&e¹_ÅnQõå§¸ùƒâŒ6¤°[.}ØCÁôV9¶ÂÛ(‡;[€+Ü>Ì¶î,Ý…+uZ…Ë÷ö}X„AkLÄ=9H‹;™ÔÉì'í¶j˜ÔSE4˜•­ùs°ì(3,EÜ`i¦ LD˜\ Ì2:½œ§q*yj!/ùìªÂŸÝ9®Z­¤+FÍU‘5Ö.UÜ–lï"8~tZÁo¥6Ø *M-{áM5@áƒÃâ*©dx°ÅÂ%NV+ÙE¿-9Ô‡Eå£ß&Ì#ýIû8h×GÒï=(üm1 g¯öšNžú¬×!ø«Í‰Ù¡º©¦ù0	a_¦ñå
+ŸNøD‚ÀšbÀºB r)<Ý7&øD€Û ¾ãÿŽN½U˜uÇe0ø987ytŠÃ“Ûòø¿–qáˆkžs¯£•D\gj°å½Ÿ•ùÚA™0Ë	óøÑkÆCgÖi“¡Ë;ÓlÈ—½Aö|ÓÂvÙÕ`.ØMÁdÉ¢k„³XJ£òäÓñLŠúz%¬ô?Ž »÷Šìz¡ ©”`^0¦Ü•ÆÖ1ø„ßëOd°C§e€Yu>è`‹Ý¦Éã²¯¶8t·(Ý¹gÏžÛ1€QÖqJ^…'yåcch[ý±š‹›Fa•[é™‰‘bvé—!XmKy6(^ÜDüf”ÇqÊ]O!u4#qAc©OVk‡~{Oz-Ç#°1Q}cµ½'3¼¼^G¼¯Ü´I;8mO•°ë"P&Ãp]+•,ÃkZþì2,I	pÃI'(9+i¸ 1´ü>–ñµ¹¼¾Ö™@¦G/”„Âêelý}+8%(¥&´ £ËZTGƒJ¥dÓ4\,ÇW\æyæd	ê«Ï.æ±\™åZ²P?°X¨YmûZún1 É!‡“šÚFU2,ŒSŸ™ãã¶ ñýºCSÐq¿R”ÈÁ˜	”ô_$£†§N
+ëÍ³¢Jd½¥¹Òï“ÀCý%úá‰G»	=TyÔ$¥xaÔØ‡c¿‰²öudÓ©-j…ËÄnODÕÕ2öIý’uc¦ôÆŸÅ#tK…µ-nkš"b‡4‹7†4)'uap‹œãuVGgXàôÔ¶¦QA%Š·¸3µÆhì—ôyr}sÑÙaˆU%RFÙ‹¹ •=¸}|Í4ïöÄÃmØŽøx@wÄ‡ò-
+yRõ&\‡`§Ðzw2ªž!á‡Òéx—AüÙïoQ™²"áú6ÊuØ=µ—ßNÉ²¾Uòøñéâ÷ó?Åû<½v«ì³Ò)íXËe¬ä[ùÆÊ>ýwôÖ:wEÙÈÞ¥¦È­wÉÛ
+Nˆy§ÊüÐ/uyƒ:`œæß!õ\ýÔëvâ!Tá%˜¦ÂŠyr1âaŸ|H¢.Ý
+‹ˆªžx‹ôíÈÁ9ØŸ«FÁõIüQma¡æ+-J/T scÕ%ÔF"HÔ¸I@ö	WhÏ™'EYžJ!—\xÕF }+¨Ð[};!Ü2WÉÙûþu8ðÍ&#‚ˆ¨A6¨ˆ·ùy…9:\$f`­ #éåá´aUi	…{¾„BÃÀÏŠÊ¯àR^«ë7ý´4#‘0S’©i;ó×ÝœM'çáº\_aòÚ²VUkç÷îžÿ³ðûÖ!Ÿ•š…Àr±BÇ:‘¡Ü D0ßý£l“ \'~• ™½d#ïR¨íŠô96²€aÝ •Ëk×
+ˆÔäãlP›…^Ì„¾Æ+-ç+lã¶×^ÌƒÒÅF.3\Ì£ Dy ¢\‹\àü{†ªv°ÈÎ³vt]~c³*LÚ”n=/kßMnCØXµdy©ø¦¶ýÛX·˜íã·§Æºj™B™uÞü]Pç't´„x8\&Î›uQÁÜ´'µQ±¨æß°e×0žK-™EkàÉ3ô5(1­‚0ëî\åÑÂº¯v’EŸÛkB¢‡Z®¨@Fþ(ƒ¶±!øQ¬ºg_&ÃÑÞþ¹v
+Ÿ}1ŒöíÏ;¯£™é%µñ—¡žöè\ûÌ¸÷4oÑºž¨t’^ê¶\KÏ»kš
+¦xš9Fk˜9‹ïÖö0ïp3kƒänÜõþÙ:ÞƒõìÏÌé
+È0ª€Tº¦Þô@:eKÔC\ã¸±,øÙ½ë5ð‡À
+ÓzhÔk –ÙQŸìURN9 èãËØç¦½£öÎ\µwì¬½Swí8lÛ»l=ÍúH7ä%õ¨›:@Û»E7åÝû¤ŽÑ0×è;GÛÈÜa3þ|=É@¤hAm8]W. ó·¶	õó1 ¶Ö`7l<ƒ ö(´9Ä­VÑÛZ¹ÂaímZ|{Zd	tü‡IìÃl+
+ªÊZ¦é@KÂ«ÉìiEbÛøÑXòeÍŽ‡}=\NáÈ2CÒDÑßkn,š²Mü¬?aì?+uPâou ø?íim¤Ù¸µ^¤°mÈ
+ã©§ä2²Ü.ûÊÒ°õCGMÉaCÏ³YAÞf5ª|—eeìð&?.M× >ì…çqFÌö2´ÃVPb&îÐ˜£qË­‰ÓøfG¿À¨Þf—dÓcìHÉø	©*Ž7f2~*Üäi”Žg1ëÖOù²Q”0¯v çÕJåî*pÓ¯,÷òPfÖg?æØyFn)[c´Z`,É×X]|ŽLM²óÚÜX»-°¡WÆ¡Âxa½L)­¾N&jÍq³¼áø',Uk¥Õ+€ix)¿c`¸ÃP°ÈÆÀ¬°Ô´si|D2EÚùÜwQÝÕªÄ,±Þý#ä#­ÓûŸÓ¦aÃ‚¾¿Kçè¯W‡n™Úµµ¶x‡1ãAÙ,pƒå×µwÏ’ñìŠ[fg»7Uø¶
+ÙXŽ­ÅÆj¯Â³f?ÑÖªüj”³S~ÜÔ>ÛÜNsj¾ÊnÓ8·ž%þÍ©”n9ö«¸bkØ."[^eÊ¹W*#t gÊ[Ð21v±æQ‘Võ¹Ÿ[uRØ?×Á¥&³y°F<º¶!¤²wŸÑ1ÖÈØ{Sf™ÂØqFÿâ—[žeÇ™€zïË‰ÐÇü'ÔkšÝ<I)Ì¹°WŒ¡ÍþF»÷nÿ.°ÆÖJ„.±k?P©¦E•VŒ˜5Kë|`+/4ƒõQÌ5fðc%WTø6 %N’Ù¬ËSìåñä&»¡?ã`_žPé·æU›)My2b•ÁŒêzGEFáG®h@a^YJPØ{›	º!fTÿráè†%ð¤@e*Á-öd4Š¥«™GŽÓJ*±MÁÇ±ÈÎÉø¾¡Dˆl–ŽdäÈÍ@Rå4¹»½Sí>Óöä]Zo"‡kÄÃxëE7ËÑkü“ÐEým(‚Ûµ?IóUŸèj7[Ýl˜D/Pƒx›“¬îèìý,©åŸðìm¶Ú<ê%ù{Óóâ¯æú‡?èeU¿'%õýµ*«ª<¥–UåE]Ø“r`<ˆ}Ó'Ÿ;Ø{Å·¼‰gÔ_ uÎÎõÛ~Œ¯h+ÃvkËöó³¸å	ÝHŽ»*§»r‹˜WGX[qØFEX„ŸÄj°}¬ëª;lÀm3=gXÕfW)†ÀÃ¾^V ô«õ¦Á}<Zz0=Wgá‡W¿”ýMÝ*(ãBíÚÀÖ5QÊ±Ù™ÊYÕ£«;GLÁùE£Ü½¡ÖætwÁ? ;ÕÃÈ³+wºhÈya"UÁƒ¤hoÁ‚aƒ¾C«¦D\ztÐßmÀ˜‰õ×q’ÛÆÊ‰%F¥àM\â-ÂË^š‹=ZÎ?N_o‘e7â3.´T¶ÚÅñ¨Y_'edZÕ‹´ñÈs80"35êBR¿ý–ø‰§š…^þ\t•‰Ör–„¼[ŒQ¿b`…X¬¹Ìj¢»z/õ.p¡Ì9“CÆFàô’;YqqC/,«’É# “G*Ù/B\ÒšQgÐˆ·k¿²‹Ta©ÅàcY^(©)†XŠã¿…‘uuâègp£¢ºÌ2ÕÊÃÌP™ÍfÌ*ä4›“b1¢Üïöõ
+ÚŽÚ…Ú¥qvh„D3 0 ä):SÒÙï¥×é6%ŠœÁ}x6º+‰Cß£QÜ½†û*¦(øU~0Ø*=ï$Í¤œ+ïÒÇ#zi‚Åb…ëïa‚GfŠ½hRn<¥7½	[€q ?‹,ï.@-À¢DÆ§5ò²iž§‹e)4žöFx£ÂØ"Ä6·!*C[Â»iEÍ±œV‰¦-†LÌ†ÞåÜ„5»È“y”_x…?~•jò¡34ÎÊ©7#Ò6èÅÛ'n¸#7×Çã×8°<·ô'ëÌºsÁ¸OÕPc
+ÀAHµKî¤ÑŽ«ÇOÆc¶ßoUÁð TT®ˆ oun+ÿ á®ž{þœ²/]ÕLëÀß@™u~¬?Y°1Ëf&£àë{¶ZÓ–sÀž${üCtÏb…k¹ÎJ_d1Ã7±Ã;Þ¥­[ßM94Ásîi6_Ìâ^ŸM&[Ðô{
+ïÙk+î]öî“ï¢y2»&ß//¾³Ñl	Š{*©Çvó`V+ú1=:tÅ:î•´PO6fh”Ž‚]Çià9ü²¿ s*PS‹=3‡u-‹î‡¤H@ê:¢I}ÓE˜hº)mv%«]§yÛòµ¬¤Š¸l
+ÂP«¬Ót˜Ñ1ší8(7jÿŠ•)PŠ¦ð“f¢‹lYžZÈW#]©[fºsQ¯l÷	"â9UÕfÆ&ÁR‡jÙ•Zq¨V¢Z¡Jº ç™ñ «(I.Í!ÀnƒªO¥Ü7–ŒRÔ^0eÜâöi£Øä´gµ=Í(QøÃC;€)SÇê;Ë¾ÁLÒÚ>PÄ£,…¥¼V$\]kàBä® ~!TÊ„º=«Â`7æõn¦Úó]Úu'·7þ&W31K€±ÒÛg1rFò|ä
+Å°Š9Ï_žˆ%r¥:¡u±*}:îŒðéQ/aõ•cÅ&ïÈ¿ùª/@¯dÎ‰üŽÓžœi|ÊÀziv°¯Èýé©µl<û„T¬À	hW3LÕÂáÎ`ót–ìt0p˜ÙÎÂÎ{â<.îÛì55‰‘(½>;ÇRóècëè$‘çòë¯å‰q—]’»Ñ[,‹©¥®xõ®ñ‘báNªrð|éúrnÿ?þA¶ÿž-·Ým­‡6-n¥-{šÍÊÕÁ½Í/)Äã¥P÷½pÒÄÆ‘!-Ò7‹;è›_^¥qî}ýþjÇm7²µKìvJWvSo’åßF£)Å¤ð¥úó4ÿçé$sóÊ†l¼w¢+Lð!¶2˜9/„uWNOy;ü‚«±u·RÛ=äÙ<möŒ{³´Ù&îý¶3Úì	ûf`Ô´¨‹uÝíàÂ„GŽ¬¯–„tÙw3dQXná/qb]4KFc‰þ$êÍÿ˜‘ŒVQàÒ
+IRIw:Þ]8jÓ9òðyß”‘!pG‡½Æ[é0ÂnÚ®?‚½vÏïö¦íga-k½ïð5›¼éVÏ„ì†¯ÍÊš{J¨(ÕåZék˜Bƒ\\ÉúÝP§,ñ^k¢â€«|ôAuVÙ§ZÞM!!ií	~¹bŸ›CF?BNF…û ì<ÿ{7ƒ^dVkWB	=žî+-iúã\×#&¬VÜJ,6°y^7ãîßiXîêš8önÞ‡$ O÷†­Í ‡*T.†9hLË9úð§ÀRõ²åˆ…ä²&ôÂV#È£^­Û‚F:!#ƒ+· rfs6­`
+n3·ThUÆô®gW¨‘ý:-fs2¹‹éBkqÌä^“a`RÐãÿýïÿiíY*íÕÛz,v IzÙ¼(0„{2ÂEq9Ó¥‡î<"%ù„ÜnpêÒéGoC¾¤ëµ0%]ÜÕƒåª8€—VáQqŽHXínö)óëÀ;	‰®¢¤$Ñ"ù..GÓã(½~Üy¿‹Úí.Âñ|ˆ%ÃÒ)‹Ì?ùr¥Z×n¾Îc¸A7è¯µ4üþ>Y…Ì0ûÌãrš&ºýêÝÛíÀ§\z‘ú±Eá.òøÕÙáaZC#âcÐŠiO5—%Mý°YeÑøÅ5ÎeÑAkGðãeç¯XŽFqQtŒ¢BNgLñM˜*õ>°y*#XjÒ‰sfí)†.÷žËòÎûï@µ†”ïËˆ/ðSo}¹ö&¸?wÝ„ÜÄæÙòUóï´ ŽŒBñ‹$]jñ£3´tj¹ó*ê¯Ú¤Ýz¬¶_låß}Na‹7	ÃQ„ÝúMLsê]Jù‡«xeS»õzœ6é'’FátÝ¥·#1È’Úým. 4òòñ ½w;÷€Ó¨$wíS•žÀa:Â¸ÓQYÌ_Žf´X¢02ÝÖ¬¤Œš•pn½GðÝx¨~34Hwoá%æÛÂz|ª•ÚÕþ'³Æñ~2[\°!mm£–AVÙðþ¯âlæýÍ‚”‡ “Û»ò»ù®yÓog¾kg«YTûM•ÕîŸÐf÷»±Nþün¬û¿a¬Û°eN7ÃiÞáÏÅl\kmZkeX³™ÕD°\%?IÑtkšÓÖ6¦…›Ò*}dçòwqDÎ¸DzNnÂl"«h¥²2gµÉ¡é-pÖv·—oÞz¢êÏE6¾>"ÿþæå½¢ÄÀ]ô:lü;¡mLiv!ÌÐŠlóìó.ÂnCg¢ÅÖŒB?íþ'Ìäv¥­=jàòjØêGh~þ95ƒ
+5äFÐÐÇB­ ¡÷ùl¥g½^ÿ¾/tÄóÀ†oem˜ECÄ5 Hf¥la$]ÛDj1BÖ³Žú)>À2*`ˆÆã@£hÀYôj¶®-4Ìú¹:ƒ.Û“ä+€}›Ôš• IA…D¡Çi#èÜ"¨	$Un¤tLw'Y_ÒsY’øÅ9ý‹†Ì] 8Ê8gƒ^xÎ Äµ~ïÑÃFA½sÃ ÌX_ä1ÃŸ¬îÉ9d=8·æ’h¬öñÓi<ú…þ£` `ò¯ƒðß`ý
+–Ì£Åè›ö€F)~Ð~A¾aáùÈZ_dãhf‚¿¡P7¦ûnƒE~a¡Ãa`hÖhŒ‰¾úZê=ªÍ=øE`.Ê•Á¥O\úÁÅU”I±L«»?ÌÀ†hS±‚Ÿ‚_Ø)øƒn1¤7c¦àÝ2^
+o_²(6˜ÚÛ<*¦œ;Í¨mÐ¼‰ÿ¹€Qlß×‚Eáy)[j’èÖ©ÖC+ J Šj]:0‡bÌKZ7›um›cÎ ¯F·Ÿä1¹Î–¤Xò?®°²'Èc6*‹ç)y‹FÌ›6ŠÒ4ƒã!&@G@¿=ã0-È):¶Gcx¹Ž6Ûå¢Ú.ðEpþp¢Š
+‹ù‘ü+Î¢¾™Ì'TØÕzJtD:¥‘ûu(Okˆò|ì°ŒFét³Ã›>Õ8 ¼F'Š§Q:ŠgÚ’šÄ¦[Ï	;9ëéh;|ÕUÇ+¦~m.†"TbþêN7M*ÚŸáÑ.8ç”Ñ;§bo°-pûóø»,¿Šò±õ0¶bÑé†ÃÑñ'ÿ¼`Ê†‘Žßõ&ŽòÑôÿ-ãüº5Nœùø·£À1@“ rÖ‡žë‡ˆ¢6Á]5˜ó¹²úT„\ì37;OC±›OCßÙž¹Dµè._þ†–b?­¸åX\ÌºwK`g<g4³)ˆhxÈMxOé)ÇUc¸~«ÓÌ¥Z¡‚ÑÂ°º$Ùv1b¡ #1õ²Ew°;$ì|¤+xM/pMÁï…"]¡ñ½žÁàª.0nÊ½í Fê/±ùuSøÝ|¾i‡à`	“ojjí&œOóÀ$ø$XƒºÎ Ï@nÓPfÎ†´d¼CY±Ç5 ‘ô!G¢è.ÂÔj2bÆjDDëÿv(¡_âì¼‰âJˆ8ªCX0àˆƒ63¼fßS÷š«ŠïëŒzi•»Ó+³²«8qg§ŽTj>«Þ¹cJÃ#RŒ1 BÉ„bôÅòS8ÊC=t‰ï«®J‹c}ˆ
+§×3¿½M½¾æDð‘UsA#šðÅV9#ÚCÉ „rëñÂšä”v_	B2Ç ™àðÎ¯ÉVÇÞÎksW0e,–JwùqD:zO•j³<9ZyÊh*T_Ÿ‚€Uo§´zZÿhåù“²ÓGÒ}‡±„Œ ÍÝ‘*Ëê?V¿9ZÜ~·mNõt“î…R›FL±9ÛlÉF,w! r“7aõÊ¶¶’í‡!ÑUÔ4EV:DD—0”Uî”µWYOcÊÊo‚5·ÄâCÒ	³²žá±W¦S¿ÒÂ5$RíÈÞ“ƒ:\¨%úÎuÇ”Øƒ±´vDèUµù6aå‹ÊÐxÎ1ÅŠ®ÂR¬¦´ÊK¼.;ŸË-b‰²òÇVm0%rSxŠõSÁàUž|ÀÖQÔØ¶{¼ÜaUÞc‹E¯®£Mã¬ú]“Ë6ûƒöø³$Gˆ3MçPÖuv·±H@¬0ED'Ÿ
+ÉEZ³[ƒëÏ›8[;è."qa/ `*?¬_kzñb{-¥Ë×}n· Õ(Tz÷8ÜÀÓ•©Î±^‡ÍµÚ2Ú7Æ#nÜ\ÓÐ¸®o*¡ŠlõV‘öò˜¤¬æñÜ·^`™Õ2dèúáˆ–Ö9Ù¢âÜîës¹¡ÊBn¥ý`{¥ â÷â´wÖWp¸Ñ€.‚i~Ïj¡…w¯è€äÊø%=~à;{X£aºFõ£OóÅ<ºP†pU…….ooË7Ô3UÅìZÍ‘?ÆWÈ‹ZY"¥gÂŸ²àÅ÷Ù<fÑt·±fÊmZü2Ùën}n•0î«¦!~:sˆu›Ñ)1Uö/s†ÕUdlj#Oúe•Q©á¨yy„Ó96ü@ï×›•Ñ~kØ¹ŽHm}®º¬éÕöTá]:GÚz7X.Äoª6ÔÎÜ
+ð³ieBô¨<™`åÕ2$´8$\zˆxªðO".½®4Ò<R>«Ú#ûŸAí‘•:ÍVBhø{3¼ÊQtö³¯U¢ÍÀÖSzD`î„ƒÅcR8äJzc%Ò»)gbSr[V8ÑY‡Ûèé(§\7bƒŽf Ã
+:~æqŽþ_©ŠpÊ	x±g+œ"µ¦k§ŸwEò/—!är)zy•úôÃÂ^.¡ùQÅR[J*Åò&ÇGd¿ÿUPqQ‹E¤jYcEF3vék¾Š+µqÐ]7jRÜ™«·+’²©2)m¬—ÿ*¥R\ÌV5R\&Ì;®’â·_n¬RŠÁ2¶!c¹eù[bVpÿÓ¢ÄŠ7x}ë®ë§õJŠ4ô!ëj0œÞîÚ¶„Féõømt©ÐÍbÄeâôS]åÄa›uBÆGp´(€Ò²Ê&‹ üV‘`ŸOSh­z(ŸíF;þ.Á²ËË[î4suË”»°wî¦hKû²-.Üò/¹éŒÔÐ²¼P]±…i‡áÚÇ”l1½) laÁÌfY9¬ž²°”o¡÷N÷îŽUÐ‘µf“½K
+„”ÌhÎƒ™[L^xJžL÷lMX.Ób¦,’†–8)ØwLcÇUÎ0„1‡AjÙ!ÍhG´µ£SX©witMŸ7â´w`	-5Iì¿â®æe7þ o/¸UÝ1÷íR%£W4›#Sëç³S“§­|cö­'è°€ÙE.‡Íb†Ô‹œåÚ|VÖ¬0ÞõblÕ(ƒ—–ëH¥•ÝüÆ-R„âRáæ¡öÒì9ãjû€aÝalìÃ<ÌìFw–sÓknõ"º3¬M3ÇŠïÌ0ST[I˜ƒÁS%º™T³»!ªý7/÷Õ7u„|°O'ä³—y2&ø³è™¯Éeè	@‰àE’²ËËxü<e$‚ÎiÒŠz+«`¬……Wžr×WAÄxÿí,éü=[î¼_£ä¥å»¬9Ô|¿«à£¹Gq%Ð¹®´Õ‰TI.Ø`H
+%æ±Ìô{¤|ýÑïÜêFQ…á›±“s·GÃ¶ÕÆ|°lxK:&ŽÊ»Îâ´Eý#ê‘wÐPÁƒŽýÈ¸x£~`¶èíø§ÿš`Ù;‚êüÐ+Š¼w¯³¬1,Ðk8:È’£;yZòÀÝ¬E`¾¡A;Æ#˜ã!ìˆ¥u×¯c~kµ`¶Ë•$ßlìd rê^Æ\ŠzCŸ©Üû>±TÞóçÎ–4P³éö[².7Hªfªèž
+ÑŠˆ²Â¶°I <7âoØÞv3ç¬Ö0q?4ÿ€w+ Ë&XÀÃOû³ão]
+C0|HIMy!Oí8ôbíÈ‘„¿Ä/ž¼' q( MÈ”dú¸<NJ•”ö!EÉij‡=»®vÖ~TLçÕü¨¶`(ÓGÔìá-ŒãI´œ•z,Ñ‹òª¿îŒÑHp™jnCöŸô<BÛÑ'?û4`DñhŠß+}ÒøëC
+EGxDµ‡ 9éÜU<jªÝÁIúô³Â»R¿Û<@'rË}¤âÇ,éVðCKè"^ÐEö‘\Ð
+Â4ÊgÑ¥ª¡ÃrTtÝ¦Ò.±™aï€k™.”yGs›¶¯ÈoQÝýlsú5Y¡!Pb‡A÷Ó¸U‰ªk›¸|‰2Ê<‚ª¾àçH#­=i=°Gy•ziQš?+ib`ÿ7©¦Ý=tÃ¢Ì³_âîÙ^ïàÜ3Øü!‡úôq©¯°¸8C^%£ámÖ¡úiw€†Áþz˜ä·L–«Y‰än©Ž~â$iê4áJ“¢h(áPËÖè¥=‘W‰â› o_l!§ Q~uhwBP¶Ãi•*n_“7eT.‹µ(58ÝNjbƒ‰w‹ÁÏ…1†¬rK†üÙ o@+¸àÔPhó¥Ùéci^n’Ï‹z¶ÅÕ
+ãy#¸Û†>Ü5®y+dsÒŒ»{°Í½3àw³çþ©×ÏûËªšßº(èípÐ[N~4òºóÎCáy)¶Î^<‰íK4‰œ·•A|7ù|øqêÄîšÛ¶@ÚÆ…Æó›v_›¨òŠ«ÑßÎ°Þ€Äšc¼ ¥°‚"„C¦­‚¶[ûÝkŸ{;;V…ÓÝåm_ÇÓ¾q/ûïöÍxØ-”ÓÞ³î3Ó†\7âMÿžtÃîl—It7^wGèMKo»ûÔ3N~Ë ¼»	w3 1†ÅùãÜý>~ôˆ%ÅOI|õCF³ý:Ûó(­º‹^™b{+Ú°CÅ¯aßNó8~–•o‚Ì0¬õdK|•Yø®³z¡íÕÍY3ÒÕaœ¥¹î_å¤	ñ.ÙisNF>*œuBc$|Ul·T±ïU×£¿8)ë@g©ø}ñá÷×¶amxB<¤®ÖÄÊ±ÊçÇ^@iX¢ñã:Õ~Bpn½:šR%Ê{÷X€B@•É°R’AÎI¥˜¤ç^ýÄl^öƒéÌlØ¾6ŒiÖÂnû®
+‘­ÀÃì>µpì5)ŸRÉÅû¬*TÞ…5¸QÇ²­Yø÷¢–Þ…µ\×žZç²%½ª6a'æE£©ÍÙ†¯}éùÔ¾¼kÛñï1?±ÅøÓÛ‹?ßª™úln¼¦o9ËÚš­E–ÇÞÎn¡à(0CrîQœÏ¨"rÒ<Æò,eiuwtÄÌpˆÅþŸ¤ì›òº&Ý(h-ãÜ„³S–Ý±ÛÕí5cus¿Zú­o‚µ'-Œ§Úââo VÛ†M«Â‘–…áŒúJ»RˆúŠtVÆ`]ŽTÿ'2hÆ[Ê é(õ<¬ƒ Þ-°2'y•Ç’øŠpìÈ:BG“d÷óÛ­¥æšwY1
+Íó#÷w¶¿OcLh‹@®m=~Û¿„Ô¨V¼Q=lÓîÙÃƒSµp‹q‚ïQ¾DàC¾–=oÈè‘y§œ€„ZP/Ùp(8ëÖÞAoE3r…‰#PFõj¶^|Gø²9¨BS¸ØN±ãÄ 3MØi®Çø¡§UÖæmÇ³$Y±míaæ-Ep h@I›ÊüX€ßä‚Þ~@F¯XS/	µ¸Á(l°ÅºWÄVŽÐ^Þk}6Õ›\ã˜98ŽŽÕ¶”Ç‰€ÏLú&%ÔÒ5nw±ôÈµJq¢‡&ÑýJïB#N›µŠ’ažÐJ2Ï”>ÒI°{, 
+Ugý¾½$Ó¯À4U
+®	›B½r1jW6…²+4üÎ2¦NBó8H—Á¾B§àz.QµpÝ,úÚ§ÿ˜Øéú¿¡¥aŽÝÏimþ´6%éÇí±TðË›‹uf[Ús‹‚D}uäœ{Ol…yHí›¡§2¼Ÿz1Jà´GÅ_“rÚÙfˆìÛ6L´òœ_™½•ø³½æ·¥=qø`¹ÿŽV²"´[õJ¿?©¶»/Y*4Òì$Iã1Çúã+¡l„ÊXž–QRÃƒÏ.¥â¤(¯g E¯Üûû)ïˆlí€Ø»u¯ý5—S¸ÒçW[äæÆ¡†ÛxCb8b+8L÷o9“t½ms‰s•g³â3žFëÌŒ}mœÆ(•Âos}UÉ`ˆ¢§ä¥£hÜL¥^/*ö÷U„Òè,Y˜¬]LÌýâ`ÿðàprî³­ƒDÈT^n„;ªu·¹TÉ…iC®A~DÅcEyŠw_1¾Ø‚,m•×u[fÅý¨ñò]úKš]¥ä-\ØööÅgXsÿn¥gÓe‹Íö†æ´1¼„£z]“rºœ_¤Q2#¸øÆ„kÜEê^*àiâÃGzn–ÿY¡Ö²üG¤¢ªZy„èa°Íh1Ë]M.àÿqâËÅl™cñ{‰&–-I!«Nó 4fÉã>IÆýBÁçq.Ëç„8 E=aNíÇVIÚ¶´ëã¢”`XBùø£l5Z½—¼ó|]iÁTŽ%€SC×ö´Üá
+ÈX3¶‰/dñR6±ú”lk€ÄrÖ«0ð]±êÖƒAŸŒ2”«Ë€;&åu÷P¾âB ÈÛèlßÅ7P}ÓJjrtå-®Äº{œª.é©3mj€ô$ÈÙ×[Ü¸ún%Ä7¹ÞÌ-ñÜ~ü¦U|4IY|s‰¾çw(¿Bþnücb
+lõ™0á{»ïuùîðú™mÂLÃÿuàsv¹ü«<êÌ™|lKøîs¹_¯Å¡ì	iÔcÀi¡ç1‹`láÁA;<0‰+4ki>1ÙâÑ%­ºãŽ[$â¼HÅÙwBñ-š‡¢MÑ@¯X@cdQ÷A©÷<…ªOªÙ9U‚•Óléy¯OeÞñ®1Uý TµƒÓéØq8}ýµý·ÇA3Ñì§|XXïú×GÕQ}Ç¬k$ø ¶Ò·™N9aòP†ëgD‹›IjFs
+àff^¼‹ñš§á&\ƒLs³àO%Su­¥¡	Û^ÔÃ™Šv@øG/‹ÁØ³Ë÷$2ØÜ`’¾í;¢‚1ÊýF ƒþKa¢kš¦i÷ûšÇYÿ˜1ø¶¢‚­²¨»áâ‰¼pû^Ð¶m2½nÈâbhÅ%LÚbQÿ‡×ñZ±ø­‡ok6Y)iFMoÇÞ%)­Ø¤à´æF…âçh”ÊÚ­–ãÄÓè¼Ei³hƒÉË¡`ŽV ´wÛË@—¯·.wÞ2š°QéE³ÕbÚ¶
+wa†+«IWP\àí ºŸ.–6$%R4×ÿÉ²Ìº@¡³xLž½}I:|Ÿ”e4šÎ¡7ÏÊ¬	¿dÜñ`W9ýçÁ$?§ãûÈ¡^¯Y00ÎÒŒHÞvóø=qˆš¡·Þwd+tµø@‰ÉVìë4gè £Á-³~É%3HºÂ)×˜È7É¯·ë$ã&¡@vÉ ?ÜÇÔ«ï’ñ¸3Ø¹!ÿñé¬ª[nÈ7;ë¾Ä™Z@Žn««8?^ImžÕlðüQ½qŒaÕ‘¹ç‰Óãb:îá¶9«÷ØštÚnöÞ
+Ë¯cîìÍÖá®b#íV¦äb7`N	—?Sëg?oï?‘½ˆ¬ÊtÝ ÑÇ‰*…œ©y]_4&‡ÖÙ“þd898o†µá±f‰ªªÃGÛ )ØaðÒw˜/¯P'À‚Y‘B2p@EvÂÒ2útš@Þéù ²ô?âëgÀÅV”PâÞ/ñ5¥œíoq·ÍbLá7ñHc˜f‹@Åð1Ö_Ó]zGú]3V=I§qžTáÀ¢bË@: ž#Ú—iè]t[Q“’!ªQ5éVæ `Ù†ªp`Ñ``…zP²ê¹q0‰œ+]ˆ?RÒïéŸ“,Ÿ“ˆ
+çÜ@þ¨Ï§×K§®JckÓAEbhÔÎÉ0¨)L¢Môî‹xœDUðî‹lÍ±»ü>z›5t·qÓ†"wº"w-¹¨þ Üuëªk¾ñ[†ëb|RÉ*fbÐî¾%^×šŽÛ&^Wèöi3·…1-w‰@ˆ‡3öŽú#-äï’â¬³5ŽÅÍa f·×Íž*Íœñ/La†SÙ|$ù%Ò nø”têoLd5Ê5(ûH7ŽjAÙìÙÔîGùàUTNO5xsØöüÁÞ|±¿ÎcWñÅUß#3¦‚öÕêmŸíˆôv´œ`¹b+ew¸|D’¯åì‹~?zøpÿ¼&pÊH«ëV³¥ËÓc³ 9_l“%£Èe>»´F™ûÙ›ßDLö£ô*Üìˆl1‘W\±%AùÊª[í†¦ÐvÝÐwÇn#&…u¼g¼èË•Ì6h²É&õe™CÝ¼Ç©@ôÄYaÕQQkÄâÈRkÝd“0Mƒ&Ñ5Cd,2’#«ý,ÇÝÛ¥+K¾jrÔ2@„#¡éo4Åêë’Õw‹I‹Û¯Ñõ%ÕnÛƒ"×éCùÿ  ÿÿì=ÛrÛHvïù
+kQ‰©‹eE²J–äÍŒle»&år!"™!.@Ž¬Õª*_°/ù€T¥òeù‚|BÎén }9§Òòe'f•-h4úrúÜ/¹[€S…ZC©Æ(’ÉËdÞ^ ™aÅYÑä—¼b7Pº¨ÕüX_ôeo6Þbo¸ù‹xwÔ+O'}ÿ¡ÁR¯Ë)rtuõ<H~Ý}ÝIv=šF˜)CÙzÛv
+Í(Þcÿ èäÊtê9¾GÖ+(™N{CîO½í{¤Dˆ… Æ€ÅdÒ´zÓ†@h÷öš¢P„øû-i=tDÄR¡.ç·¬/1AÖ°ëNe}‰¹Ð–Pg.~(>OæYäÛclA›Z§DôÿjÊönB9õ®uî]_¡û+t{ ûS‹dÖÏv;xŒŸvð«9KŠkëó ƒh/ÚB\ùæb½ø‡ÇÅ;¼³ðèTfúH²¥ôV5$K;!Ø¡¼1U¬¾šý?]—VOË¥<%npål.ñ©`Í‹}e³×]{h»‘›Ax¥V{·PaÅ}+ Îeô…™å,l{5÷ç©ðßÃ÷±ËPß9p!¿ÀÚXºhnàj·ø|²w*Ö&µdˆ¦/Ô$Ühó3€±ÊºûŽÉÏÂñÒ`L³Oò³$/ÍZÇ”*åHú‘<æ-šôÐév&—ÀéI|p›ËtÌvùÂ—-o?N„iˆ	3M
+¢¯!›–œƒÿde· Aµ‡,lŠ\¦£`Õôù›¾ßQ#UY :Û@Y×á¯j–ŠýØ¼­ÄÑ€6­‡»l«;OÝÓžšNÅàë´Sc¤~˜üÓÑûÑlÉ%ßÿLK¾ØqŠÃÓÓJ¹n4zÞf¸^ÐüÏµ(©ÖaoE¢ø½ ‘MÑÂÜXQ»š /»lÂzÚŽ§p~u}{X,îm¶q»¬S4»T~`Ÿ
+ÐŽ¡W§RÏGœ¨¨ôÐAž'ŠèhOôÛ†_?å²Ik­X3ü:TAVÌµ¢Þšu<`M±9içãMXt#»×5C÷?ÿŠù†FWQšFéóx˜›ƒÆ$YÏ/yžã—š3•—¶Y´þ~l(à>HO ëD)¢¥Y¥S´×š³nD3Ö1‚t€ØÞ¸Ôe‹{8àw«ÞO¦µ]0ã.zS7‡mQwný6…«Á¢ÉÉøL…Xfga³hýTËæcì–±àîëÐùAéÍ,P·'ëM[&ïDY/	w=*¹žu¹:sVùk<zF™ˆ­%q4KG=h;¡/ ²¢A>0íåÉÊxS Q}J:ãl"|î.û[Nµi\8åTá·Þe#Š8¸¥=,öEíoµEŸ¥=›ÕÙÁ1i.õ…\ªv¬™,jà£$U“%—A=©<Ió"íˆáô‰¿Æ6¿`33“¼LGƒ‰‡º^¸'zqx]?6ÓK“õþPãÓ3p‡	l¼<fž¨m~Ù<Ç!'å~”rAä…hòÜÀ‚õEiìG•ÙhÍ’‹JØûÁAÀŽMkXo©ôÐsô¹—Ú1è:®¯.—¯B}¡ñ4°;ãË
+j[Í©g(õB²Å?ÙŸ[g¿dý)Ró|¸ì\8dý,žRøz›[ì­{]½QUûÄ²]Ž’åY&¸rùò&5Ùß?òw£ÉêàýïÃ´¦T¦ûÂýy¿µñ¿öÀÕÔ¤åŠTÐ‚p*òfgòþLßakX<,nhˆXdXá—ƒÐ‘þ¡×ñiö$WjbÛ¢ý‚qk,â¡ÄÂÃE±ðPÇÂÃE°ð°¢Pø—…Ké‹#¯¥½§ØqÞ¶fèßt»y
+¹-CBÊ³´˜g¿cd¯·ÏýCÝSæxyHVÜêÖ)[%ý³‰	h9ïYö
+ÏuWC‘DÏ…-Ìn&½ÀÇ!Î@žåxÇ>A8=‰f½aó][à9 ý"úóh˜vé°<#ª ÿ4Ü×RI ïÖ<|-È±Ã¤häù³‹—+¼&û2éß`.3NoÍ²­³˜V6ïõ¢,k6tA*'X~€ÜšÏ¼Õ`z»z!¬aÐŒÒt/'7|ÂùZh—¤ðR@@Q_‘¿òªÆ^Ð¾ e+–¾*ìTÚmt_Šƒ0ã™îAÈÿY8é_&ïá< ØNèÁöfóp³KÚƒQLœsØ"Àrz~é¢‡½ŸÅ4¨bØ“é¦“Á¿\´³µ6zýøÙ‹ë¿$Gðyzñjxúj€_Oñ¿ÇÇGÿŠ¯žô.~À/'¯Æ§?¿~±ÕŸïþe÷ñÏ'×G§ÃŸ¿;þŸŸý,ùáÅ«íÓô·ƒÁÁAƒ[`6´=ÞDYáL†™ŽðûZ1ƒ·ÜVW	ã‰D_„ýQR¿’¬:c}o	¦’Ë…sê³¼_$»ËÅ’ð¯~Œ•UÁv·c¸]'ØP÷Ãl'ÕÐ¶nRÚÖZVÔcY™!,ã¶XG>€¬T{]§áT•ž´hE­_TcGZÊÝâ†J²»‚ŒìÊZgÏTØ4¿í.Fú[çÇIGñ LI1El^ÈÒóL”U
+ÂlŠ†šìÏs@ª°:Ý-ÂDC®¬—Ý¯¤ÕN(¯¾} åLÄ/nÆéÛw:´Éä”!ó®fJÁ"Åä.ÿT™T°àa¶6ŠþÌòUzÞJÍeG]^>·b…c”7º¦üþSˆCÒ¹ðŒô4¯(ùµHítžZàß¼ŽsóW úU™»þœð °Ùyñ
+ãžtöÔ¢F|ëœv#-çgd/¯c*‡{©¿3îï3è%„c O¡§ëÖZŠ¦Á0­ÕZ`Qì5áiªï‚4“<I’™£ŒqÉ)&¿×¢bþˆeQ],ÞÓÆŠv`uT Dºn–žê´œU[’Úõ
+dZP9‰ôu¯ž<&EÔÙ¡®Tæ?DîŒ:™ä¡§á¨ÿu@Ê¹ä´íÒ,:›Ìšì@IW²«Rd;ô’¾ðò“v$oˆàâAY±|emHã5Ìó9ÞtÐ»®¹ªŸ;—Æé&ã¨Ç£Ù¸˜_Æ£™A´±;å^c-_‚)çDXK|]1ÄWY N»²ÂÉšuäÌ¡°fè-µ¢”(ë"m<<Ø¶^xPµÿvn…s»’‚êÏž¶2¡ mæÓ¦„R@ñJ­Ò
+lªº(ùæZhe<,<IUI’ù†–£|–¿fƒQMšŸeŽóE¥çŠ¤0Ž„p<Œz¿ÒÞ8êÁí9·ÜšÙªE^ø\IQpÈ‘¿ÕtË)Üž>9;©pÊQ‹ô29‰0‘`u0ŠÇvÌibsÞ¾ÁoÈ%À^Ÿ›O7ñÉÕu¶rgÝ²•XE5UÏK‡KÁ¹@™)©Mo\ƒúÉKeæèbzøf×®#Óˆä™§ãKº¶ßËÄ×.Á<» K1KD3ÇBµKÎz7É0“úrJÝZ_ÂÛl8Ê„‡n^ :j¥Æ³ A¿aOzÛ„Ôt]F(È¡ñKøÍ†Qþ^ÉNÂí4ŠûÁUšÄ8X`.á %éMËY}n°ß²©ónyº\-õ:²Å3g‹9A¬*4Å‰èsl?g‚t™­]=“çý(‹ÜŒ	æñßµ³fÙpNzÑ¸ßòëWWÏŽA±þdô¿u¼ÉÎì|Ô|×VÒ–½ª_‡êeB½n½P¨W·ø^»¸=ßyZŽñB]²à¾‘õ±¸õ’â|él
+£Z¯¯Yg8…_Ô kêÔï“aTÜË¸³B÷æ^t.¹*æªS¦è„Q¾/˜¥›µÃÈåòó<éà”r%>‡ãç\Nûp€–ä[ðÙáZª8”.{Ì;[¸Lw@+¢æÈº¦.àèéò8|òJe©=_eµŽuòNž:OU%ž4u5÷ÂVp	7µ¬–Š,”ÛÍ€RF´a‰EV
+Ú -+åÖµ§’BêmPœ=s"€û×)¿¸{Í…^qÔÈKŒPSQR¢©±‡@øZ­VìÔZ0Êðf3Kç`{˜GÃ‰jP°ÚŒ¡_ø¢Å¨Wñ¢ñÙÓ¢s»>sL³`ËšÌgãÑ$¢*Ì’H[2{ñw5Ù;ƒ»ûzzƒ¯§—Ñß÷é}tþ’gƒq[T)5ÊòÖO¯F}6NÌiôw%ö5ìÓ‡‚]ôÂÉO@Z>,Ì c{žŸ9
+Lœ¬Y§(ñ÷÷Q/úT‘`Zô×N˜ðŠŠë[†¬»œ/N!YÆç˜[Ýwu7)úq4é~àBx¦ýöËpÐ>‘«{Š—_à>\D“,I[þ%fÎR'(Ÿr ¥Zï¾¸†/ÒÍk©€6_8ÐÀ„3 å¨ŽaÓZyB%è°…Îç
+[ð-Ôˆ\#ÖˆiY;\íž‚ÕÊÕRûX1j5ƒÔ¼!jNO~o~6Z¢F¬DH‰¥"Óî+.í£E¥UÇQÐÞ]•1\EíP‰¿SÄ½P0ZU(Ú2x»^ü™Õò„¿+cÎ˜Õòbñ{43ßÍG˜é3ò˜í¹?3¶¼¯¨²ûŠ)«ˆ(ûðàWçÊ?¾seÉ¤±n:^N3kúÂv s¡~Oòì'‚µ]#XÆµ ¡vYMÊ‘-ïh†ÓáèpdÇI?¢é¬¡"è4ùƒ«£(ö„ÌÕr:KÜƒ™8rµm•ßíÐÀhB§q¹ Ãé0CP,ÆÇp8tëqŽ†ÅXö-4{ïN†ÿŠå@®à51`f™Øv'øËú›‡ð±k}IµÆ4!NYõý2ÉVQª;³©>ÛfoÎž'ÓùÔ”R¦x‰­0‡"&'
+á37Sˆ®Zò‘çêPZ[+{Å¡`Ÿø×ì°‡öÌ±ÓÑ(ûN„Iˆ.[ùotK'2€çÅ2àož§	¦—!šùƒ¬Ê1BÇ*å:ölL3ïDU3•WI+ïÃæÕö‚æwé›(^9En†9kÙæ©FÅHŸªGš
+J„¦@~¯VxÚ:ƒÆ+Yì·±êä™ÌC
+óÔg}¨ÿB@JfÍ,Ëû
+…?™AYäW+xÅ¦‘¯ Hõ»€ä!ÄBÈŸ¢|8Ëa°ò¿ÿù·ÿ^'¨ëÌm—å2†E!ê=œ‹Zõ„UÙÙü-(«W‹Š±O±´¢ê™9#/“ä§d‚`nN¨ì~gƒzR­Ýy&OHÞÍ¡ÝM6¿”FÔæÆZ°ý Ë×®´Z-žÙ²f½tOeÁçËuÿE*ç[™îöÌ‰«åÇ¥â“óÜ´ðE&U75ê®?…pBhgÝ^"€=€nüól>kP6H÷’Hëè† dŠ`~ žMêµ¸M€Æ&¿ˆiS	¤öÃm+}{ÛÅ„6`<U†§cü/¦))dH{åîöï×oƒ¸ŸÛ/71÷)
+ ˜'cGÚ2MÚ*žVŒQ¥8·o½9`ªt]=cûÝnA£@¾ –¥uf¯nü¥å¿Á”Š9qŸÇ‚&6=²xà,®E]4t .{gÕõÒ§ª½öªJA‰³[ÙúKµ]QLÎ2AÓÅ7\bÏåAö%ì¡Ívõ§ëU6}¯ˆÖHÛÐX]±š×D4t8^_^òº”8›ã˜©±ÛÅÕoMí)g^·l9«–'{C+*jrÓ5¢µéè	2~C(TÍ÷`…ýÂ
+_NZì5Y»‘|•Y¤¢¨S9IÒXúehÒÞ`3 ÝæŒ­àÍlæín±’Ê~KûI*µêÖ¡äs3[5æË×°éšÍ|·²(Ð1VÒ ®é›Q†_g†cÛ%©Ò‘Æã?êsç¤7ÌÅPŠo€ì66„{s®Ýv©XÜ×ÕOæ{ èWš?Ò:Úè°™³1ë˜Î‹FÀ—uŒÊY—£-kŽ !£¨žŸ¸´ã|¬B&2I…á›_7~ílOßÿš.Ãfgg­³»½Öé>\ÛhuWß–XÇKÛÿ<Ÿ3THýy
+L\ÃD“Tóv*¶’H•Qá>Aåˆâ(Ç2Ì ]ù*be€"ID×U#,J
+wKSFÁVèƒ°Ý©*É¦’b>EWÊ­Æa'¥D.rJ/Ïm˜òX.0”ý‹føíÄlÓÌ[¬2ÑXYïZ61zn‘dU?c8´fK	+e¦†(z‘™O¸fzt¡¬ZVER†¾Úýu€]¬‡Q UQûÓ‘ ë"ë zÎ˜Â6@Œ×%nìy=këØQØï¡}Î¸¢Ñ†²€þÒª×Qà¾¼elS·…ïæUÊUÑ‡M¢Y¤ýçÃÄöœ£:”uÄUíNª÷ŠMsSY›Ø—•
+,j²Hë$Ø8Àö6z%ù¾Ü¯ÄHrvJðêÈ¤„9óÙP”:9,ÚÀ™8CŠ[bAìA)—¹¥L÷FÐýëò#¢œQffÜ\7ûECôE@ªÿÛdIOAô€S®ªlÎæYq¬.ÄÏÖô ª¡†úÚjµ°Þû»³	æÉ º,øŸÿ/à7¯›‰39‚Aˆå>QÌÉEûÝÏVïÞU­+÷Ñ4Lk°’¸üC½¶¶â½bL¼‹`õýdœ„")Ç‘ˆ‘®u®Hç§²Q¿íÎEÌ?Ïá™àe2Œ£à|ÔƒæÅ8¸YÚ0¬=´"œ­»Zþ)ëN1Öa8é#ùzÁ0#àÌn{3’Ù¨Œàm‹ÉDwóJBàªµ”X0Çð‚ž¨bh’	A«ÝUb£¸`UM6éZ}{AÃ`ó4	nÓÎ~àÆÒ9rï½¡Ñ§¿œÀ!êÁc¤°åºãùjœ[×üf2«Ï}xðÙÕ²
+Ýcæ®}@sË·§“¾¤JŸ\£4M`ÝñÕž@ÈJÌá`Ç+ˆ¸°’ûÝÈ—¨"Ì˜`,Ä¦œ„>¤4™!ä½éln÷£Á[W–!CÁ˜}|!)è'ÚÅúBúZY÷ŒÚ§ø¶õ<|?ŠaªÛš7«?NÛ©­¢TÚÏ²&o"ÔpÑK£h’…°®"Å°Ë˜Ð¡Y]xS‹ff)­&v£Ü¾Áwã(cr©¾° >B¦BÃ\þdr’Ì/’9pf-‚r·à¥ûä¢Ûw¦°'‹ï à¿?Ùì®ðçVúäV/Dí¬Ÿævº¿þí€û°n‡ÁJYÄ§#ú¤É5|_	ö–ìµk÷šÅ{F¥ ûxÉ–ù½×®Û«ÖrÓhi´nÑ!tÌp„ËüF·¦Q…ÈŸÌá¥ gül/NÑ·ßË¾è_æå›Õ0£:å&™ÏÄu+5e!1
+Í_ôÝ±x NÜ¹{Ç*¯s¥Ô˜KÆD%ùü)Q=R>§: .À9ÉåªLdãUš«jŽ‚˜”)6ÿÎfÓl¯ÝÆôBá j’XÑp:ÊZ½$nf¿¯‹qdë—óÞoÑ¬…˜f¡ýx4xÏ'“,,/Ø¦e;;GÓ!–Ú=Á%Ý;ÌÉ©€éDÀº¿tNÎ²ØÀ4ô)ÒŒÊZràãk‚îóþ²ûß³×µê…pQ¿Æe‚ ã$quôOÌ±üù%ýìl‚QóžVµ/Q6Ô£=)(>ª_cB9×ô/ÝÄ„jŠÑ1a¡cWDÏbOíJÃÝEå™m§†Áè»R%bë‘ØXïJHçË…ÐJó>“B˜^¨b7•*4·m}ª«£qJ&‰¶¼íGJ1ÓœD×è5W×‚•ï¿ß‹ã½,[Yõn?l™rŽòrTëðFªsvTLC!æèÙ»MÔgi¼	¤·~O}_W¡ät¦s ’¹ìÌÈZÏæîKÚéÈì<›ð_a±âÓ¤‹nê?âÐ½Ùhu£ømñ¢-íÓ$¸&á8XŽÎA’ø¶S-Xab)è¼Ô®FÖ~ú¶ùÉ
+
+’DÝ0²¯Ò¹½?æîFšp&’ì¡àÞ÷ÿX±ÈÇÉäj4˜§B.ÔÚr @—^®4R9Š	Mb^XÆ	|}£•-l²ß¢aÙ\Çø°Èà äTz™·q™e<ƒJiéŽŽ€Žãã—¯íÕˆ'òË±&‡Òiw%‚_$6ÀûÞ¾p#.°«êI[¹ª@>w|nqJmÂÙ¢i¥Ù,ª"î©ni¾0Ûƒ•*<œÏEÔ›§X˜â<™Œ@ñà\Æj7¦¹-çM$op~~ôAŽ¾?à½Ëa¢Înú¾ÜÒƒÀ¾´PFÂ'QÔÏîa4Û,}ÍŠ¦phMÃþÅ,LgÍ.ìÑÆÂC_t}Õäºl*”V“vl"R3%…GRÌÂ)†]cq
+Yæ+›Ç7•eÀÂ9~g„!œò7+È	á[¦îÜŽ24ƒHª¡vÒt!û.G“›#ôêWÍ$s™g…9¸5~îl¡"Pü1nà['BãÛ?C(~ëd+™H“[~S%râ›“,¢}ˆó'¹’ñd¢¥ÌbƒoBÚõ¾»3ëNß>šEÇI‡“~n‚±êš>RòxeÓd‚Ã½JGýð&ÿ}g¬ÓÅ4
+€p™žˆvù•²]%Ô†à#¾û‡ÿ  ÿÿ p·
