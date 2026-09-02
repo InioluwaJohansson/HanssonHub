@@ -23809,18 +23809,18 @@ export default function App() {
               <motion.div
                 key={popup.id}
                 layout="position"
-                initial={{ opacity: 0, x: 200, rotate: 90 }}
+                initial={{ opacity: 0, y: 20, scale: 0.95 }}
                 animate={{ 
                   opacity: 1, 
-                  x: 0, 
-                  rotate: 0,
-                  transition: { type: "spring", stiffness: 300, damping: 22, mass: 0.8 }
+                  y: 0, 
+                  scale: 1,
+                  transition: { type: "spring", stiffness: 350, damping: 25 }
                 }}
                 exit={{ 
                   opacity: 0, 
-                  x: 200, 
-                  rotate: 90,
-                  transition: { duration: 0.4, ease: "easeInOut" }
+                  y: 20, 
+                  scale: 0.95,
+                  transition: { duration: 0.2, ease: "easeOut" }
                 }}
                 className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-full shadow-xl p-3 pl-3 pr-6 w-auto max-w-[85vw] md:max-w-[340px] min-w-[260px] pointer-events-auto border-2 border-slate-300 dark:border-zinc-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-800/90 transition-colors flex gap-3.5 items-center text-slate-900 dark:text-zinc-100"
                 onClick={() => {
