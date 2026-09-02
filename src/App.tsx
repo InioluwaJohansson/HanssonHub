@@ -2524,7 +2524,12 @@ export default function App() {
     if (loadingViews[viewName] !== undefined) {
       return loadingViews[viewName];
     }
-    return !fetchedViewsRef.current[viewName] && globalFetching > 0;
+    const alias = viewName === 'manage-users' ? 'all-users' : viewName === 'all-users' ? 'manage-users' : null;
+    if (alias && loadingViews[alias] !== undefined) {
+      return loadingViews[alias];
+    }
+    const isFetched = fetchedViewsRef.current[viewName] || (alias ? fetchedViewsRef.current[alias] : false);
+    return !isFetched && globalFetching > 0;
   }, [loadingViews, globalFetching]);
 
   React.useEffect(() => {
@@ -3127,6 +3132,8 @@ export default function App() {
     // PRELOAD ALL backend records once logged in, to set up real lists and prevent displaying fallback states
     if (isLoggedIn && !fetchedViewsRef.current['all-preloads']) {
       fetchedViewsRef.current['all-preloads'] = true;
+      fetchedViewsRef.current['all-users'] = true;
+      fetchedViewsRef.current['manage-users'] = true;
 
       // Fetch user profile based on personId from local storage or userDto
       const storedPersonId = localStorage.getItem('personId') || '1';
@@ -3320,11 +3327,12 @@ export default function App() {
     if (activeView === 'all-users') {
       if (!fetchedViewsRef.current['all-users']) {
         fetchedViewsRef.current['all-users'] = true;
-        setLoadingViews(prev => ({ ...prev, 'all-users': true }));
+        fetchedViewsRef.current['manage-users'] = true;
+        setLoadingViews(prev => ({ ...prev, 'all-users': true, 'manage-users': true }));
         apiFetch('/Person/GetAllPersons', { method: 'POST' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setAllUsers(res.data); else setAllUsers([]); })
           .catch(err => { console.error("Failed to load persons", err); setAllUsers([]); })
-          .finally(() => setLoadingViews(prev => ({ ...prev, 'all-users': false })));
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'all-users': false, 'manage-users': false })));
       }
     }
 
@@ -6482,18 +6490,20 @@ export default function App() {
         }
       }
 
-      // Update unread count and lastMessage
-      setChats(prev => prev.map(c => {
-        if (c.id?.toString() === msg.chatId?.toString()) {
-          const shouldInc = !isMe && (!isChatOpen || activeChatIdVal?.toString() !== msg.chatId?.toString());
-          return { 
-            ...c, 
-            unreadCount: shouldInc ? (c.unreadCount || 0) + 1 : c.unreadCount,
-            lastMessage: msg 
-          };
-        }
-        return c;
-      }));
+      // Update unread count, lastMessage, and dynamically move chat to the top of the chat list
+      setChats(prev => {
+        const targetIndex = prev.findIndex(c => c.id?.toString() === msg.chatId?.toString());
+        if (targetIndex === -1) return prev;
+        const targetChat = prev[targetIndex];
+        const shouldInc = !isMe && (!isChatOpen || activeChatIdVal?.toString() !== msg.chatId?.toString());
+        const updatedChat: ChatDto = {
+          ...targetChat,
+          unreadCount: shouldInc ? (targetChat.unreadCount || 0) + 1 : targetChat.unreadCount,
+          lastMessage: msg
+        };
+        const remainingChats = prev.filter((_, idx) => idx !== targetIndex);
+        return [updatedChat, ...remainingChats];
+      });
     };
     
     hs.on("MessageSent", onMessageSent);
@@ -11217,9 +11227,7 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {isViewLoading('manage-users') ? (
-              <ThreeDotsLoading label="Loading users..." />
-            ) : allUsers && allUsers.length > 0 ? (
+            {allUsers && allUsers.length > 0 ? (
               allUsers
                 .filter(person => {
                   const query = userSearchQuery.toLowerCase();
@@ -11272,6 +11280,8 @@ export default function App() {
                   </Card>
                 );
               })
+            ) : (isViewLoading('manage-users') || isViewLoading('all-users')) ? (
+              <ThreeDotsLoading label="Loading users..." />
             ) : (
               <div className="col-span-full">
                 <NoItems icon={Users} message="No users found." />
@@ -11888,7 +11898,7 @@ export default function App() {
                         action.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700"
                       )}>
                         <Repeat className="h-3 w-3" />
-                        {action.isRecurring ? "Recurring" : "One-time"}
+                        {action.isRecurring ? "Every day" : "When activated"}
                       </Badge>
                       {action.time && (
                         <Badge variant="outline" className="text-[10px] h-5 gap-1 rounded-md font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
@@ -15325,36 +15335,36 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader className="mb-0">
+            <DialogTitle className="flex items-center gap-2">
               <PlusCircle className="h-5 w-5 text-primary" />
               Add New Category
             </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">Create a new category to organize your contacts.</DialogDescription>
+            <DialogDescription>Create a new category to organize your contacts.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
+          <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
             <div className="grid gap-2">
-              <Label htmlFor="cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
+              <Label htmlFor="cat-name">Category Name</Label>
               <Input autoComplete="off" id="cat-name" 
                 placeholder="e.g. Emergency, Family, Services" 
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
+                className="h-10 bg-transparent rounded-none border-0 border-b-2 border-border focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
+              <Label htmlFor="cat-desc">Description (Optional)</Label>
               <Input autoComplete="off" id="cat-desc" 
                 placeholder="Brief description of this category" 
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
+                className="h-10 bg-transparent rounded-none border-0 border-b-2 border-border focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
                 value={newCategoryDescription}
                 onChange={(e) => setNewCategoryDescription(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
+              <Label>Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border border-border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/30">
                 {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
                   const Icon = iconMap[iconName];
                   return (
@@ -15363,8 +15373,8 @@ export default function App() {
                       variant="outline"
                       size="icon"
                       className={cn(
-                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
-                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                        "h-10 w-10 transition-all border-border bg-background text-foreground",
+                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
                       )}
                       onClick={() => setNewCategoryIcon(iconName)}
                     >
@@ -15375,7 +15385,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end my-auto min-h-[72px]">
+          <DialogFooter>
             <Button onClick={handleAddCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add New Category
@@ -15385,36 +15395,36 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px] p-0 overflow-hidden bg-slate-100 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="p-6 pb-2 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-            <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader className="mb-0">
+            <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
               Edit Category
             </DialogTitle>
-            <DialogDescription className="text-slate-500 dark:text-zinc-400">Update category details and icon.</DialogDescription>
+            <DialogDescription>Update category details and icon.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 p-6 pt-1 pb-4 overflow-y-auto max-h-[60vh] bg-slate-100 dark:bg-zinc-950">
+          <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
             <div className="grid gap-2">
-              <Label htmlFor="edit-cat-name" className="text-slate-700 dark:text-zinc-300">Category Name</Label>
+              <Label htmlFor="edit-cat-name">Category Name</Label>
               <Input autoComplete="off" id="edit-cat-name" 
                 placeholder="e.g. Emergency, Family, Services" 
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
+                className="h-10 bg-transparent rounded-none border-0 border-b-2 border-border focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-cat-desc" className="text-slate-700 dark:text-zinc-300">Description (Optional)</Label>
+              <Label htmlFor="edit-cat-desc">Description (Optional)</Label>
               <Input autoComplete="off" id="edit-cat-desc" 
                 placeholder="Brief description of this category" 
                 value={newCategoryDescription}
                 onChange={(e) => setNewCategoryDescription(e.target.value)}
-                className="h-10 bg-transparent text-slate-900 dark:text-zinc-100 rounded-none border-0 border-b-2 border-slate-200 dark:border-zinc-800 focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
+                className="h-10 bg-transparent rounded-none border-0 border-b-2 border-border focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none"
               />
             </div>
             <div className="grid gap-2">
-              <Label className="text-slate-700 dark:text-zinc-300">Category Icon</Label>
-              <div className="grid grid-cols-5 gap-2 border border-slate-200 dark:border-zinc-800 rounded-xl p-3 max-h-[160px] overflow-y-auto bg-white dark:bg-zinc-900">
+              <Label>Category Icon</Label>
+              <div className="grid grid-cols-5 gap-2 border border-border rounded-xl p-3 max-h-[160px] overflow-y-auto bg-muted/30">
                 {['UserCircle', 'Users', 'ShieldAlert', 'Heart', 'Wrench', 'Phone', 'Mail', 'HomeIcon', 'Smartphone', 'Zap', 'Bell', 'Search', 'Building2', 'Sofa', 'Utensils', 'Bed', 'Bath', 'Car', 'Trees', 'Shield'].map(iconName => {
                   const Icon = iconMap[iconName];
                   return (
@@ -15423,8 +15433,8 @@ export default function App() {
                       variant="outline"
                       size="icon"
                       className={cn(
-                        "h-10 w-10 transition-all border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300",
-                        newCategoryIcon === iconName ? "border-primary dark:border-primary bg-primary/10 dark:bg-primary/20 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
+                        "h-10 w-10 transition-all border-border bg-background text-foreground",
+                        newCategoryIcon === iconName ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20" : "hover:border-primary/50"
                       )}
                       onClick={() => setNewCategoryIcon(iconName)}
                     >
@@ -15435,7 +15445,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-end sm:justify-end">
+          <DialogFooter>
             <Button onClick={handleEditCategory} className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium">
               <CheckCheck className="mr-2 h-4 w-4" />
               Save Changes
@@ -15836,19 +15846,27 @@ export default function App() {
 
             {/* Logout All Devices Confirmation Dialog */}
       <Dialog open={isLogoutAllConfirmationOpen} onOpenChange={setIsLogoutAllConfirmationOpen}>
-        <DialogContent className="sm:max-w-[420px] p-6 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
-          <DialogHeader className="mb-1">
-            <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400 text-lg font-bold">
-              <LogOut className="h-5 w-5" />
-              Logout From All Devices
-            </DialogTitle>
+        <DialogContent className="sm:max-w-[440px]" showCloseButton={false}>
+          <DialogHeader className="mb-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400 text-lg font-bold">
+                <LogOut className="h-5 w-5" />
+                Logout From All Devices
+              </DialogTitle>
+              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+                <X className="h-4 w-4" />
+              </DialogClose>
+            </div>
+            <DialogDescription className="mt-0">Terminate active user sessions across all registered devices.</DialogDescription>
           </DialogHeader>
-          <div className="py-3">
-            <p className="text-slate-600 dark:text-zinc-400 text-sm leading-relaxed">
-              Are you sure you want to terminate all active sessions across all devices? You will be prompted to enter your authorization code to confirm this action.
-            </p>
+          <div className="py-2 space-y-3">
+            <div className="bg-muted/30 p-4 rounded-xl border border-border/50 text-sm">
+              <p className="text-slate-600 dark:text-zinc-300 text-sm leading-relaxed">
+                Are you sure you want to terminate all active sessions across all devices? You will be prompted to enter your authorization code to confirm this action.
+              </p>
+            </div>
           </div>
-          <DialogFooter className="flex items-center justify-end pt-4 border-t border-slate-100 dark:border-zinc-800/80 mt-2">
+          <DialogFooter>
             <Button 
               variant="outline"
               className="w-full sm:w-auto border border-red-600 hover:border-red-700 text-red-600 hover:text-red-700 dark:border-red-500 dark:text-red-400 dark:hover:border-red-400 bg-transparent hover:bg-red-50 dark:hover:bg-red-950/30 rounded-full px-6 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-transform active:scale-95"
@@ -15868,27 +15886,27 @@ export default function App() {
 
       {/* Logout All Users (System-wide) Confirmation Dialog */}
       <Dialog open={isLogoutAllUsersModalOpen} onOpenChange={setIsLogoutAllUsersModalOpen}>
-        <DialogContent className="sm:max-w-[440px] p-6 bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
-          <DialogHeader className="mb-1">
-            <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400 text-lg font-bold">
-              <LogOut className="h-5 w-5" />
-              Logout All Users
-            </DialogTitle>
+        <DialogContent className="sm:max-w-[440px]" showCloseButton={false}>
+          <DialogHeader className="mb-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400 text-lg font-bold">
+                <LogOut className="h-5 w-5" />
+                Logout All Users
+              </DialogTitle>
+              <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+                <X className="h-4 w-4" />
+              </DialogClose>
+            </div>
+            <DialogDescription className="mt-0">System-wide administrative session termination.</DialogDescription>
           </DialogHeader>
-          <div className="py-3">
-            <p className="text-slate-600 dark:text-zinc-400 text-sm leading-relaxed">
-              Are you sure you want to log out all users from the system? This action will terminate all active user sessions across all devices.
-            </p>
+          <div className="py-2 space-y-3">
+            <div className="bg-muted/30 p-4 rounded-xl border border-border/50 text-sm">
+              <p className="text-slate-600 dark:text-zinc-300 text-sm leading-relaxed">
+                Are you sure you want to log out all users from the system? This action will terminate all active user sessions across all devices.
+              </p>
+            </div>
           </div>
-          <DialogFooter className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-zinc-800/80 mt-2">
-            <Button
-              variant="outline"
-              className="rounded-full px-4 text-xs font-semibold"
-              onClick={() => setIsLogoutAllUsersModalOpen(false)}
-              disabled={isLoggingOutAllUsers}
-            >
-              Cancel
-            </Button>
+          <DialogFooter>
             <Button 
               variant="outline"
               disabled={isLoggingOutAllUsers}
@@ -16386,36 +16404,36 @@ export default function App() {
 
       {/* Token Generation Modal */}
       <Dialog open={isTokenModalOpen} onOpenChange={setIsTokenModalOpen}>
-        <DialogContent className="sm:max-w-[420px] rounded-3xl border shadow-2xl p-6 bg-white dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-foreground" showCloseButton={false}>
-          <div className="absolute right-6 top-6 z-50">
-            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors" />}>
+        <DialogContent className="sm:max-w-[420px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mt-0 mx-0 pt-1 pb-3 mb-0 text-left pr-16 bg-white dark:bg-zinc-950">
-            <DialogTitle className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-zinc-100">
-              <Key className="h-6 w-6 text-primary" />
+          <DialogHeader className="mb-0 pr-12">
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5 text-primary" />
               Generated Token
             </DialogTitle>
-            <DialogDescription className="text-xs mt-1 text-slate-500 dark:text-zinc-400">
+            <DialogDescription>
               Copy this token and keep it safe. It is required for external system integrations.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 pt-4">
-            <div className="bg-slate-50 dark:bg-zinc-800/60 p-6 rounded-2xl border border-slate-100 dark:border-zinc-700/60 space-y-4">
+          <div className="pt-[3px] pb-2 space-y-4">
+            <div className="bg-muted/30 p-4 rounded-xl border border-border/50 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest">Authentication Token</span>
+                <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Authentication Token</span>
                 {generatedToken?.expiryTime && <TokenCountdown expiryTime={generatedToken.expiryTime} />}
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex-1 bg-white dark:bg-zinc-950 p-4 rounded-xl border border-slate-100 dark:border-zinc-800 font-mono text-sm break-all select-all text-emerald-600 dark:text-emerald-400 shadow-inner">
+                <div className="flex-1 bg-background p-3 rounded-lg border border-border font-mono text-sm break-all select-all text-emerald-600 dark:text-emerald-400">
                   {generatedToken?.tokenCode}
                 </div>
                 <Button 
-                  size="icon"
-                  variant="outline"
-                  className="shrink-0 h-12 w-12 rounded-xl bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 transition-all border-slate-100 dark:border-zinc-700 shadow-sm"
+                  size="icon" 
+                  variant="outline" 
+                  className="shrink-0 h-10 w-10 rounded-lg"
                   onClick={() => {
                     if (generatedToken?.tokenCode) {
                       navigator.clipboard.writeText(generatedToken.tokenCode);
@@ -16423,7 +16441,7 @@ export default function App() {
                     }
                   }}
                 >
-                  <Copy className="h-5 w-5 text-primary" />
+                  <Copy className="h-4 w-4 text-primary" />
                 </Button>
               </div>
             </div>
@@ -18774,7 +18792,7 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isViewActionOpen} onOpenChange={setIsViewActionOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-6 top-6 flex items-center gap-2 z-50">
             <Button 
               variant="ghost" 
@@ -18820,25 +18838,25 @@ export default function App() {
               <X className="h-5 w-5" />
             </DialogClose>
           </div>
-          <DialogHeader className="p-6 h-[100px] bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800 mb-0 shrink-0 pr-40 flex flex-col justify-center">
+          <DialogHeader className="mb-0 pr-40">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2 text-foreground dark:text-zinc-100">
+              <DialogTitle className="text-xl font-bold tracking-tight leading-tight flex items-center gap-2 text-foreground">
                 <Play className="h-6 w-6 text-primary shrink-0" />
                 {selectedAction?.actionName}
               </DialogTitle>
-              <DialogDescription className="text-slate-500 dark:text-zinc-400 font-medium flex items-center gap-2 flex-wrap leading-none">
-                <span className="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
-                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
+              <DialogDescription className="text-muted-foreground font-medium flex items-center gap-2 flex-wrap leading-none mt-1">
+                <span className="text-[10px] bg-muted text-foreground px-2 py-1 rounded-md font-mono shrink-0">{selectedAction?.actionId}</span>
+                <span className="h-1 w-1 rounded-full bg-border shrink-0" />
                 {selectedAction?.actionActive ? 
                   <span className="text-emerald-500 font-bold text-[11px] uppercase tracking-wider shrink-0">Active sequence</span> : 
-                  <span className="text-slate-400 font-bold text-[11px] uppercase tracking-wider shrink-0">Disabled</span>
+                  <span className="text-slate-400 dark:text-zinc-500 font-bold text-[11px] uppercase tracking-wider shrink-0">Disabled</span>
                 }
-                <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0" />
+                <span className="h-1 w-1 rounded-full bg-border shrink-0" />
                 <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isPrivate ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800" : "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800")}>
                   {selectedAction?.isPrivate ? "Private" : "Public"}
                 </Badge>
-                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-slate-50 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700")}>
-                  {selectedAction?.isRecurring ? "Recurring" : "One-time"}
+                <Badge variant="outline" className={cn("text-[10px] px-2 py-0.5 rounded-md", selectedAction?.isRecurring ? "bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800" : "bg-muted text-muted-foreground border-border")}>
+                  {selectedAction?.isRecurring ? "Every day" : "When activated"}
                 </Badge>
                 {selectedAction?.time && (
                   <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
@@ -18849,7 +18867,7 @@ export default function App() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-6 scrollbar-hide">
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -18880,14 +18898,14 @@ export default function App() {
 
               <div className="space-y-3">
                 {(selectedAction?.getActionStepDtos || []).map((step, idx) => (
-                  <Card key={step.id} className="p-4 bg-white dark:bg-zinc-950 border-slate-200/60 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all group rounded-2xl">
+                  <Card key={step.id} className="p-4 bg-muted/30 border-border/50 shadow-sm hover:shadow-md transition-all group rounded-2xl">
                     <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-400 shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+                      <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center font-bold text-muted-foreground shadow-sm transition-colors group-hover:bg-primary/10 group-hover:text-primary">
                         {idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700 dark:text-zinc-100">
+                          <span className="font-bold text-foreground">
                             {(() => {
                               switch (step.facilityType) {
                                 case FacilityType.Appliance: return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
@@ -18900,7 +18918,7 @@ export default function App() {
                               }
                             })()}
                           </span>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md">
+                          <span className="text-[10px] uppercase font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
                             {FacilityType[step.facilityType]}
                           </span>
                         </div>
@@ -18913,7 +18931,7 @@ export default function App() {
                           {step.facilityType === FacilityType.Door && (
                             <Badge variant="outline" className={cn(
                               "text-[10px] rounded-lg",
-                              step.isLocked ? "bg-slate-50 text-blue-600 border-slate-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                              step.isLocked ? "bg-muted text-blue-600 border-border" : "bg-muted text-muted-foreground border-border"
                             )}>
                               {step.isLocked ? "Locked" : "Unlocked"}
                             </Badge>
@@ -18921,14 +18939,14 @@ export default function App() {
                           {(step.facilityType === FacilityType.Door || step.facilityType === FacilityType.Window) && (
                             <Badge variant="outline" className={cn(
                               "text-[10px] rounded-lg",
-                              step.isOpen ? "bg-orange-50 text-orange-600 border-orange-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                              step.isOpen ? "bg-orange-50 text-orange-600 border-orange-200" : "bg-muted text-muted-foreground border-border"
                             )}>
                               {step.isOpen ? "Open" : "Closed"}
                             </Badge>
                           )}
                           <Badge variant="outline" className={cn(
                             "text-[10px] rounded-lg",
-                            step.isActive ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"
+                            step.isActive ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-muted text-muted-foreground border-border"
                           )}>
                             {step.isActive ? "Run" : "Stop"}
                           </Badge>
@@ -18938,7 +18956,7 @@ export default function App() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-9 w-9 rounded-xl hover:bg-slate-50 hover:text-blue-600 text-slate-400" 
+                          className="h-9 w-9 rounded-xl hover:bg-muted hover:text-blue-600 text-muted-foreground" 
                           title="Edit Step"
                           onClick={() => {
                             setSelectedActionStep(step);
@@ -18951,7 +18969,7 @@ export default function App() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive text-slate-400" 
+                          className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive text-muted-foreground" 
                           title="Remove Step"
                           onClick={() => requestAuth(async () => {
                             if (selectedAction) {
@@ -18977,27 +18995,27 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-6 bg-primary/5 dark:bg-zinc-950 rounded-3xl border border-primary/10 dark:border-zinc-800">
+            <div className="p-5 bg-muted/30 rounded-2xl border border-border/50">
               <h4 className="text-sm font-bold text-primary uppercase tracking-widest mb-3 flex items-center gap-2">
                 <Info className="h-4 w-4" />
                 Description
               </h4>
-              <p className="text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
+              <p className="text-foreground leading-relaxed font-medium">
                 {selectedAction?.actionDescription}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Created By</span>
+              <div className="p-5 bg-muted/30 rounded-2xl border border-border/50 shadow-sm">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Created By</span>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
+                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                     <UserCircle className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-zinc-100">
+                  <div className="font-bold text-foreground">
                     {getProp(selectedAction, 'createdByName') || getUserNameById(getProp(selectedAction, 'createdBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
+                  <div className="text-xs text-muted-foreground ml-auto">
                     {(() => {
                       const cOn = getProp(selectedAction, 'createdOn') || getProp(selectedAction, 'createdDate') || getProp(selectedAction, 'createdTime') || getProp(selectedAction, 'createdAt');
                       return cOn ? format(new Date(cOn), 'PP') : 'N/A';
@@ -19005,16 +19023,16 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="p-5 bg-white dark:bg-zinc-950 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-400 uppercase tracking-widest block mb-1">Last Modified</span>
+              <div className="p-5 bg-muted/30 rounded-2xl border border-border/50 shadow-sm">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Last Modified</span>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300">
+                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                     <Settings2 className="h-5 w-5" />
                   </div>
-                  <div className="font-bold text-slate-700 dark:text-zinc-100">
+                  <div className="font-bold text-foreground">
                     {getProp(selectedAction, 'lastModifiedByName') || getUserNameById(getProp(selectedAction, 'lastModifiedBy') || getProp(selectedAction, 'personId')) || 'System'}
                   </div>
-                  <div className="text-xs text-slate-400 dark:text-zinc-400 ml-auto">
+                  <div className="text-xs text-muted-foreground ml-auto">
                     {(() => {
                       const mOn = getProp(selectedAction, 'lastModifiedOn') || getProp(selectedAction, 'lastModifiedTime') || getProp(selectedAction, 'lastModifiedDate') || getProp(selectedAction, 'updatedAt');
                       return mOn ? format(new Date(mOn), 'PP') : 'N/A';
@@ -19025,28 +19043,28 @@ export default function App() {
             </div>
           </div>
 
-          <div className="p-5 border-t bg-white dark:bg-zinc-950 shrink-0">
-             <div className="flex justify-end gap-3 text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-widest">
+          <DialogFooter className="items-center justify-end">
+             <div className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
                Step configuration for automated sequence
              </div>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={isAddActionOpen} onOpenChange={setIsAddActionOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+        <DialogContent className="sm:max-w-[420px]">
           <DialogHeader className="mb-0">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Play className="h-6 w-6 text-primary shrink-0" />
+              <DialogTitle className="flex items-center gap-2">
+                <Play className="h-5 w-5 text-primary shrink-0" />
                 Add Action
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Define a new automated sequence</DialogDescription>
+              <DialogDescription>Define a new automated sequence</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="grid gap-2">
-              <Label htmlFor="actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="actionName" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <Play className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Action Name
               </Label>
@@ -19054,11 +19072,11 @@ export default function App() {
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground placeholder:text-muted-foreground rounded-none shadow-none focus-visible:ring-0"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="description" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Description
               </Label>
@@ -19066,22 +19084,22 @@ export default function App() {
                 placeholder="Describe what this action does..." 
                 value={actionForm.description}
                 onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground placeholder:text-muted-foreground rounded-none shadow-none focus-visible:ring-0"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="actionTime" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Scheduled Execution Time
               </Label>
               <Input autoComplete="off" id="actionTime" type="time"
                 value={formatTimeSpanForInput(actionForm.time)}
                 onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground font-mono text-sm px-3 rounded-none shadow-none focus-visible:ring-0 [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
               />
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+            <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
                 <div>
@@ -19096,12 +19114,12 @@ export default function App() {
               />
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+            <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
                 <div>
-                  <Label htmlFor="isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
+                  <Label htmlFor="isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Every Day Schedule</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes every day (when disabled: executes when activated)</p>
                 </div>
               </div>
               <Switch
@@ -19146,19 +19164,19 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+        <DialogContent className="sm:max-w-[420px]">
           <DialogHeader className="mb-0">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Edit3 className="h-6 w-6 text-primary shrink-0" />
+              <DialogTitle className="flex items-center gap-2">
+                <Edit3 className="h-5 w-5 text-primary shrink-0" />
                 Edit Action
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400">Update action details</DialogDescription>
+              <DialogDescription>Update action details</DialogDescription>
             </div>
           </DialogHeader>
           <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="grid gap-2">
-              <Label htmlFor="edit-actionName" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="edit-actionName" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <Play className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Action Name
               </Label>
@@ -19166,11 +19184,11 @@ export default function App() {
                 placeholder="e.g. Master Shutoff" 
                 value={actionForm.actionName}
                 onChange={(e) => setActionForm(prev => ({ ...prev, actionName: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground placeholder:text-muted-foreground rounded-none shadow-none focus-visible:ring-0"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-description" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="edit-description" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Description
               </Label>
@@ -19178,22 +19196,22 @@ export default function App() {
                 placeholder="Describe what this action does..." 
                 value={actionForm.description}
                 onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground placeholder:text-muted-foreground rounded-none shadow-none focus-visible:ring-0"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-actionTime" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <Label htmlFor="edit-actionTime" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
                 Scheduled Execution Time
               </Label>
               <Input autoComplete="off" id="edit-actionTime" type="time"
                 value={formatTimeSpanForInput(actionForm.time)}
                 onChange={(e) => setActionForm(prev => ({ ...prev, time: formatTimeSpanForPayload(e.target.value) }))}
-                className="rounded-none h-11 border-slate-200 dark:border-zinc-800 bg-transparent text-slate-900 dark:text-zinc-100 font-mono text-sm px-3 focus-visible:ring-1 focus-visible:ring-primary shadow-xs [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
+                className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground font-mono text-sm px-3 rounded-none shadow-none focus-visible:ring-0 [&::-webkit-calendar-picker-indicator]:dark:invert cursor-pointer"
               />
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+            <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <Lock className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
                 <div>
@@ -19208,12 +19226,12 @@ export default function App() {
               />
             </div>
 
-            <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50">
+            <div className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <Repeat className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
                 <div>
-                  <Label htmlFor="edit-isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Recurring Schedule</Label>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes on schedule periodically</p>
+                  <Label htmlFor="edit-isRecurring" className="text-xs font-bold text-slate-700 dark:text-zinc-200 cursor-pointer">Every Day Schedule</Label>
+                  <p className="text-[10px] text-slate-400 dark:text-zinc-400">Executes every day (when disabled: executes when activated)</p>
                 </div>
               </div>
               <Switch
@@ -19798,7 +19816,12 @@ export default function App() {
                     const isTypingInChat = typers.length > 0;
                     
                     return (
-                      <button 
+                      <motion.button 
+                        layout="position"
+                        initial={false}
+                        transition={{
+                          layout: { type: "spring", stiffness: 450, damping: 35, mass: 0.8 }
+                        }}
                         key={chat.id}
                         onClick={() => {
                           setActiveChatId(chat.id);
@@ -19806,7 +19829,7 @@ export default function App() {
                           setIsChatSearchVisible(false);
                         }}
                         className={cn(
-                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] dark:hover:bg-zinc-800/60 transition-all text-left group relative border-l-4 border-transparent",
+                          "w-full h-[72px] px-4 flex gap-3 hover:bg-[#f5f6f6] dark:hover:bg-zinc-800/60 transition-colors text-left group relative border-l-4 border-transparent",
                           activeChatId === chat.id && "bg-[#f0f2f5] dark:bg-zinc-800/80 border-primary border-b-0"
                         )}
                       >
@@ -19890,7 +19913,7 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                      </button>
+                      </motion.button>
                     );
                   })
                 )}
@@ -22993,7 +23016,7 @@ export default function App() {
                   <div className="p-4">
                     <div className="space-y-3">
                       {(() => {
-                        if (isViewLoading('manage-users') || isViewLoading('all-users')) {
+                        if ((isViewLoading('manage-users') || isViewLoading('all-users')) && (!allUsers || allUsers.length === 0)) {
                           return <ThreeDotsLoading label="Loading members..." />;
                         }
                         const filteredUsers = allUsers.filter(u => {
@@ -23419,33 +23442,38 @@ export default function App() {
 
       {/* Add Fingerprint Modal */}
       <Dialog open={isAddFingerprintOpen} onOpenChange={setIsAddFingerprintOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl flex flex-col max-h-[90vh]">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
+        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="mb-0 pr-12">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <Fingerprint className="h-6 w-6 text-primary shrink-0" />
+              <DialogTitle className="flex items-center gap-2">
+                <Fingerprint className="h-5 w-5 text-primary shrink-0" />
                 Add Fingerprint
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register biometric data for a user</DialogDescription>
+              <DialogDescription>Register biometric data for a user</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="px-10 pt-3 pb-6 space-y-4 overflow-y-auto flex-1">
+          <div className="pt-[3px] pb-2 space-y-4 max-h-[65vh] overflow-y-auto">
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                  <label className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                     <UserIcon className="h-3 w-3" />
                     Select User
                   </label>
                   <Select value={selectedFingerprintUserId} onValueChange={setSelectedFingerprintUserId}>
-                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                      <SelectValue placeholder="Chose a user">
+                    <SelectTrigger className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground rounded-none shadow-none focus:ring-0">
+                      <SelectValue placeholder="Choose a user">
                         {selectedFingerprintUserId
                           ? (() => {
                               const u = (allUsers || []).find(user => user.id.toString() === selectedFingerprintUserId.toString());
-                              return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Chose a user';
+                              return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Choose a user';
                             })()
-                          : 'Chose a user'}
+                          : 'Choose a user'}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -23458,16 +23486,16 @@ export default function App() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                  <label className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                     <Cpu className="h-3 w-3" />
                     Select Hardware
                   </label>
                   <Select value={selectedFingerprintHardwareId} onValueChange={setSelectedFingerprintHardwareId}>
-                    <SelectTrigger className="h-10 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
-                      <SelectValue placeholder="Chose a hardware">
+                    <SelectTrigger className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground rounded-none shadow-none focus:ring-0">
+                      <SelectValue placeholder="Choose a hardware">
                         {selectedFingerprintHardwareId
-                          ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedFingerprintHardwareId.toString())?.name || 'Chose a hardware')
-                          : 'Chose a hardware'}
+                          ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedFingerprintHardwareId.toString())?.name || 'Choose a hardware')
+                          : 'Choose a hardware'}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -23482,7 +23510,8 @@ export default function App() {
               </div>
               <div className="flex justify-end">
                 <Button 
-                  className="w-[220px] px-4 font-medium bg-black dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-200 flex items-center justify-center gap-2"
+                  variant="outline"
+                  className="px-4 font-medium flex items-center justify-center gap-2"
                   disabled={!selectedFingerprintUserId || !selectedFingerprintHardwareId}
                   onClick={async () => {
                     try {
@@ -23506,13 +23535,13 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+              <label className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <ImageIcon className="h-3 w-3" />
                 Fingerprint Previews
               </label>
-              <div className="border border-dashed border-slate-300 dark:border-zinc-700 rounded-2xl p-4 h-[150px] bg-white dark:bg-zinc-950 flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <div className="border border-dashed border-border rounded-xl p-4 h-[150px] bg-muted/30 flex flex-wrap gap-4 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {(fingerprintImages || []).map((img, idx) => (
-                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 flex items-center justify-center overflow-hidden shrink-0">
+                  <div key={idx} className="relative group aspect-square h-24 rounded-lg border border-border bg-background flex items-center justify-center overflow-hidden shrink-0">
                     <img src={img || undefined} alt={`Fingerprint ${idx + 1}`} className="w-full h-full object-cover opacity-80" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Button 
@@ -23527,16 +23556,16 @@ export default function App() {
                   </div>
                 ))}
                 {fingerprintImages.length === 0 && (
-                  <div className="col-span-full flex items-center justify-center text-slate-400 dark:text-zinc-500 text-xs italic">
+                  <div className="col-span-full flex items-center justify-center text-muted-foreground text-xs italic">
                     Images will appear here...
                   </div>
                 )}
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
+          <DialogFooter>
             <Button 
-              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
+              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium flex items-center justify-center gap-2 px-4"
               disabled={!selectedFingerprintUserId || fingerprintImages.length === 0}
               onClick={async () => {
                 const payload = {
@@ -23661,28 +23690,33 @@ export default function App() {
 
       {/* Register NFID Modal */}
       <Dialog open={isRegisterNfidOpen} onOpenChange={setIsRegisterNfidOpen}>
-        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-10 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16 text-slate-900 dark:text-zinc-100">
+        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          <DialogHeader className="mb-0 pr-12">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2 text-slate-900 dark:text-zinc-100">
-                <ScanLine className="h-6 w-6 text-primary shrink-0" />
+              <DialogTitle className="flex items-center gap-2">
+                <ScanLine className="h-5 w-5 text-primary shrink-0" />
                 Register NFID
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">Register NFID tag or device for a user</DialogDescription>
+              <DialogDescription>Register NFID tag or device for a user</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="p-6 space-y-6">
-            <div className="bg-slate-100 dark:bg-zinc-900 p-4 rounded-xl border border-dashed border-slate-300 dark:border-zinc-800 text-center text-sm font-medium text-slate-600 dark:text-zinc-300">
+          <div className="pt-[3px] pb-2 space-y-4">
+            <div className="bg-muted/30 p-4 rounded-xl border border-dashed border-border text-center text-sm font-medium text-slate-600 dark:text-zinc-300">
                Kindly place the Card/Tag/Device on the RFID Sensor.
             </div>
             <div className="flex gap-3 items-end">
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <label className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                   <UserIcon className="h-3 w-3" />
                   Select User
                 </label>
                 <Select value={selectedNfidUserId} onValueChange={setSelectedNfidUserId}>
-                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
+                  <SelectTrigger className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground rounded-none shadow-none focus:ring-0">
                     <SelectValue placeholder="Choose a user">
                       {selectedNfidUserId
                         ? (() => {
@@ -23702,12 +23736,12 @@ export default function App() {
                 </Select>
               </div>
               <div className="flex-1 space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-400 ml-1 flex items-center gap-1.5">
+                <label className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                   <Cpu className="h-3 w-3" />
                   Select Hardware
                 </label>
                 <Select value={selectedNfidHardwareId} onValueChange={setSelectedNfidHardwareId}>
-                  <SelectTrigger className="h-11 rounded-none bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border-0 shadow-none">
+                  <SelectTrigger className="h-10 border-0 border-b-2 border-border bg-transparent text-foreground rounded-none shadow-none focus:ring-0">
                     <SelectValue placeholder="Choose hardware">
                       {selectedNfidHardwareId
                         ? ((appNamesDetailList?.hardwareIdNames || []).find(h => h.id.toString() === selectedNfidHardwareId.toString())?.name || 'Choose hardware')
@@ -23725,9 +23759,9 @@ export default function App() {
               </div>
             </div>
           </div>
-          <DialogFooter className="p-6 pr-8 border-t border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-row items-center justify-end sm:justify-end my-auto min-h-[72px]">
+          <DialogFooter>
             <Button 
-              className="bg-black dark:bg-zinc-900 hover:bg-black/90 dark:hover:bg-zinc-800 text-white dark:text-zinc-100 border dark:border-zinc-700 font-medium flex items-center justify-center gap-2 px-4 h-10"
+              className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-zinc-100 dark:hover:bg-zinc-900 dark:border dark:border-zinc-800 font-medium flex items-center justify-center gap-2 px-4"
               disabled={!selectedNfidUserId || !selectedNfidHardwareId}
               onClick={async () => {
                 console.log("Sending NFID Data for user", selectedNfidUserId, "to hardware", selectedNfidHardwareId);
@@ -23745,7 +23779,7 @@ export default function App() {
                 }
               }}
             >
-              <Send className="h-5 w-5" />
+              <Send className="h-4 w-4" />
               Send NFID Data
             </Button>
           </DialogFooter>
@@ -23774,25 +23808,27 @@ export default function App() {
             return (
               <motion.div
                 key={popup.id}
-                initial={{ scaleX: 0, opacity: 0 }}
+                layout="position"
+                initial={{ opacity: 0, x: 200, rotate: 90 }}
                 animate={{ 
-                  scaleX: 1, 
-                  opacity: 1,
-                  transition: { duration: 0.5, ease: "easeOut" }
+                  opacity: 1, 
+                  x: 0, 
+                  rotate: 0,
+                  transition: { type: "spring", stiffness: 300, damping: 22, mass: 0.8 }
                 }}
                 exit={{ 
-                  scaleX: 0, 
-                  opacity: 0,
-                  transition: { duration: 0.9, ease: "easeInOut" }
+                  opacity: 0, 
+                  x: 200, 
+                  rotate: 90,
+                  transition: { duration: 0.4, ease: "easeInOut" }
                 }}
-                style={{ originX: 0.5 }}
-                className="bg-white/95 backdrop-blur-sm rounded-full shadow-lg p-3 pl-3 pr-6 w-auto max-w-[85vw] md:max-w-[30%] min-w-[260px] pointer-events-auto border-2 border-zinc-300 cursor-pointer hover:bg-slate-50 transition-colors flex gap-3.5 items-center"
+                className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md rounded-full shadow-xl p-3 pl-3 pr-6 w-auto max-w-[85vw] md:max-w-[340px] min-w-[260px] pointer-events-auto border-2 border-slate-300 dark:border-zinc-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-800/90 transition-colors flex gap-3.5 items-center text-slate-900 dark:text-zinc-100"
                 onClick={() => {
                   setActiveChatId(popup.chatId);
                   setIsChatModalOpen(true);
                 }}
               >
-                <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-700 font-bold shrink-0 overflow-hidden">
+                <div className="h-10 w-10 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 font-bold shrink-0 overflow-hidden">
                   {displayProfileImg ? (
                     <img 
                       src={getFullImageUrl(displayProfileImg)} 
@@ -23805,8 +23841,8 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0 text-left flex flex-col justify-center">
-                  <p className="text-sm font-bold text-slate-800 truncate leading-tight">{displayName}</p>
-                  <p className="text-xs text-slate-500 font-normal truncate leading-tight mt-0.5">
+                  <p className="text-sm font-bold text-slate-800 dark:text-zinc-100 truncate leading-tight">{displayName}</p>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 font-normal truncate leading-tight mt-0.5">
                     {isGroup ? `${popup.senderName}: ${displayMsg}` : displayMsg}
                   </p>
                 </div>
