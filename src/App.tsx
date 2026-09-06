@@ -3630,6 +3630,7 @@ export default function App() {
 
   const [isAddRoomOpen, setIsAddRoomOpen] = React.useState(false);
   const [roomLocked, setRoomLocked] = React.useState(false);
+  const [isLockingRoomDoors, setIsLockingRoomDoors] = React.useState(false);
   const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
   const [generatedToken, setGeneratedToken] = React.useState<GetTokenDto | null>(null);
   const [newGroupImageUrl, setNewGroupImageUrl] = React.useState("");
@@ -4603,7 +4604,15 @@ export default function App() {
           console.warn("[WebRTC Log] Failed to send toggle controls on participant join:", err);
         }
       }
-    } else if (eventName === "CallRejected" || eventName === "ParticipantLeft") {
+    } else if (eventName === "CallRejected") {
+      setIsCallModalOpen(false);
+      setIsIncomingCall(false);
+      setIsCallCameraEnabled(false);
+      setIsCallScreenSharing(false);
+      cleanupAllPeerConnections();
+      setActiveCall(null);
+      toast.info("Call rejected");
+    } else if (eventName === "ParticipantLeft") {
       const leftPersonId = payload?.personId || payload?.PersonId || (isLegacy ? legacyData?.personId : undefined);
       if (leftPersonId) {
         cleanupPeerConnectionForPerson(leftPersonId);
@@ -4611,10 +4620,12 @@ export default function App() {
       if (isLegacy && legacyData) {
         const data = legacyData;
         setActiveCall(prev => {
-          if (!prev || prev.id !== data.callId) return prev;
+          if (!prev || (data.callId && prev.id && Number(data.callId) !== Number(prev.id))) return prev;
           if (data.callStatus === CallStatus.Ended || data.callStatus === CallStatus.Rejected) {
             setIsCallModalOpen(false);
+            setIsIncomingCall(false);
             setIsCallCameraEnabled(false);
+            setIsCallScreenSharing(false);
             cleanupAllPeerConnections();
             toast.info("Call ended/rejected");
             return null;
@@ -4631,13 +4642,15 @@ export default function App() {
       } else {
         // It's a full CallDto
         setActiveCall(prev => {
-          if (!prev || prev.id !== callDto.id) return prev;
+          if (!prev || (callDto?.id && prev.id && Number(callDto.id) !== Number(prev.id))) return prev;
           
           // If overall status is ended/rejected, or if current user declined/left, close call modal
           const isUserActive = callDto.participants?.some(p => p.personId === currentUserId && (p.status === CallParticipantStatus.Connected || p.status === CallParticipantStatus.Ringing));
           if (callDto.status === CallStatus.Ended || callDto.status === CallStatus.Rejected || !isUserActive) {
             setIsCallModalOpen(false);
+            setIsIncomingCall(false);
             setIsCallCameraEnabled(false);
+            setIsCallScreenSharing(false);
             cleanupAllPeerConnections();
             toast.info("Call ended/rejected");
             return null;
@@ -4647,42 +4660,21 @@ export default function App() {
         });
       }
     } else if (eventName === "CallEnded") {
+      setIsCallModalOpen(false);
+      setIsIncomingCall(false);
+      setIsCallCameraEnabled(false);
+      setIsCallScreenSharing(false);
       cleanupAllPeerConnections();
-      if (isLegacy && legacyData) {
-        const data = legacyData;
-        setActiveCall(prev => {
-          if (!prev || prev.id !== data.callId) return prev;
-          setIsCallModalOpen(false);
-          setIsCallCameraEnabled(false);
-          toast.info("Call ended");
-          return null;
-        });
-      } else {
-        // It's a full CallDto
-        setActiveCall(prev => {
-          if (!prev || prev.id !== callDto.id) return prev;
-          setIsCallModalOpen(false);
-          setIsCallCameraEnabled(false);
-          toast.info("Call ended");
-          return null;
-        });
-      }
+      setActiveCall(null);
+      toast.info("Call ended");
     } else if (eventName === "CallTimedOut") {
       setIsCallModalOpen(false);
       setIsIncomingCall(false);
       setIsCallCameraEnabled(false);
-      
-      const targetStatus = CallStatus.Missed;
-      callDto.status = targetStatus;
-      if (isLegacy && legacyData) {
-        legacyData.callStatus = targetStatus;
-      }
-      
-      setActiveCall(prev => {
-        if (!prev || prev.id !== callDto.id) return prev;
-        toast.info("Call timed out / missed");
-        return null;
-      });
+      setIsCallScreenSharing(false);
+      cleanupAllPeerConnections();
+      setActiveCall(null);
+      toast.info("Call timed out / missed");
     }
 
     // 2. Update callLogs history list!
@@ -5271,6 +5263,13 @@ export default function App() {
   }, []);
 
   const handleEndCall = React.useCallback(async (callId: number) => {
+    setActiveCall(null);
+    setIsCallModalOpen(false);
+    setIsIncomingCall(false);
+    setIsCallCameraEnabled(false);
+    setIsCallScreenSharing(false);
+    cleanupAllPeerConnections();
+
     try {
       const nowIso = new Date().toISOString();
       setCallLogs(prev => prev.map(log => {
@@ -5293,19 +5292,20 @@ export default function App() {
         },
         body: ''
       });
-      setActiveCall(null);
-      setIsCallModalOpen(false);
-      setIsCallCameraEnabled(false);
       toast.info("Call ended");
     } catch (err) {
       console.error("Failed to end call", err);
-      setActiveCall(null);
-      setIsCallModalOpen(false);
-      setIsCallCameraEnabled(false);
     }
-  }, []);
+  }, [cleanupAllPeerConnections]);
 
   const handleRejectCall = React.useCallback(async (callId: number, chatId: number) => {
+    setActiveCall(null);
+    setIsCallModalOpen(false);
+    setIsIncomingCall(false);
+    setIsCallCameraEnabled(false);
+    setIsCallScreenSharing(false);
+    cleanupAllPeerConnections();
+
     try {
       const nowIso = new Date().toISOString();
       setCallLogs(prev => prev.map(log => {
@@ -5328,17 +5328,11 @@ export default function App() {
         },
         body: ''
       });
-      setActiveCall(null);
-      setIsCallModalOpen(false);
-      setIsCallCameraEnabled(false);
-      toast.info("Call rejected/left");
+      toast.info("Call rejected");
     } catch (err) {
-      console.error("Failed to reject/leave call", err);
-      setActiveCall(null);
-      setIsCallModalOpen(false);
-      setIsCallCameraEnabled(false);
+      console.error("Failed to reject call", err);
     }
-  }, []);
+  }, [cleanupAllPeerConnections]);
 
   const handleTerminateCall = React.useCallback(() => {
     if (!activeCall) return;
@@ -7766,42 +7760,92 @@ export default function App() {
     }
   };
 
-  const toggleRoomLock = async (roomId: string) => {
-    const nextState = !roomLocked;
-    setRoomLocked(nextState);
-    
-    const doorsInRoom = devices.filter(d => d.room === roomId && d.type === 'door');
-    const windowsInRoom = devices.filter(d => d.room === roomId && d.type === 'window');
+  const handleLockUnlockedRoomDoors = async (roomId: string) => {
+    if (isLockingRoomDoors) return;
+    const currentRoomObj = (userRooms || []).find(r => r.id.toString() === roomId.toString());
+    const doorsInRoom = devices.filter(d => 
+      (d.room?.toString() === roomId.toString() || (currentRoomObj?.name && d.room?.toLowerCase() === currentRoomObj.name.toLowerCase())) &&
+      d.type === 'door'
+    );
 
-    for (const door of doorsInRoom) {
+    const unlockedDoors = doorsInRoom.filter(d => {
+      const rawId = getRawId(d.id);
+      const dto = (doors || []).find(item => item.id.toString() === rawId.toString());
+      if (dto) return !dto.isLocked;
+      return d.status !== 'locked' && d.status !== 'open-locked';
+    });
+
+    if (unlockedDoors.length === 0) {
+      toast.info("All doors in this room are already locked");
+      return;
+    }
+
+    setIsLockingRoomDoors(true);
+    const unlockedRawIds = unlockedDoors.map(d => getRawId(d.id));
+    const unlockedDevIds = unlockedDoors.map(d => d.id);
+
+    let successCount = 0;
+    let lastError: any = null;
+
+    for (const doorDev of unlockedDoors) {
+      const rawId = getRawId(doorDev.id);
       try {
-        const rawId = door.id.includes('-') ? door.id.split('-')[1] : door.id;
         await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-      } catch (e) {
-         console.error("Failed to toggle door in room lock", e);
+        successCount++;
+      } catch (e: any) {
+        console.error("Failed to lock door in room lock", e);
+        lastError = e;
       }
     }
 
-    for (const win of windowsInRoom) {
-      try {
-        const rawId = win.id.includes('-') ? win.id.split('-')[1] : win.id;
-        await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-      } catch (e) {
-         console.error("Failed to toggle window in room lock", e);
+    // Update doors DTO state
+    setDoors(prev => prev.map(item => {
+      if (unlockedRawIds.includes(item.id.toString())) {
+        return { ...item, isLocked: true, isOpen: false };
       }
-    }
-    
-    // Toggle all doors and windows in this room
+      return item;
+    }));
+
+    // Update devices state
     setDevices(prev => prev.map(d => {
-      if (d.room === roomId && (d.type === 'door' || d.type === 'window')) {
-        return { ...d, status: nextState ? 'locked' : 'unlocked' };
+      if (unlockedDevIds.includes(d.id) || (d.type === 'door' && unlockedRawIds.includes(getRawId(d.id)))) {
+        return { ...d, status: 'locked' };
       }
       return d;
     }));
-    
-    // Add log
-    addLogEntry('Door Security', `${nextState ? 'Locked' : 'Unlocked'} all security points in ${(rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room'}`);
-    toast.success(`Room ${nextState ? 'locked' : 'unlocked'} successfully`);
+
+    setRoomLocked(true);
+    setIsLockingRoomDoors(false);
+
+    const roomName = currentRoomObj?.name || (rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room';
+    if (successCount > 0) {
+      addLogEntry('Door Security', `Locked ${successCount} unlocked door(s) in ${roomName}`);
+      toast.success(successCount === 1 ? `Locked 1 door in ${roomName}` : `Locked all ${successCount} doors in ${roomName}`);
+    } else if (lastError) {
+      toast.error(`Failed to lock door(s): ${lastError.message || 'Unknown error'}`);
+    }
+  };
+
+  const toggleRoomLock = async (roomId: string) => {
+    const currentRoomObj = (userRooms || []).find(r => r.id.toString() === roomId.toString());
+    const doorsInRoom = devices.filter(d => 
+      (d.room?.toString() === roomId.toString() || (currentRoomObj?.name && d.room?.toLowerCase() === currentRoomObj.name.toLowerCase())) &&
+      d.type === 'door'
+    );
+    const unlockedDoors = doorsInRoom.filter(d => {
+      const rawId = getRawId(d.id);
+      const dto = (doors || []).find(item => item.id.toString() === rawId.toString());
+      if (dto) return !dto.isLocked;
+      return d.status !== 'locked' && d.status !== 'open-locked';
+    });
+
+    const isCurrentlyLocked = doorsInRoom.length > 0 ? (unlockedDoors.length === 0) : roomLocked;
+    if (isCurrentlyLocked) {
+      // If room is locked, locked button cannot be clicked on
+      return;
+    }
+
+    await handleLockUnlockedRoomDoors(roomId);
   };
 
   const handleUpdateProfile = async () => {
@@ -11406,12 +11450,24 @@ export default function App() {
         return (securityPriority[a.type] || 99) - (securityPriority[b.type] || 99);
       });
 
-      const doors = sortedRoomDevices.filter(d => d.type === 'door');
+      const roomDoorDevices = sortedRoomDevices.filter(d => d.type === 'door');
       const windows = sortedRoomDevices.filter(d => d.type === 'window');
       const lights = sortedRoomDevices.filter(d => d.type === 'light');
       const appliances = sortedRoomDevices.filter(d => d.type === 'appliance');
       const cameras = sortedRoomDevices.filter(d => d.type === 'camera');
       const roomExternals = sortedRoomDevices.filter(d => d.type === 'external' as any);
+
+      const isDoorDeviceLocked = (dev: Device): boolean => {
+        const rawId = getRawId(dev.id);
+        const matchedDto = (doors || []).find(item => item.id.toString() === rawId.toString());
+        if (matchedDto) {
+          return Boolean(matchedDto.isLocked);
+        }
+        return dev.status === 'locked' || dev.status === 'open-locked';
+      };
+
+      const unlockedDoorsInRoom = roomDoorDevices.filter(dev => !isDoorDeviceLocked(dev));
+      const isRoomLocked = roomDoorDevices.length > 0 ? (unlockedDoorsInRoom.length === 0) : roomLocked;
       
       const roomScenes = scenes.filter(scene => 
         scene.actions.some(action => roomDevices.some(d => d.id === action.deviceId))
@@ -11452,7 +11508,7 @@ export default function App() {
               </h3>
               <div className="grid grid-cols-3 gap-4">
                 <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl font-bold">{roomDevices.filter(d => d.type === 'door').length}</span>
+                  <span className="text-2xl font-bold">{roomDoorDevices.length}</span>
                   <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase">Doors</span>
                 </div>
                 <div className="flex flex-col items-center gap-1">
@@ -11483,22 +11539,33 @@ export default function App() {
             </Card>
             <Card 
               className={cn(
-                "p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 group border-2",
-                roomLocked 
-                  ? "bg-red-500/5 border-red-500/20 text-red-600 hover:bg-red-500/10" 
-                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10"
+                "p-6 flex flex-col items-center justify-center gap-3 transition-all duration-300 border-2 select-none",
+                isRoomLocked 
+                  ? "bg-red-500/5 border-red-500/20 text-red-600 cursor-not-allowed opacity-90" 
+                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10 cursor-pointer group"
               )}
-              onClick={() => toggleRoomLock(userRoomId)}
+              onClick={isRoomLocked || isLockingRoomDoors ? undefined : () => handleLockUnlockedRoomDoors(userRoomId)}
+              role="button"
+              aria-disabled={isRoomLocked}
+              title={isRoomLocked ? "All doors in this room are locked. Cannot be clicked." : "Click to lock unlocked doors"}
             >
               <div className={cn(
-                "rounded-full p-4 transition-transform group-hover:scale-110",
-                roomLocked ? "bg-red-500/10" : "bg-green-500/10"
+                "rounded-full p-4 transition-transform",
+                isRoomLocked ? "bg-red-500/10" : "bg-green-500/10 group-hover:scale-110"
               )}>
-                {roomLocked ? <Lock className="h-10 w-10" /> : <Unlock className="h-10 w-10" />}
+                {isLockingRoomDoors ? (
+                  <Loader2 className="h-10 w-10 animate-spin" />
+                ) : isRoomLocked ? (
+                  <Lock className="h-10 w-10" />
+                ) : (
+                  <Unlock className="h-10 w-10" />
+                )}
               </div>
               <div className="text-center">
-                <p className="text-lg font-bold uppercase tracking-wider">{roomLocked ? 'Locked' : 'Unlocked'}</p>
-                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">Click to toggle security</p>
+                <p className="text-lg font-bold uppercase tracking-wider">{isRoomLocked ? 'Locked' : 'Unlocked'}</p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">
+                  {isRoomLocked ? 'All doors locked' : (isLockingRoomDoors ? 'Locking doors...' : 'Click to lock unlocked doors')}
+                </p>
               </div>
             </Card>
           </div>
@@ -11506,7 +11573,7 @@ export default function App() {
           <div className="flex flex-col lg:flex-row gap-12">
             <div className="lg:w-2/3 space-y-12">
               {/* Doors */}
-              {doors.length > 0 && (
+              {roomDoorDevices.length > 0 && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
                     <Lock className="h-5 w-5 text-primary" />
@@ -11514,7 +11581,7 @@ export default function App() {
                   </div>
                   <Separator />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {(doors || []).map(device => (
+                    {(roomDoorDevices || []).map(device => (
                       <DeviceCard
                         key={device.id}
                         device={device}
@@ -14768,13 +14835,13 @@ export default function App() {
 
       {/* Authorization Code Dialog */}
       <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
-        <DialogContent className="sm:max-w-[400px] border-2 border-yellow-400 dark:border-yellow-600 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 shadow-lg shadow-yellow-100/50 dark:shadow-none">
+        <DialogContent className="sm:max-w-[400px] border-2 border-slate-300 dark:border-zinc-600 bg-popover text-popover-foreground">
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 font-bold">
               <ShieldAlert className="h-5 w-5" />
               Change Authorization Code
             </DialogTitle>
-            <DialogDescription className="text-yellow-800/80 dark:text-yellow-200 font-medium">
+            <DialogDescription>
               This is a sensitive operation. Please enter your credentials to authorize the action.
             </DialogDescription>
           </DialogHeader>
@@ -14784,7 +14851,7 @@ export default function App() {
             <div className="relative">
               <Input autoComplete="off" id="auth-pwd" 
                 type={showAuthPwd ? "text" : "password"}
-                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.password ? "border-b-green-400" : "")}
+                className={cn("pr-9 bg-background border-input text-foreground placeholder:text-muted-foreground", authCodeData.password ? "border-b-green-400" : "")}
                 value={authCodeData.password}
                 onChange={(e) => setAuthCodeData(prev => ({ ...prev, password: e.target.value }))}
               />
@@ -14801,7 +14868,7 @@ export default function App() {
             <Label htmlFor="auth-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
             <Input autoComplete="off" id="auth-token" 
               placeholder="XXXX-XXXX-XXXX-XXXX"
-              className={cn("bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.token ? "border-b-green-400" : "")}
+              className={cn("bg-background border-input text-foreground placeholder:text-muted-foreground", authCodeData.token ? "border-b-green-400" : "")}
               value={authCodeData.token}
               onChange={(e) => setAuthCodeData(prev => ({ ...prev, token: e.target.value }))}
             />
@@ -14813,7 +14880,7 @@ export default function App() {
                 type={showNewAuthCode ? "text" : "password"}
                 placeholder="000000"
                 maxLength={6}
-                className={cn("pr-9 bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
+                className={cn("pr-9 bg-background border-input text-foreground placeholder:text-muted-foreground", authCodeData.newAuthorizationCode.length === 6 ? "border-b-green-400" : "")}
                 value={authCodeData.newAuthorizationCode}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '');
@@ -15921,7 +15988,17 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isAuthModalOpen} onOpenChange={setIsAuthModalOpen}>
-        <DialogContent showCloseButton={false} className={cn("sm:max-w-[520px] border-2 transition-colors duration-300 bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100", authSuccess ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-50 dark:bg-green-900/20" : authError ? "border-red-500 bg-white dark:bg-zinc-950" : "border-yellow-400 dark:border-yellow-600 shadow-lg shadow-yellow-100/50 dark:shadow-none bg-white dark:bg-zinc-950")}>
+        <DialogContent 
+          showCloseButton={false} 
+          className={cn(
+            "sm:max-w-[520px] border-2 transition-colors duration-300 bg-popover text-popover-foreground", 
+            authSuccess 
+              ? "border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.3)] bg-green-500/10 dark:bg-green-900/20" 
+              : authError 
+                ? "border-destructive bg-destructive/10" 
+                : "border-slate-300 dark:border-zinc-600 bg-popover"
+          )}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-4 items-center">
             {/* Left Column (Current Contents) */}
             <div className="sm:col-span-7 space-y-4">
@@ -15946,14 +16023,14 @@ export default function App() {
                       maxLength={1}
                       disabled={isVerifyingAuth || authSuccess}
                       className={cn(
-                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100",
+                        "h-10 w-8 sm:w-10 text-center text-lg sm:text-xl font-mono border-2 transition-all rounded-lg bg-background text-foreground",
                         authSuccess 
-                          ? "border-green-500 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/40" 
+                          ? "border-green-500 text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-950/40" 
                           : authError
-                            ? "border-red-500 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400"
+                            ? "border-destructive bg-destructive/10 text-destructive"
                             : authCode[index] 
-                              ? "border-primary bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100" 
-                              : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:border-primary text-slate-900 dark:text-zinc-100"
+                              ? "border-primary bg-background text-foreground" 
+                              : "border-input bg-background focus:border-primary text-foreground"
                       )}
                       value={authCode[index] || ''}
                       onKeyDown={(e) => {
@@ -16017,7 +16094,7 @@ export default function App() {
                 <Button
                   variant="outline"
                   disabled={isVerifyingAuth || authSuccess}
-                  className="h-11 w-11 text-[11px] font-semibold rounded-full text-red-500 hover:bg-red-50 p-0 flex items-center justify-center"
+                  className="h-11 w-11 text-[11px] font-semibold rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 p-0 flex items-center justify-center"
                   onClick={() => {
                     setAuthCode('');
                     setAuthError(false);
@@ -21869,9 +21946,17 @@ export default function App() {
       <GlobalRemoteAudioFeeds remoteStreams={remoteStreams} />
 
       {/* Call Dialog (WhatsApp style overlay) */}
-      <Dialog open={isCallModalOpen} onOpenChange={(open) => {
-        setIsCallModalOpen(open);
-      }}>
+      <Dialog 
+        open={isCallModalOpen && !!activeCall && activeCall.status !== CallStatus.Ended && activeCall.status !== CallStatus.Rejected && activeCall.status !== CallStatus.Missed && activeCall.status !== CallStatus.TimedOut && !activeCall.endedAt} 
+        onOpenChange={(open) => {
+          setIsCallModalOpen(open);
+          if (!open) {
+            if (!activeCall || activeCall.status === CallStatus.Ended || activeCall.status === CallStatus.Rejected || activeCall.status === CallStatus.Missed || activeCall.status === CallStatus.TimedOut || activeCall.endedAt) {
+              setActiveCall(null);
+            }
+          }
+        }}
+      >
         <DialogContent 
           showCloseButton={false} 
           className="max-w-[500px] w-[95vw] h-[650px] p-0 overflow-hidden rounded-3xl border border-black/40 shadow-2xl bg-[#111b21] text-white flex flex-col justify-between"
@@ -23852,7 +23937,7 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {activeCall && !isCallModalOpen && (
+      {activeCall && !isCallModalOpen && activeCall.status !== CallStatus.Ended && activeCall.status !== CallStatus.Rejected && activeCall.status !== CallStatus.Missed && activeCall.status !== CallStatus.TimedOut && !activeCall.endedAt && (
         <div 
           onClick={() => setIsCallModalOpen(true)}
           className="fixed bottom-24 right-6 z-[10000] bg-zinc-950/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"

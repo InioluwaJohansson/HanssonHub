@@ -6,8 +6,18 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const getDirname = () => {
+  try {
+    if (typeof __dirname !== "undefined") return __dirname;
+    if (typeof import.meta !== "undefined" && import.meta.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {
+    // Fallback to process.cwd()
+  }
+  return process.cwd();
+};
+const currentDir = getDirname();
 
 async function startServer() {
   const app = express();
@@ -182,20 +192,31 @@ async function startServer() {
     res.setHeader("Content-Type", "application/javascript");
     res.setHeader("Service-Worker-Allowed", "/");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.sendFile(swPath);
+    res.sendFile(swPath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(404).end();
+      }
+    });
   });
 
   app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
     const manifestPath = path.join(process.cwd(), process.env.NODE_ENV === "production" ? "dist" : "public", "manifest.json");
     res.setHeader("Content-Type", "application/manifest+json");
     res.setHeader("Cache-Control", "public, max-age=3600");
-    res.sendFile(manifestPath);
+    res.sendFile(manifestPath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(404).end();
+      }
+    });
   });
 
   // Vite middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === "true" ? false : undefined,
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -212,4 +233,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
