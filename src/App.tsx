@@ -51,6 +51,11 @@ import {
   UpdateCameraDto,
   GetRecordingDto,
   GetApplianceDto,
+  GetUtilityDto,
+  UtilityType,
+  UtilityComponent,
+  UtilityDataMQTT,
+  UtilityTypeComponentsDto,
   GetDoorDto,
   GetLightDto,
   GetWindowDto,
@@ -102,6 +107,7 @@ import { API_BASE_URL } from './config';
 import { apiFetch } from './api/client';
 import { ScrollArea } from './components/ui/scroll-area';
 import { HlsVideo } from './components/HlsVideo';
+import { WaterTank } from './components/WaterTank';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
 import { Separator } from './components/ui/separator';
@@ -131,6 +137,7 @@ import { Switch } from "./components/ui/switch";
 import { Calendar } from "./components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { 
+  Menu,
   RefreshCw,
   Bell, 
   Search, 
@@ -252,7 +259,12 @@ import {
   Moon,
   Sun,
   Mic,
-  MicOff
+  MicOff,
+  Droplets,
+  Flame,
+  Sprout,
+  Gauge,
+  Wind
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
@@ -2168,6 +2180,298 @@ function parseCallUpdate(payload: any): { callDto: CallDto; isLegacy: boolean; l
   }
 }
 
+const DEFAULT_UTILITY_TYPES = [
+  { id: UtilityType.Electricity, name: 'Electricity' },
+  { id: UtilityType.Water, name: 'Water' },
+  { id: UtilityType.Gas, name: 'Gas' },
+  { id: UtilityType.HVAC, name: 'HVAC' },
+  { id: UtilityType.Telecommunication, name: 'Telecommunication' },
+  { id: UtilityType.Irrigation, name: 'Irrigation' },
+  { id: UtilityType.Emergency, name: 'Emergency' },
+];
+
+const DEFAULT_UTILITY_COMPONENTS: UtilityTypeComponentsDto[] = [
+  {
+    utilityType: { id: UtilityType.Electricity, name: 'Electricity' },
+    components: [
+      { id: UtilityComponent.Generator, name: 'Generator' },
+      { id: UtilityComponent.SolarPanel, name: 'SolarPanel' },
+    ],
+  },
+  {
+    utilityType: { id: UtilityType.Water, name: 'Water' },
+    components: [
+      { id: UtilityComponent.WaterTank, name: 'WaterTank' },
+      { id: UtilityComponent.WaterPump, name: 'WaterPump' },
+      { id: UtilityComponent.WaterMeter, name: 'WaterMeter' },
+    ],
+  },
+  {
+    utilityType: { id: UtilityType.Gas, name: 'Gas' },
+    components: [
+      { id: UtilityComponent.GasCylinder, name: 'GasCylinder' },
+    ],
+  },
+  {
+    utilityType: { id: UtilityType.HVAC, name: 'HVAC' },
+    components: [
+      { id: UtilityComponent.AirConditioner, name: 'AirConditioner' },
+      { id: UtilityComponent.Heater, name: 'Heater' },
+    ],
+  },
+  {
+    utilityType: { id: UtilityType.Telecommunication, name: 'Telecommunication' },
+    components: [],
+  },
+  {
+    utilityType: { id: UtilityType.Irrigation, name: 'Irrigation' },
+    components: [],
+  },
+  {
+    utilityType: { id: UtilityType.Emergency, name: 'Emergency' },
+    components: [
+      { id: UtilityComponent.EmergencyNone, name: 'EmergencyNone' },
+      { id: UtilityComponent.EmergencyMild, name: 'EmergencyMild' },
+      { id: UtilityComponent.EmergencySevere, name: 'EmergencySevere' },
+      { id: UtilityComponent.EmergencyCritical, name: 'EmergencyCritical' },
+    ],
+  },
+];
+
+const formatEnumLabel = (name?: string | null): string => {
+  if (!name) return '';
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+};
+
+const normalizeUtilityComponentsList = (rawList: any): UtilityTypeComponentsDto[] => {
+  if (!Array.isArray(rawList) || rawList.length === 0) return DEFAULT_UTILITY_COMPONENTS;
+  return rawList.map((entry: any) => {
+    const ut = entry.utilityType ?? entry.UtilityType ?? {};
+    const comps = entry.components ?? entry.Components ?? [];
+    return {
+      utilityType: {
+        id: Number(ut.id ?? ut.Id ?? 1),
+        name: ut.name ?? ut.Name ?? 'Electricity',
+      },
+      components: Array.isArray(comps)
+        ? comps.map((c: any) => ({
+            id: Number(c.id ?? c.Id ?? 0),
+            name: c.name ?? c.Name ?? '',
+          }))
+        : [],
+    };
+  });
+};
+
+const mergeAppNamesDetailList = (prev: any, rawData: any) => {
+  if (!rawData || typeof rawData !== 'object') return prev;
+  const next = { ...prev };
+  Object.keys(rawData).forEach((key) => {
+    const val = rawData[key];
+    if (val === null || val === undefined) return;
+    const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+    next[key] = val;
+    next[camelKey] = val;
+    if (key === 'DoorType') next['doorType'] = val;
+    if (key === 'doorType') next['DoorType'] = val;
+    if (key === 'UtilityType' || key === 'utilityType') {
+      next['utilityType'] = Array.isArray(val) && val.length > 0
+        ? val.map((t: any) => ({ id: Number(t.id ?? t.Id ?? 1), name: t.name ?? t.Name ?? '' }))
+        : DEFAULT_UTILITY_TYPES;
+    }
+    if (key === 'UtilityComponent' || key === 'utilityComponent') {
+      next['utilityComponent'] = normalizeUtilityComponentsList(val);
+    }
+  });
+  return next;
+};
+
+const getUtilityComponentsForType = (utilityTypeId: number, appList?: any) => {
+  const groups: UtilityTypeComponentsDto[] =
+    appList?.utilityComponent && appList.utilityComponent.length > 0
+      ? normalizeUtilityComponentsList(appList.utilityComponent)
+      : DEFAULT_UTILITY_COMPONENTS;
+  const matched = groups.find((g) => Number(g.utilityType?.id) === Number(utilityTypeId));
+  if (matched) return matched.components || [];
+  const fallback = DEFAULT_UTILITY_COMPONENTS.find((g) => Number(g.utilityType?.id) === Number(utilityTypeId));
+  return fallback?.components || [];
+};
+
+const resolveUtilityTypeId = (val: any, appList?: any): number => {
+  if (val === undefined || val === null || val === '') return UtilityType.Electricity;
+  if (typeof val === 'number' && !Number.isNaN(val) && val > 0) return val;
+  const str = val.toString().trim();
+  if (/^\d+$/.test(str)) return parseInt(str, 10);
+  const types = (appList?.utilityType && appList.utilityType.length > 0) ? appList.utilityType : DEFAULT_UTILITY_TYPES;
+  const found = types.find((t: any) => (t.name ?? t.Name ?? '').toLowerCase() === str.toLowerCase());
+  if (found) return Number(found.id ?? found.Id);
+  const fallback = DEFAULT_UTILITY_TYPES.find((t) => t.name.toLowerCase() === str.toLowerCase());
+  return fallback ? fallback.id : UtilityType.Electricity;
+};
+
+const resolveUtilityTypeName = (val: any, appList?: any): string => {
+  const id = resolveUtilityTypeId(val, appList);
+  const types = (appList?.utilityType && appList.utilityType.length > 0) ? appList.utilityType : DEFAULT_UTILITY_TYPES;
+  const found = types.find((t: any) => Number(t.id ?? t.Id) === id);
+  if (found) return found.name ?? found.Name;
+  const fallback = DEFAULT_UTILITY_TYPES.find((t) => t.id === id);
+  return fallback?.name || 'Electricity';
+};
+
+const resolveUtilityComponentId = (val: any, appList?: any): number | null => {
+  if (val === undefined || val === null || val === '') return null;
+  if (typeof val === 'number' && !Number.isNaN(val)) return val;
+  const str = val.toString().trim();
+  if (/^-?\d+$/.test(str)) return parseInt(str, 10);
+  const groups = normalizeUtilityComponentsList(appList?.utilityComponent);
+  for (const g of [...groups, ...DEFAULT_UTILITY_COMPONENTS]) {
+    const found = g.components.find((c) => c.name.toLowerCase() === str.toLowerCase());
+    if (found) return found.id;
+  }
+  return null;
+};
+
+const resolveUtilityComponentName = (val: any, appList?: any): string => {
+  if (val === undefined || val === null || val === '') return '';
+  if (typeof val === 'string' && !/^-?\d+$/.test(val.trim())) return val.trim();
+  const id = Number(val);
+  const groups = normalizeUtilityComponentsList(appList?.utilityComponent);
+  for (const g of [...groups, ...DEFAULT_UTILITY_COMPONENTS]) {
+    const found = g.components.find((c) => Number(c.id) === id);
+    if (found) return found.name;
+  }
+  const enumName = (UtilityComponent as any)[id];
+  return typeof enumName === 'string' ? enumName : '';
+};
+
+const normalizeUtilityDto = (raw: any): GetUtilityDto => {
+  const id = Number(raw?.id ?? raw?.Id ?? 0);
+  const isActive = raw?.isActive ?? raw?.IsActive ?? false;
+  const utilityComponent = raw?.utilityComponent !== undefined
+    ? raw.utilityComponent
+    : (raw?.UtilityComponent !== undefined ? raw.UtilityComponent : null);
+  return {
+    ...raw,
+    id,
+    personId: raw?.personId ?? raw?.PersonId,
+    utilityName: raw?.utilityName ?? raw?.UtilityName ?? raw?.name ?? 'Unknown Utility',
+    utilityId: raw?.utilityId ?? raw?.UtilityId ?? '',
+    utilityType: raw?.utilityType ?? raw?.UtilityType ?? UtilityType.Electricity,
+    utilityComponent,
+    isActive: Boolean(isActive),
+    powerActive: raw?.powerActive ?? raw?.PowerActive ?? Boolean(isActive),
+    currentLevel: raw?.currentLevel ?? raw?.CurrentLevel ?? null,
+    voltageLevel: raw?.voltageLevel ?? raw?.VoltageLevel ?? null,
+    powerConsumption: raw?.powerConsumption ?? raw?.PowerConsumption ?? null,
+    powerConsumptionToday: raw?.powerConsumptionToday ?? raw?.PowerConsumptionToday ?? null,
+    timeOut: raw?.timeOut ?? raw?.TimeOut ?? null,
+    actionIds: Array.isArray(raw?.actionIds ?? raw?.ActionIds) ? (raw.actionIds ?? raw.ActionIds).map(Number) : [],
+    currentWaterLevel: raw?.currentWaterLevel ?? raw?.CurrentWaterLevel ?? null,
+    maxWaterLevel: raw?.maxWaterLevel ?? raw?.MaxWaterLevel ?? null,
+    minWaterLevel: raw?.minWaterLevel ?? raw?.MinWaterLevel ?? null,
+    roomId: raw?.roomId ?? raw?.RoomId,
+    roomName: raw?.roomName ?? raw?.RoomName,
+    sectionId: raw?.sectionId ?? raw?.SectionId,
+    sectionName: raw?.sectionName ?? raw?.SectionName,
+    createdBy: raw?.createdBy ?? raw?.CreatedBy,
+    createdByName: raw?.createdByName ?? raw?.CreatedByName,
+    createdOn: raw?.createdOn ?? raw?.CreatedOn,
+    lastModifiedBy: raw?.lastModifiedBy ?? raw?.LastModifiedBy,
+    lastModifiedByName: raw?.lastModifiedByName ?? raw?.LastModifiedByName,
+    lastModifiedOn: raw?.lastModifiedOn ?? raw?.LastModifiedOn,
+  };
+};
+
+const mapUtilityToDevice = (item: any, existingDev?: Device, appList?: any): Device => {
+  const id = item?.id ?? item?.Id;
+  const rawActive = item?.isActive ?? item?.IsActive;
+  const isAct = (rawActive !== undefined && rawActive !== null)
+    ? (rawActive === true || rawActive === 'true' || rawActive === 1 || rawActive === '1')
+    : (existingDev ? (existingDev.status === 'on' || existingDev.status === 'active') : false);
+
+  const rawRoomId = item?.roomId ?? item?.RoomId;
+  const rawSectionId = item?.sectionId ?? item?.SectionId;
+  const roomStr = (rawRoomId !== undefined && rawRoomId !== null && rawRoomId !== '')
+    ? rawRoomId.toString()
+    : (existingDev?.room || '');
+  const sectionStr = (rawSectionId !== undefined && rawSectionId !== null && rawSectionId !== '')
+    ? rawSectionId.toString()
+    : (existingDev?.section || '');
+
+  const rawType = item?.utilityType ?? item?.UtilityType;
+  const utilityTypeId = (rawType !== undefined && rawType !== null && rawType !== '')
+    ? resolveUtilityTypeId(rawType, appList)
+    : (existingDev?.utilityType ?? UtilityType.Electricity);
+  const utilityTypeName = resolveUtilityTypeName(utilityTypeId, appList);
+
+  const hasRawComp = item?.utilityComponent !== undefined || item?.UtilityComponent !== undefined;
+  const rawComp = hasRawComp ? (item?.utilityComponent ?? item?.UtilityComponent) : existingDev?.utilityComponent;
+  const utilityComponentId = resolveUtilityComponentId(rawComp, appList);
+  const utilityComponentName = resolveUtilityComponentName(utilityComponentId, appList);
+
+  const nameVal = item?.utilityName ?? item?.UtilityName ?? item?.name ?? existingDev?.name ?? 'Unknown Utility';
+  const utilityIdVal = (item?.utilityId ?? item?.UtilityId) !== undefined
+    ? (item?.utilityId ?? item?.UtilityId)
+    : existingDev?.utilityId;
+
+  const powerConsumptionVal = (item?.powerConsumption ?? item?.PowerConsumption) !== undefined
+    ? (item?.powerConsumption ?? item?.PowerConsumption)
+    : existingDev?.powerConsumption;
+  const currentLevelVal = (item?.currentLevel ?? item?.CurrentLevel) !== undefined
+    ? (item?.currentLevel ?? item?.CurrentLevel)
+    : existingDev?.currentLevel;
+  const voltageLevelVal = (item?.voltageLevel ?? item?.VoltageLevel) !== undefined
+    ? (item?.voltageLevel ?? item?.VoltageLevel)
+    : existingDev?.voltageLevel;
+  const powerConsumptionTodayVal = (item?.powerConsumptionToday ?? item?.PowerConsumptionToday) !== undefined
+    ? (item?.powerConsumptionToday ?? item?.PowerConsumptionToday)
+    : existingDev?.powerConsumptionToday;
+  const timeOutVal = (item?.timeOut ?? item?.TimeOut) !== undefined
+    ? (item?.timeOut ?? item?.TimeOut)
+    : existingDev?.timeOut;
+  const currentWaterLevelVal = (item?.currentWaterLevel ?? item?.CurrentWaterLevel) !== undefined
+    ? (item?.currentWaterLevel ?? item?.CurrentWaterLevel)
+    : existingDev?.currentWaterLevel;
+  const maxWaterLevelVal = (item?.maxWaterLevel ?? item?.MaxWaterLevel) !== undefined
+    ? (item?.maxWaterLevel ?? item?.MaxWaterLevel)
+    : existingDev?.maxWaterLevel;
+  const minWaterLevelVal = (item?.minWaterLevel ?? item?.MinWaterLevel) !== undefined
+    ? (item?.minWaterLevel ?? item?.MinWaterLevel)
+    : existingDev?.minWaterLevel;
+  const actionIdsVal = (item?.actionIds ?? item?.ActionIds) !== undefined
+    ? (Array.isArray(item?.actionIds ?? item?.ActionIds) ? (item?.actionIds ?? item?.ActionIds).map(Number) : [])
+    : (existingDev?.actionIds || []);
+
+  const powerActiveVal = item?.powerActive ?? item?.PowerActive;
+  const powerUsageVal = (powerConsumptionVal !== undefined && powerConsumptionVal !== null)
+    ? Number(powerConsumptionVal)
+    : (powerActiveVal ? 150 : (existingDev?.powerUsage ?? 0));
+
+  return {
+    id: `utility-${id}`,
+    name: nameVal,
+    type: 'utility',
+    status: isAct ? 'on' : 'off',
+    room: roomStr,
+    section: sectionStr,
+    powerUsage: powerUsageVal,
+    utilityId: utilityIdVal,
+    utilityType: utilityTypeId,
+    utilityTypeName,
+    utilityComponent: utilityComponentId,
+    utilityComponentName,
+    timeOut: timeOutVal,
+    currentLevel: currentLevelVal,
+    voltageLevel: voltageLevelVal,
+    powerConsumption: powerConsumptionVal,
+    powerConsumptionToday: powerConsumptionTodayVal,
+    actionIds: actionIdsVal,
+    currentWaterLevel: currentWaterLevelVal,
+    maxWaterLevel: maxWaterLevelVal,
+    minWaterLevel: minWaterLevelVal,
+  };
+};
+
 export default function App() {
   const [devices, setDevices] = React.useState<Device[]>([]);
   const [scenes, setScenes] = React.useState<Scene[]>([]);
@@ -2175,6 +2479,7 @@ export default function App() {
   const [externals, setExternals] = React.useState<GetExternalDto[]>([]);
   const [cameras, setCameras] = React.useState<GetCameraDto[]>([]);
   const [appliances, setAppliances] = React.useState<GetApplianceDto[]>([]);
+  const [utilities, setUtilities] = React.useState<GetUtilityDto[]>([]);
   const [doors, setDoors] = React.useState<GetDoorDto[]>([]);
   const [lights, setLights] = React.useState<GetLightDto[]>([]);
   const [windows, setWindows] = React.useState<GetWindowDto[]>([]);
@@ -2208,6 +2513,7 @@ export default function App() {
       const rawLights = section.lights || section.Lights || [];
       const rawWindows = section.windows || section.Windows || [];
       const rawAppliances = section.appliances || section.Appliances || [];
+      const rawUtilities = section.utilities || section.Utilities || [];
       const rawCameras = section.cameras || section.Cameras || [];
       const rawExternals = section.externals || section.Externals || [];
 
@@ -2269,6 +2575,10 @@ export default function App() {
           } as Device;
         }
 
+        if (type === 'utility') {
+          return mapUtilityToDevice(item, undefined, appNamesDetailList);
+        }
+
         if (type === 'camera') {
           return {
             id: `camera-${item.id}`,
@@ -2298,6 +2608,7 @@ export default function App() {
       rawLights.forEach((l: any) => { const mapped = mapDevice(l, 'light'); if (mapped) nestedDevices.push(mapped); });
       rawWindows.forEach((w: any) => { const mapped = mapDevice(w, 'window'); if (mapped) nestedDevices.push(mapped); });
       rawAppliances.forEach((a: any) => { const mapped = mapDevice(a, 'appliance'); if (mapped) nestedDevices.push(mapped); });
+      rawUtilities.forEach((u: any) => { const mapped = mapDevice(u, 'utility'); if (mapped) nestedDevices.push(mapped); });
       rawCameras.forEach((c: any) => { const mapped = mapDevice(c, 'camera'); if (mapped) nestedDevices.push(mapped); });
       rawExternals.forEach((e: any) => { const mapped = mapDevice(e, 'external'); if (mapped) nestedDevices.push(mapped); });
     });
@@ -2364,6 +2675,17 @@ export default function App() {
     setFacilitySearchQuery('');
   }, [activeView]);
 
+  React.useEffect(() => {
+    const handleResponsiveLayout = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+    handleResponsiveLayout();
+    window.addEventListener('resize', handleResponsiveLayout);
+    return () => window.removeEventListener('resize', handleResponsiveLayout);
+  }, []);
+
   const syncDevicesFromFetchedType = (type: string, fetchedData: any[]) => {
     setDevices(prev => {
       const otherDevices = prev.filter(d => d.type !== type);
@@ -2384,6 +2706,9 @@ export default function App() {
             section: sectionStr,
             powerUsage: item.powerActive ? 150 : 0
           } as Device;
+        }
+        if (type === 'utility') {
+          return mapUtilityToDevice(item, undefined, appNamesDetailList);
         }
         if (type === 'light') {
           return {
@@ -2729,7 +3054,7 @@ export default function App() {
     const newLog: GetLogDto = {
       id: Date.now(),
       getPersonDto: userProfile,
-      personId: userProfile.id,
+      personId: userProfile?.id || 0,
       actionType: actionType,
       timeOfAction: new Date().toISOString(),
       logDetails: logDetails
@@ -2832,7 +3157,13 @@ export default function App() {
     password: '',
     streamPath: '',
     port: 80,
-    applianceType: 1
+    applianceType: 1,
+    utilityType: UtilityType.Electricity,
+    utilityComponent: UtilityComponent.Generator,
+    timeOut: 0,
+    actionIds: [],
+    maxWaterLevel: 0,
+    minWaterLevel: 0
   });
 
   // Pre-select room/section when opening Add Device dialog
@@ -2861,7 +3192,13 @@ export default function App() {
         password: '',
         streamPath: '',
         port: 80,
-        applianceType: 1
+        applianceType: 1,
+        utilityType: UtilityType.Electricity,
+        utilityComponent: UtilityComponent.Generator,
+        timeOut: 0,
+        actionIds: [],
+        maxWaterLevel: 0,
+        minWaterLevel: 0
       });
     }
   }, [isAddDeviceOpen, activeView, rooms]);
@@ -2887,12 +3224,17 @@ export default function App() {
 
   const [appNamesDetailList, setAppNamesDetailList] = React.useState<any>({
     applianceIdNames: (appliances || []).map(a => ({ id: a.id, name: a.applianceName })),
+    utilityIdNames: (utilities || []).map(u => ({ id: u.id, name: u.utilityName })),
     cameraIdNames: (cameras || []).map(c => ({ id: c.id, name: c.cameraName })),
     lightIdNames: (lights || []).map(l => ({ id: l.id, name: l.lightName })),
     windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
     doorIdNames: (doors || []).map(d => ({ id: d.id, name: d.doorName })),
     externalIdNames: (externals || []).map(e => ({ id: e.id, name: e.externalName })),
-    personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`, imageUrl: u.getPersonDetailsDto.imageUrl })),
+    personIdNames: (allUsers || []).map(u => ({ 
+      id: u.id, 
+      name: u.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u.userName || `User ${u.id}`), 
+      imageUrl: u.getPersonDetailsDto?.imageUrl || '' 
+    })),
     contactCategoryIdNames: (contactCategories || []).map(c => ({ id: c.id, name: c.name })),
     actionIdNames: (actions || []).map(a => ({ id: a.id, name: a.actionName })),
     applianceType: [
@@ -2902,6 +3244,8 @@ export default function App() {
       { id: 4, name: 'AC' },
       { id: 5, name: 'Sprinklers' }
     ],
+    utilityType: DEFAULT_UTILITY_TYPES,
+    utilityComponent: DEFAULT_UTILITY_COMPONENTS,
     gender: [
       { id: 1, name: 'Male' },
       { id: 2, name: 'Female' },
@@ -2936,17 +3280,23 @@ export default function App() {
     setAppNamesDetailList((prev: any) => ({
       ...prev,
       applianceIdNames: (appliances || []).map(a => ({ id: a.id, name: a.applianceName })),
+      utilityIdNames: (utilities || []).map(u => ({ id: u.id, name: u.utilityName })),
       cameraIdNames: (cameras || []).map(c => ({ id: c.id, name: c.cameraName })),
       lightIdNames: (lights || []).map(l => ({ id: l.id, name: l.lightName })),
       windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
       doorIdNames: (doors || []).map(d => ({ id: d.id, name: d.doorName })),
       externalIdNames: (externals || []).map(e => ({ id: e.id, name: e.externalName })),
-      personIdNames: (allUsers || []).map(u => ({ id: u.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`, imageUrl: u.getPersonDetailsDto.imageUrl, isOnline: u.isOnline ?? !u.disabled })),
+      personIdNames: (allUsers || []).map(u => ({ 
+        id: u.id, 
+        name: u.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u.userName || `User ${u.id}`), 
+        imageUrl: u.getPersonDetailsDto?.imageUrl || '', 
+        isOnline: u.isOnline ?? !u.disabled 
+      })),
       contactCategoryIdNames: (contactCategories || []).map(c => ({ id: c.id, name: c.name })),
       roomIds: (rooms || []).map(r => ({ id: r.id, name: r.name })),
       sectionIds: (sections || []).map(s => ({ id: s.id, name: s.name })),
     }));
-  }, [allUsers, appliances, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
+  }, [allUsers, appliances, utilities, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
 
   const isOwner = userProfile?.getUserDto?.role === 1 || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
   const canSeeActions = isOwner || userProfile?.getUserDto?.role === 2 || userProfile?.getUserDto?.role === 3 || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
@@ -3065,7 +3415,7 @@ export default function App() {
       .map(p => {
         const u = (allUsers || []).find(user => user.id === p.personId);
         if (u) {
-          return u.getPersonDetailsDto.firstName;
+          return u.getPersonDetailsDto?.firstName || u.userName || `User ${u.id}`;
         }
         const detail = getUserDetailsById(p.personId);
         const name = detail?.fullName || p.fullName || '';
@@ -3101,28 +3451,9 @@ export default function App() {
           .then((data: any) => {
             if (data && (data.data ?? data.Data)) {
                const responseData = data.data ?? data.Data;
-               setAppNamesDetailList((prev: any) => {
-                 const next = { ...prev };
-                 Object.keys(responseData).forEach(key => {
-                   if (responseData[key] !== null && responseData[key] !== undefined) {
-                     next[key] = responseData[key];
-                     if (key === 'DoorType') {
-                       next['doorType'] = responseData[key];
-                     }
-                     if (key === 'doorType') {
-                       next['DoorType'] = responseData[key];
-                     }
-                   }
-                 });
-                 return next;
-               });
+               setAppNamesDetailList((prev: any) => mergeAppNamesDetailList(prev, responseData));
             } else if (data && !data.success) {
-               setAppNamesDetailList((prev: any) => {
-                 const next = { ...prev, ...data };
-                 if (data.DoorType) next.doorType = data.DoorType;
-                 if (data.doorType) next.DoorType = data.doorType;
-                 return next;
-               });
+               setAppNamesDetailList((prev: any) => mergeAppNamesDetailList(prev, data));
             }
           })
           .catch(err => console.error("Failed to load app list data", err));
@@ -3196,6 +3527,20 @@ export default function App() {
         })
         .catch(() => { setAppliances([]); syncDevicesFromFetchedType('appliance', []); });
 
+      apiFetch('/Utility/GetAllUtilities', { method: 'POST', body: '' })
+        .then((res: any) => { 
+          const rawList = res?.data ?? res?.Data;
+          if (Array.isArray(rawList)) {
+            const normalized = rawList.map(normalizeUtilityDto);
+            setUtilities(normalized); 
+            syncDevicesFromFetchedType('utility', normalized);
+          } else {
+            setUtilities([]);
+            syncDevicesFromFetchedType('utility', []);
+          }
+        })
+        .catch(() => { setUtilities([]); syncDevicesFromFetchedType('utility', []); });
+
       apiFetch('/Light/GetAllLights', { method: 'POST' })
         .then((res: any) => { 
           if (res && res.data && Array.isArray(res.data)) {
@@ -3256,17 +3601,7 @@ export default function App() {
         .then((data: any) => {
           if (data && (data.data ?? data.Data)) {
              const responseData = data.data ?? data.Data;
-             setAppNamesDetailList((prev: any) => {
-               const next = { ...prev };
-               Object.keys(responseData).forEach(key => {
-                 if (responseData[key] !== null && responseData[key] !== undefined) {
-                   next[key] = responseData[key];
-                   if (key === 'DoorType') next['doorType'] = responseData[key];
-                   if (key === 'doorType') next['DoorType'] = responseData[key];
-                 }
-               });
-               return next;
-             });
+             setAppNamesDetailList((prev: any) => mergeAppNamesDetailList(prev, responseData));
           }
         })
         .catch(err => console.error("Failed to preload app list data", err));
@@ -3491,6 +3826,32 @@ export default function App() {
           })
           .catch(err => { console.error("Failed to load appliances", err); setAppliances([]); syncDevicesFromFetchedType('appliance', []); })
           .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-appliances': false })));
+      }
+    }
+
+    // 11.5. Utilities Page
+    if (activeView === 'facility-utilities') {
+      if (!fetchedViewsRef.current['facility-utilities']) {
+        fetchedViewsRef.current['facility-utilities'] = true;
+        setLoadingViews(prev => ({ ...prev, 'facility-utilities': true }));
+        apiFetch('/Utility/GetAllUtilities', { method: 'POST', body: '' })
+          .then((res: any) => { 
+            const rawList = res?.data ?? res?.Data;
+            if (Array.isArray(rawList)) { 
+              const normalized = rawList.map(normalizeUtilityDto);
+              setUtilities(normalized); 
+              syncDevicesFromFetchedType('utility', normalized);
+            } else {
+              setUtilities([]);
+              syncDevicesFromFetchedType('utility', []);
+            }
+          })
+          .catch(err => {
+            console.error("Failed to load utilities", err);
+            setUtilities([]);
+            syncDevicesFromFetchedType('utility', []);
+          })
+          .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-utilities': false })));
       }
     }
 
@@ -3778,6 +4139,25 @@ export default function App() {
   const [isCallMuted, setIsCallMuted] = React.useState(false);
   const [isCallCameraEnabled, setIsCallCameraEnabled] = React.useState(false);
   const [isCallScreenSharing, setIsCallScreenSharing] = React.useState(false);
+
+  const isCallActive = React.useCallback((call: CallDto | null | undefined): boolean => {
+    if (!call || !call.id) return false;
+    if (call.endedAt) return false;
+    const s = call.status as any;
+    if (
+      s === CallStatus.Ended || s === 3 || s === '3' ||
+      s === CallStatus.Rejected || s === 5 || s === '5' ||
+      s === CallStatus.Missed || s === 4 || s === '4' ||
+      s === CallStatus.TimedOut || s === 6 || s === '6' ||
+      String(s).toLowerCase() === 'ended' ||
+      String(s).toLowerCase() === 'rejected' ||
+      String(s).toLowerCase() === 'missed' ||
+      String(s).toLowerCase() === 'timedout'
+    ) {
+      return false;
+    }
+    return true;
+  }, []);
 
   const isCallMutedRef = React.useRef(isCallMuted);
   const isCallCameraEnabledRef = React.useRef(isCallCameraEnabled);
@@ -4081,13 +4461,20 @@ export default function App() {
   }, []);
 
   React.useEffect(() => {
-    if (!activeCall) {
+    if (!activeCall || !isCallActive(activeCall)) {
+      if (activeCall && !isCallActive(activeCall)) {
+        setActiveCall(null);
+        setIsCallModalOpen(false);
+        setIsIncomingCall(false);
+        setIsCallCameraEnabled(false);
+        setIsCallScreenSharing(false);
+      }
       cleanupAllPeerConnections();
     }
     return () => {
       cleanupAllPeerConnections();
     };
-  }, [activeCall, cleanupAllPeerConnections]);
+  }, [activeCall, isCallActive, cleanupAllPeerConnections]);
 
   React.useEffect(() => {
     if (localStreamRef.current) {
@@ -4801,6 +5188,10 @@ export default function App() {
   const [isApplianceModalOpen, setIsApplianceModalOpen] = React.useState(false);
   const [selectedAppliance, setSelectedAppliance] = React.useState<Device | null>(null);
 
+  // Utility Modal
+  const [isUtilityModalOpen, setIsUtilityModalOpen] = React.useState(false);
+  const [selectedUtility, setSelectedUtility] = React.useState<Device | null>(null);
+
   // Door Modal
   const [isDoorModalOpen, setIsDoorModalOpen] = React.useState(false);
   const [selectedDoor, setSelectedDoor] = React.useState<Device | null>(null);
@@ -5160,7 +5551,8 @@ export default function App() {
       if (fullName.includes(cleanQ) || cleanQ.includes(fullName) || (firstName.length > 1 && cleanQ.includes(firstName))) {
         const existingChat = (chatsRef.current || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id));
         if (existingChat) {
-          return { chatId: existingChat.id, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` };
+          const uName = u.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u.userName || `User ${u.id}`);
+          return { chatId: existingChat.id, name: uName };
         }
         try {
           const response = await apiFetch<any>(`/Chat/CreateChat?recipientPersonId=${u.id}`, { method: 'POST' });
@@ -5169,7 +5561,8 @@ export default function App() {
           }
           const cId = response?.id || (chatsRef.current || []).find(c => !c.isGroup && c.participants?.some(p => p.personId === u.id))?.id;
           if (cId) {
-            return { chatId: cId, name: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` };
+            const uName = u.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u.userName || `User ${u.id}`);
+            return { chatId: cId, name: uName };
           }
         } catch (err) {}
       }
@@ -5914,19 +6307,19 @@ export default function App() {
     const token = localStorage.getItem('token');
 
     const setupConnectionAndRoles = async () => {
+      if (!token) return;
       if (homeSecurityConnection!.state === "Disconnected") {
         try {
           await homeSecurityConnection!.start();
           if (token) {
-            await homeSecurityConnection!.invoke("AddPersonRole", token);
-            await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson", err));
+            await homeSecurityConnection!.invoke("AddPersonRole", token).catch(err => console.warn("Failed AddPersonRole:", err));
           }
           
           // Automatically invoke JoinChat if we already have an active chat when connecting
           const activeChatIdVal = activeChatIdRef.current;
           if (activeChatIdVal && (homeSecurityConnection!.state as any) === "Connected") {
             homeSecurityConnection!.invoke("JoinChat", activeChatIdVal)
-              .catch(err => console.error(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
+              .catch(err => console.warn(`Failed to join SignalR chat group ${activeChatIdVal}:`, err));
           }
           // Also automatically join all loaded chats so we get typing/messages correctly for everything
           const allChatsVal = chatsRef.current || [];
@@ -5936,16 +6329,15 @@ export default function App() {
                 .catch(err => console.warn(`Error joining chat ${chat.id}:`, err));
             });
           }
-        } catch (err) {
-          console.error("SignalR Connection Error: ", err);
+        } catch (err: any) {
+          console.warn("SignalR Connection paused (server/tunnel may be offline, will retry):", err?.message || err);
         }
       } else if (homeSecurityConnection!.state === "Connected") {
         if (token) {
           try {
             await homeSecurityConnection!.invoke("AddPersonRole", token);
-            await homeSecurityConnection!.invoke("AddPerson", token).catch(err => console.error("Failed AddPerson on existing connection", err));
           } catch (err) {
-            console.error("Failed to add person role on existing connection:", err);
+            console.warn("Failed to add person role on existing connection:", err);
           }
         }
         const activeChatIdVal = activeChatIdRef.current;
@@ -5970,7 +6362,6 @@ export default function App() {
       if (reToken && homeSecurityConnection!.state === "Connected") {
         try {
           await homeSecurityConnection!.invoke("AddPersonRole", reToken);
-          await homeSecurityConnection!.invoke("AddPerson", reToken).catch(err => console.error("Failed AddPerson on reconnect", err));
         } catch (err) {
           console.error("Failed to re-add person role on reconnect:", err);
         }
@@ -5991,6 +6382,10 @@ export default function App() {
         }
         
         const mapToDevice = (item: any, existingDev?: Device): Device => {
+          if (type === 'utility') {
+            return mapUtilityToDevice(item, existingDev, appNamesDetailList);
+          }
+
           let st = 'off';
           const isActiveVal = getProp(item, 'isActive');
           const isOpenVal = getProp(item, 'isOpen');
@@ -6081,6 +6476,7 @@ export default function App() {
             light: ['lights', 'Lights'],
             window: ['windows', 'Windows'],
             appliance: ['appliances', 'Appliances'],
+            utility: ['utilities', 'Utilities'],
             camera: ['cameras', 'Cameras'],
             external: ['externals', 'Externals'],
             room: ['rooms', 'Rooms']
@@ -6113,35 +6509,45 @@ export default function App() {
     };
 
     // --- Device Listeners ---
-    ['Light', 'Appliance', 'Camera', 'Door', 'Window', 'External'].forEach(t => {
+    ['Light', 'Appliance', 'Utility', 'Camera', 'Door', 'Window', 'External'].forEach(t => {
       const type = t.toLowerCase();
       hs.on(`${t}Created`, (data) => {
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
-        const dataId = data.id ?? data.Id;
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Utility': setUtilities, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
+        const normalizedData = t === 'Utility' ? normalizeUtilityDto(data) : data;
+        const dataId = normalizedData.id ?? normalizedData.Id;
         if (setter && dataId !== undefined && dataId !== null) {
-          setter(prev => {
+          setter((prev: any[]) => {
             if (prev.some(x => x.id.toString() === dataId.toString())) return prev;
-            return [...prev, data];
+            return [...prev, normalizedData];
           });
         }
-        updateSyncDevice(type, dataId, data, 'add');
-        updateSectionsAndRoomsWithFacilityItem(type, data, 'add');
+        updateSyncDevice(type, dataId, normalizedData, 'add');
+        updateSectionsAndRoomsWithFacilityItem(type, normalizedData, 'add');
       });
       hs.on(`${t}Updated`, (data) => {
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Utility': setUtilities, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
         const dataId = getProp(data, 'id');
         if (setter && dataId !== undefined && dataId !== null) {
-          setter(prev => prev.map(x => {
+          setter((prev: any[]) => prev.map(x => {
             if (x.id.toString() !== dataId.toString()) return x;
             const merged = { ...x };
             for (const key of Object.keys(data)) {
-              const existingKey = Object.keys(x).find(k => k.toLowerCase() === key.toLowerCase());
+              if (data[key] === undefined) continue;
+              const lowerKey = key.toLowerCase();
+              // Preserve existing metadata when partial UtilityDataMQTT packets omit or null-out non-telemetry fields
+              if (t === 'Utility' && (lowerKey === 'utilityname' || lowerKey === 'utilityid') && !data[key]) {
+                continue;
+              }
+              const existingKey = Object.keys(x).find(k => k.toLowerCase() === lowerKey);
               if (existingKey) {
                 (merged as any)[existingKey] = data[key];
               } else {
                 const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
                 (merged as any)[camelKey] = data[key];
               }
+            }
+            if (t === 'Utility') {
+              (merged as any).powerActive = Boolean((merged as any).isActive);
             }
             return merged;
           }));
@@ -6151,9 +6557,9 @@ export default function App() {
       });
       hs.on(`${t}Deleted`, (data) => {
         const id = typeof data === 'object' ? (data.id ?? data.Id) : data;
-        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
+        const setter = ({ 'Light': setLights, 'Appliance': setAppliances, 'Utility': setUtilities, 'Camera': setCameras, 'Door': setDoors, 'Window': setWindows, 'External': setExternals }[t]);
         if (setter && id !== undefined && id !== null) {
-          setter(prev => prev.filter(x => x.id.toString() !== id.toString()));
+          setter((prev: any[]) => prev.filter(x => x.id.toString() !== id.toString()));
         }
         updateSyncDevice(type, id, {}, 'delete');
         updateSectionsAndRoomsWithFacilityItem(type, { id }, 'delete');
@@ -6372,13 +6778,7 @@ export default function App() {
     hs.on("ActionStepDeleted", (data) => setActions(prev => prev.map(a => a.id === (data.actionId ?? data.ActionId) ? { ...a, getActionStepDtos: a.getActionStepDtos.filter(s => s.id !== (data.actionStepId ?? data.ActionStepId)) } : a)));
 
     hs.on("GetAppNamesDetails", (data) => {
-      setAppNamesDetailList(prev => {
-        const next = { ...prev, ...data };
-        if (data && data.DoorType && !data.doorType) {
-          next.doorType = data.DoorType;
-        }
-        return next;
-      });
+      setAppNamesDetailList((prev: any) => mergeAppNamesDetailList(prev, data));
     });
 
     hs.on("ContactCategoryCreated", (data) => setContactCategories(prev => {
@@ -6888,6 +7288,9 @@ export default function App() {
        hs.off("ApplianceCreated");
        hs.off("ApplianceUpdated");
        hs.off("ApplianceDeleted");
+       hs.off("UtilityCreated");
+       hs.off("UtilityUpdated");
+       hs.off("UtilityDeleted");
        hs.off("CameraCreated");
        hs.off("CameraUpdated");
        hs.off("CameraDeleted");
@@ -7075,9 +7478,9 @@ export default function App() {
       const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
         id: tempId,
         chatId: activeChatId!,
-        senderPersonId: userProfile.id,
-        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+        senderPersonId: userProfile?.id || 0,
+        senderName: userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
+        senderProfileImage: userProfile?.getPersonDetailsDto?.imageUrl || undefined,
         content: "",
         type: MessageType.Audio,
         isEdited: false,
@@ -7196,9 +7599,9 @@ export default function App() {
       const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
         id: tempId,
         chatId: activeChatId!,
-        senderPersonId: userProfile.id,
-        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+        senderPersonId: userProfile?.id || 0,
+        senderName: userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
+        senderProfileImage: userProfile?.getPersonDetailsDto?.imageUrl || undefined,
         content: chatInput,
         type: MessageType.Text,
         isEdited: false,
@@ -7297,9 +7700,9 @@ export default function App() {
             const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
               id: tempId,
               chatId: activeChatId!,
-              senderPersonId: userProfile.id,
-              senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-              senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+              senderPersonId: userProfile?.id || 0,
+              senderName: userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
+              senderProfileImage: userProfile?.getPersonDetailsDto?.imageUrl || undefined,
               content: "",
               type: msgType,
               isEdited: false,
@@ -7410,9 +7813,9 @@ export default function App() {
       const tempMsg: MessageDto & { status?: 'sending' | 'sent' | 'failed' } = {
         id: tempId,
         chatId: activeChatId!,
-        senderPersonId: userProfile.id,
-        senderName: `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}`,
-        senderProfileImage: userProfile.getPersonDetailsDto.imageUrl || undefined,
+        senderPersonId: userProfile?.id || 0,
+        senderName: userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName} ${userProfile.getPersonDetailsDto.lastName}` : 'You',
+        senderProfileImage: userProfile?.getPersonDetailsDto?.imageUrl || undefined,
         content: textContent,
         type: msgType,
         isEdited: false,
@@ -7502,7 +7905,7 @@ export default function App() {
         name: newGroupName,
         description: newGroupDescription || "",
         imageUrl: uploadedImageUrl,
-        participantPersonIds: [userProfile.id, ...selectedParticipants]
+        participantPersonIds: userProfile?.id ? [userProfile.id, ...selectedParticipants] : [...selectedParticipants]
       };
 
       await apiFetch<any>('/Chat/CreateGroupChat', {
@@ -7734,6 +8137,16 @@ export default function App() {
         const p1_user = apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setUserRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' }))); });
         const p2 = apiFetch('/Section/GetAllSections', { method: 'POST' }).then((res: any) => { if (res && res.data) setSections(res.data.map(mapSection)); });
         const p3 = apiFetch('/Appliance/GetAllAppliances', { method: 'POST' }).then((res: any) => { if (res && res.data) { setAppliances(res.data); syncDevicesFromFetchedType('appliance', res.data); } });
+        const p3_util = apiFetch('/Utility/GetAllUtilities', { method: 'POST', body: '' })
+          .then((res: any) => {
+            const rawList = res?.data ?? res?.Data;
+            if (Array.isArray(rawList)) {
+              const normalized = rawList.map(normalizeUtilityDto);
+              setUtilities(normalized);
+              syncDevicesFromFetchedType('utility', normalized);
+            }
+          })
+          .catch(err => console.error("Failed to refresh utilities", err));
         const p4 = apiFetch('/Light/GetAllLights', { method: 'POST' }).then((res: any) => { if (res && res.data) { setLights(res.data); syncDevicesFromFetchedType('light', res.data); } });
         const p5 = apiFetch('/Camera/GetAllCameras', { method: 'POST' }).then((res: any) => { if (res && res.data) { setCameras(res.data); syncDevicesFromFetchedType('camera', res.data); } });
         const p6 = apiFetch('/Door/GetAllDoors', { method: 'POST' }).then((res: any) => { if (res && res.data) { setDoors(res.data); syncDevicesFromFetchedType('door', res.data); } });
@@ -7748,7 +8161,7 @@ export default function App() {
         const pLogs = apiFetch('/Log/GetAllLogs?page=1&pageSize=50', { method: 'POST', body: '' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data) && res.data.length > 0) setLogs(res.data); else setLogs(INITIAL_LOGS); })
           .catch(() => setLogs(INITIAL_LOGS));
-        await Promise.all([p1, p1_user, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, pLogs]);
+        await Promise.all([p1, p1_user, p2, p3, p3_util, p4, p5, p6, p7, p8, p9, p10, p11, p12, pLogs]);
         setRefreshProgress(100);
         setRefreshState('success');
         setTimeout(() => setRefreshState('idle'), 1000);
@@ -7855,14 +8268,14 @@ export default function App() {
       id: userProfile.id,
       cameraIds: userProfile.cameraIds || [],
       updatePersonDetailsDto: {
-        firstName: userProfile.getPersonDetailsDto.firstName || '',
-        lastName: userProfile.getPersonDetailsDto.lastName || '',
-        imageUrl: profileImageFile ? (userProfile.getPersonDetailsDto.imageUrl || '') : null
+        firstName: userProfile.getPersonDetailsDto?.firstName || '',
+        lastName: userProfile.getPersonDetailsDto?.lastName || '',
+        imageUrl: profileImageFile ? (userProfile.getPersonDetailsDto?.imageUrl || '') : null
       },
       updateUserDto: {
-        id: userProfile.getUserDto.id,
-        userName: userProfile.getUserDto.userName || '',
-        role: userProfile.getUserDto.role ?? 0
+        id: userProfile.getUserDto?.id || 0,
+        userName: userProfile.getUserDto?.userName || '',
+        role: userProfile.getUserDto?.role ?? 0
       }
     };
 
@@ -8415,7 +8828,7 @@ export default function App() {
 
   
     const handleToggle = async (id: string) => {
-      let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `appliance-${id}` || x.id === `light-${id}` || x.id === `camera-${id}` || x.id === `door-${id}` || x.id === `window-${id}` || x.id === `external-${id}`);
+      let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `appliance-${id}` || x.id === `utility-${id}` || x.id === `light-${id}` || x.id === `camera-${id}` || x.id === `door-${id}` || x.id === `window-${id}` || x.id === `external-${id}`);
       if (!d) return;
 
       const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
@@ -8426,7 +8839,7 @@ export default function App() {
       if (d.type === 'light') {
         nextActive = d.status === 'off';
         newStatus = nextActive ? 'on' : 'off';
-      } else if (d.type === 'appliance') {
+      } else if (d.type === 'appliance' || d.type === 'utility') {
         nextActive = (d.status === 'off' || d.status === 'inactive');
         newStatus = nextActive ? 'on' : 'off';
       } else if (d.type === 'door' || d.type === 'window') {
@@ -8443,6 +8856,7 @@ export default function App() {
       const prevDevices = [...devices];
       const prevLights = [...lights];
       const prevAppliances = [...appliances];
+      const prevUtilities = [...utilities];
       const prevCameras = [...cameras];
       const prevDoors = [...doors];
       const prevExternals = [...externals];
@@ -8461,6 +8875,8 @@ export default function App() {
         } : item));
       } else if (d.type === 'appliance') {
         setAppliances(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+      } else if (d.type === 'utility') {
+        setUtilities(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive, powerActive: nextActive, lastModifiedOn: new Date().toISOString() } : item));
       } else if (d.type === 'camera') {
         setCameras(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
       } else if (d.type === 'external' as any) {
@@ -8505,6 +8921,31 @@ export default function App() {
             method: 'PUT', 
             body: JSON.stringify(payload)
           });
+        } else if (d.type === 'utility') {
+          const utilDto = (prevUtilities || []).find(u => u.id.toString() === rawId.toString());
+          const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
+          const resolvedCompId = resolveUtilityComponentId(utilDto?.utilityComponent ?? d.utilityComponent, appNamesDetailList);
+          const payload = { 
+            id: parseInt(rawId), 
+            utilityName: utilDto?.utilityName || d.name,
+            utilityId: utilDto?.utilityId || d.utilityId || '',
+            utilityType: resolvedTypeId,
+            utilityComponent: resolvedCompId,
+            isActive: nextActive, 
+            timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
+            currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
+            voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
+            powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
+            powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
+            actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
+            currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
+            maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
+            minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null
+          };
+          await apiFetch('/Utility/UpdateUtility', { 
+            method: 'PUT', 
+            body: JSON.stringify(payload)
+          });
         } else if (d.type === 'camera') {
           const token = localStorage.getItem('token');
           await apiFetch(`/Camera/ToggleCamera?id=${rawId}`, { 
@@ -8542,6 +8983,7 @@ export default function App() {
         setDevices(prevDevices);
         setLights(prevLights);
         setAppliances(prevAppliances);
+        setUtilities(prevUtilities);
         setCameras(prevCameras);
         setDoors(prevDoors);
         setExternals(prevExternals);
@@ -8674,6 +9116,8 @@ export default function App() {
           await apiFetch(`/Camera/DeleteCamera?cameraId=${rawId}`, { method: 'PUT' });
         } else if (type === 'appliance') {
           await apiFetch(`/Appliance/DeleteAppliance?applianceId=${rawId}`, { method: 'PUT' });
+        } else if (type === 'utility') {
+          await apiFetch(`/Utility/DeleteUtility?utilityId=${rawId}`, { method: 'PUT' });
         } else if (type === 'window') {
           await apiFetch(`/Window/DeleteWindow?windowId=${rawId}`, { method: 'PUT' });
         } else if (type === 'door') {
@@ -8693,6 +9137,8 @@ export default function App() {
           setCameras(prev => prev.filter(c => c.id.toString() !== rawId));
         } else if (type === 'appliance') {
           setAppliances(prev => prev.filter(a => a.id.toString() !== rawId));
+        } else if (type === 'utility') {
+          setUtilities(prev => prev.filter(u => u.id.toString() !== rawId));
         } else if (type === 'window') {
           setWindows(prev => prev.filter(w => w.id.toString() !== rawId));
         } else if (type === 'door') {
@@ -8715,6 +9161,13 @@ export default function App() {
         if (appDto) {
           const typeId = (appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1;
           finalDevice.applianceType = typeId;
+        }
+      }
+      if (device.type === 'utility') {
+        const utilDto = (utilities || []).find(u => u.id.toString() === rawId || u.utilityName === device.name);
+        if (utilDto) {
+          const mapped = mapUtilityToDevice(utilDto, finalDevice, appNamesDetailList);
+          finalDevice = { ...finalDevice, ...mapped };
         }
       }
       if (device.type === 'door') {
@@ -8744,6 +9197,9 @@ export default function App() {
     } else if (d.type === 'appliance') {
       setSelectedAppliance(d);
       setIsApplianceModalOpen(true);
+    } else if (d.type === 'utility') {
+      setSelectedUtility(d);
+      setIsUtilityModalOpen(true);
     } else if (d.type === 'door') {
       setSelectedDoor(d);
       setIsDoorModalOpen(true);
@@ -8770,6 +9226,7 @@ export default function App() {
       case 'light': return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
       case 'door': return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20";
       case 'appliance': return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20";
+      case 'utility': return "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20";
       case 'camera': return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20";
       case 'window': return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20";
       case 'external': return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
@@ -8801,6 +9258,7 @@ export default function App() {
       case 'light': return <Lightbulb className="h-3 w-3" />;
       case 'door': return <Lock className="h-3 w-3" />;
       case 'appliance': return <Power className="h-3 w-3" />;
+      case 'utility': return <Zap className="h-3 w-3" />;
       case 'camera': return <Camera className="h-3 w-3" />;
       case 'window': return <WindowIcon className="h-3 w-3" />;
       case 'external': return <Radio className="h-3 w-3" />;
@@ -8824,6 +9282,10 @@ export default function App() {
       case 'appliance': {
         const app = (appliances || []).find(a => Number(a.id) === idNum);
         return app ? (app.applianceName || (app as any).name) : null;
+      }
+      case 'utility': {
+        const util = (utilities || []).find(u => Number(u.id) === idNum);
+        return util ? (util.utilityName || (util as any).name) : null;
       }
       case 'camera': {
         const cam = (cameras || []).find(c => Number(c.id) === idNum);
@@ -8918,6 +9380,22 @@ export default function App() {
           setSelectedAppliance(found);
           setTimeout(() => {
             setIsApplianceModalOpen(true);
+          }, 150);
+        }
+      }
+    } else if (lowerType === 'utility') {
+      setActiveView('facility-utilities');
+      if (fId) {
+        const found = devices.find(dev => dev.type === 'utility' && (dev.id === fId.toString() || dev.id === `utility-${fId}` || dev.id.endsWith(`-${fId}`) || (dev as any).dbId === fId))
+          || (() => {
+              const util = (utilities || []).find(u => u.id === fId || u.id.toString() === fId.toString());
+              if (!util) return null;
+              return mapUtilityToDevice(util, undefined, appNamesDetailList);
+            })();
+        if (found) {
+          setSelectedUtility(found);
+          setTimeout(() => {
+            setIsUtilityModalOpen(true);
           }, 150);
         }
       }
@@ -9166,6 +9644,32 @@ export default function App() {
                 isActive: true
               })
             });
+          } else if (editingDevice.type === 'utility') {
+            const utilTypeId = resolveUtilityTypeId(editingDevice.utilityType, appNamesDetailList);
+            const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
+            const utilCompId = compsForType.length > 0
+              ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList)
+              : null;
+            await apiFetch('/Utility/UpdateUtility', {
+              method: 'PUT',
+              body: JSON.stringify({
+                id: Number(rawId) || 0,
+                utilityName: editingDevice.name || '',
+                utilityId: editingDevice.utilityId || '',
+                utilityType: utilTypeId,
+                utilityComponent: utilCompId,
+                isActive: editingDevice.status === 'on',
+                timeOut: editingDevice.timeOut !== undefined && editingDevice.timeOut !== null && editingDevice.timeOut !== ('' as any) ? Number(editingDevice.timeOut) : null,
+                currentLevel: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.currentLevel !== undefined && editingDevice.currentLevel !== null ? Number(editingDevice.currentLevel) : null,
+                voltageLevel: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.voltageLevel !== undefined && editingDevice.voltageLevel !== null ? Number(editingDevice.voltageLevel) : null,
+                powerConsumption: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? Number(editingDevice.powerConsumption) : null,
+                powerConsumptionToday: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? Number(editingDevice.powerConsumptionToday) : null,
+                actionIds: utilTypeId === UtilityType.Emergency ? (editingDevice.actionIds || []).map(Number) : [],
+                currentWaterLevel: utilTypeId === UtilityType.Water && editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? Number(editingDevice.currentWaterLevel) : null,
+                maxWaterLevel: utilTypeId === UtilityType.Water && editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? Number(editingDevice.maxWaterLevel) : null,
+                minWaterLevel: utilTypeId === UtilityType.Water && editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? Number(editingDevice.minWaterLevel) : null
+              })
+            });
           } else if (editingDevice.type === 'window') {
             await apiFetch('/Window/UpdateWindow', {
               method: 'PUT',
@@ -9264,6 +9768,43 @@ export default function App() {
               sectionId: finalSectionId,
               sectionName: finalSectionId !== null ? (sections || []).find(s => s.id.toString() === finalSectionId.toString())?.name : undefined
             } : a));
+          }
+          if (editingDevice.type === 'utility') {
+            const utilTypeId = resolveUtilityTypeId(editingDevice.utilityType, appNamesDetailList);
+            const utilTypeName = resolveUtilityTypeName(utilTypeId, appNamesDetailList);
+            const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
+            const utilCompId = compsForType.length > 0 ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList) : null;
+            const utilCompName = resolveUtilityComponentName(utilCompId, appNamesDetailList);
+            const nextIsActive = editingDevice.status === 'on';
+            setDevices(prev => prev.map(d => d.id === editingDevice.id ? {
+              ...d,
+              utilityType: utilTypeId,
+              utilityTypeName: utilTypeName,
+              utilityComponent: utilCompId,
+              utilityComponentName: utilCompName,
+              powerUsage: editingDevice.powerConsumption ?? d.powerUsage
+            } as Device : d));
+            setUtilities(prev => prev.map(u => u.id.toString() === rawId ? {
+              ...u,
+              utilityName: editingDevice.name || u.utilityName,
+              utilityId: editingDevice.utilityId ?? u.utilityId,
+              utilityType: utilTypeId,
+              utilityComponent: utilCompId,
+              isActive: nextIsActive,
+              powerActive: nextIsActive,
+              timeOut: editingDevice.timeOut ?? u.timeOut,
+              currentLevel: editingDevice.currentLevel ?? u.currentLevel,
+              voltageLevel: editingDevice.voltageLevel ?? u.voltageLevel,
+              powerConsumption: editingDevice.powerConsumption ?? u.powerConsumption,
+              powerConsumptionToday: editingDevice.powerConsumptionToday ?? u.powerConsumptionToday,
+              actionIds: utilTypeId === UtilityType.Emergency ? (editingDevice.actionIds || []).map(Number) : [],
+              currentWaterLevel: editingDevice.currentWaterLevel ?? u.currentWaterLevel,
+              maxWaterLevel: editingDevice.maxWaterLevel ?? u.maxWaterLevel,
+              minWaterLevel: editingDevice.minWaterLevel ?? u.minWaterLevel,
+              lastModifiedOn: new Date().toISOString(),
+              lastModifiedBy: userProfile?.id,
+              lastModifiedByName: userProfile?.getPersonDetailsDto ? `${userProfile.getPersonDetailsDto.firstName || ''} ${userProfile.getPersonDetailsDto.lastName || ''}`.trim() : 'System'
+            } : u));
           }
           if (editingDevice.type === 'window') {
             setWindows(prev => prev.map(w => w.id.toString() === rawId ? {
@@ -9367,6 +9908,7 @@ export default function App() {
       else if (facilityType === 'doors') inferredType = 'door';
       else if (facilityType === 'windows') inferredType = 'window';
       else if (facilityType === 'appliances') inferredType = 'appliance';
+      else if (facilityType === 'utilities') inferredType = 'utility';
       else if (facilityType === 'cameras') inferredType = 'camera';
     }
 
@@ -9404,6 +9946,40 @@ export default function App() {
             body: JSON.stringify(payload)
           });
           toast.success('Appliance added successfully'); 
+          setIsAddDeviceOpen(false);
+        } else if (inferredType === 'utility') {
+          const utilTypeId = resolveUtilityTypeId(newDevice.utilityType, appNamesDetailList);
+          const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
+          const utilCompId = compsForType.length > 0
+            ? (resolveUtilityComponentId(newDevice.utilityComponent, appNamesDetailList) ?? compsForType[0]?.id ?? null)
+            : null;
+          const payload = {
+            utilityName: newDevice.name,
+            utilityType: utilTypeId,
+            utilityComponent: utilCompId,
+            timeOut: newDevice.timeOut !== undefined && newDevice.timeOut !== null && newDevice.timeOut !== ('' as any) ? Number(newDevice.timeOut) : null,
+            actionIds: utilTypeId === UtilityType.Emergency ? (newDevice.actionIds || []).map(Number) : [],
+            maxWaterLevel: utilTypeId === UtilityType.Water && newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? Number(newDevice.maxWaterLevel) : null,
+            minWaterLevel: utilTypeId === UtilityType.Water && newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? Number(newDevice.minWaterLevel) : null
+          };
+          const res: any = await apiFetch('/Utility/CreateUtility', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+          const createdRaw = res?.data ?? res?.Data;
+          if (createdRaw) {
+            const normalizedCreated = normalizeUtilityDto(createdRaw);
+            setUtilities(prev => {
+              if (prev.some(u => u.id.toString() === normalizedCreated.id.toString())) return prev;
+              return [...prev, normalizedCreated];
+            });
+            setDevices(prev => {
+              const mapped = mapUtilityToDevice(normalizedCreated, undefined, appNamesDetailList);
+              if (prev.some(d => d.id === mapped.id)) return prev;
+              return [...prev, mapped];
+            });
+          }
+          toast.success('Utility added successfully'); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'door') {
           const payload = {
@@ -9487,7 +10063,13 @@ export default function App() {
           password: '',
           streamPath: '',
           port: 80,
-          applianceType: 1
+          applianceType: 1,
+          utilityType: UtilityType.Electricity,
+          utilityComponent: UtilityComponent.Generator,
+          timeOut: 0,
+          actionIds: [],
+          maxWaterLevel: 0,
+          minWaterLevel: 0
         });
       } catch (err: any) {
         toast.error(err.message || 'Error occurred while creating the device');
@@ -9553,6 +10135,8 @@ export default function App() {
       filtered = filtered.filter(d => d.type === 'light');
     } else if (activeView === 'facility-appliances') {
       filtered = filtered.filter(d => d.type === 'appliance');
+    } else if (activeView === 'facility-utilities') {
+      filtered = filtered.filter(d => d.type === 'utility');
     } else if (activeView === 'facility-cameras') {
       filtered = filtered.filter(d => d.type === 'camera');
     } else if (activeView === 'facility-windows') {
@@ -9560,7 +10144,13 @@ export default function App() {
     }
 
     if (activeView.startsWith('facility-') && facilitySearchQuery) {
-      filtered = filtered.filter(d => (d?.name || '').toLowerCase().includes(facilitySearchQuery.toLowerCase()));
+      const q = facilitySearchQuery.toLowerCase();
+      filtered = filtered.filter(d =>
+        (d?.name || '').toLowerCase().includes(q) ||
+        (d?.utilityId || '').toLowerCase().includes(q) ||
+        (d?.utilityTypeName || '').toLowerCase().includes(q) ||
+        (d?.utilityComponentName || '').toLowerCase().includes(q)
+      );
     }
 
     // Sorting
@@ -9603,10 +10193,10 @@ export default function App() {
     } else if (activeView === 'user-room') {
       Icon = HomeIcon;
       if (!selectedUserRoomId) {
-        title = `${userProfile.getPersonDetailsDto.firstName}'s Room(s)`;
+        title = `${userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName}'s` : 'My'} Room(s)`;
       } else {
         const r = (userRooms || []).find(room => room.id === selectedUserRoomId);
-        title = r ? `${userProfile.getPersonDetailsDto.firstName}'s ${r.name}` : `${userProfile.getPersonDetailsDto.firstName}'s Room(s)`;
+        title = r ? `${userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName}'s` : 'My'} ${r.name}` : `${userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName}'s` : 'My'} Room(s)`;
       }
     } else if (activeView === 'facilities' || activeView === 'facility-overview') {
       Icon = Layers;
@@ -9635,6 +10225,9 @@ export default function App() {
     } else if (activeView === 'facility-appliances') {
       Icon = Power;
       title = 'Appliances';
+    } else if (activeView === 'facility-utilities') {
+      Icon = Zap;
+      title = 'Utilities';
     } else if (activeView === 'facility-cameras') {
       Icon = Camera;
       title = 'Cameras';
@@ -9680,7 +10273,7 @@ export default function App() {
               url: d.liveStreamUrl,
               liveStreamUrl: d.liveStreamUrl
             }));
-      const totalFacilityCount = (appliances?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0) + (hardwares?.length || 0) + (rooms?.length || 0) + (sections?.length || 0) + (actions?.length || 0);
+      const totalFacilityCount = (appliances?.length || 0) + (utilities?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0) + (hardwares?.length || 0) + (rooms?.length || 0) + (sections?.length || 0) + (actions?.length || 0);
       
       const facilityItemsList = [
         { id: 'appliances', label: 'Appliances', icon: Power, count: appliances?.length || 0, targetView: 'facility-appliances', visible: true },
@@ -9692,6 +10285,7 @@ export default function App() {
         { id: 'windows', label: 'Windows', icon: WindowIcon, count: windows?.length || 0, targetView: 'facility-windows', visible: true },
         { id: 'rooms', label: 'Rooms', icon: Sofa, count: rooms?.length || 0, targetView: 'facility-rooms', visible: true },
         { id: 'sections', label: 'Sections', icon: LayoutGrid, count: sections?.length || 0, targetView: 'facility-sections', visible: true },
+        { id: 'utilities', label: 'Utilities', icon: Zap, count: utilities?.length || 0, targetView: 'facility-utilities', visible: true },
         { id: 'actions', label: 'Actions', icon: Play, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
       ];
 
@@ -9753,7 +10347,7 @@ export default function App() {
           className="space-y-8"
         >
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-bold tracking-tight">Welcome home, {userProfile.getPersonDetailsDto.firstName}!</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Welcome home, {userProfile?.getPersonDetailsDto?.firstName || 'User'}!</h1>
             <p className="text-slate-500 dark:text-zinc-400">Everything is looking good. You have {activeDevices} active devices.</p>
           </div>
 
@@ -9953,17 +10547,18 @@ export default function App() {
 
     if (activeView === 'facilities' || activeView === 'facility-overview') {
       const facilityCategories = [
-        { id: 'facility-actions', name: 'Actions', icon: Play, type: 'action' },
+        { id: 'facility-actions', name: 'Actions', icon: Play, type: 'action', visible: canSeeActions },
         { id: 'facility-appliances', name: 'Appliances', icon: Power, type: 'appliance' },
         { id: 'facility-cameras', name: 'Cameras', icon: Camera, type: 'camera' },
         { id: 'facility-doors', name: 'Doors', icon: Lock, type: 'door' },
         { id: 'facility-externals', name: 'Externals', icon: Radio, type: 'externals' },
-        { id: 'facility-hardware', name: 'Hardware', icon: Cpu, type: 'hardware' },
+        { id: 'facility-hardware', name: 'Hardware', icon: Cpu, type: 'hardware', visible: isOwner },
         { id: 'facility-lights', name: 'Lights', icon: Lightbulb, type: 'light' },
         { id: 'facility-windows', name: 'Windows', icon: WindowIcon, type: 'window' },
         { id: 'facility-rooms', name: 'Rooms', icon: Sofa, type: 'room' },
         { id: 'facility-sections', name: 'Sections', icon: LayoutGrid, type: 'section' },
-      ];
+        { id: 'facility-utilities', name: 'Utilities', icon: Zap, type: 'utility' },
+      ].filter(cat => cat.visible !== false);
 
       return (
         <motion.div
@@ -10014,7 +10609,7 @@ export default function App() {
                 const categoryDevices = devices.filter(d => d.type === cat.type);
                 total = categoryDevices.length;
                 
-                if (cat.type === 'light' || cat.type === 'appliance') {
+                if (cat.type === 'light' || cat.type === 'appliance' || cat.type === 'utility') {
                   active = categoryDevices.filter(d => d.status === 'on' || d.status === 'active').length;
                   inactive = total - active;
                   statusSummary = `${active} On • ${inactive} Off`;
@@ -10644,6 +11239,14 @@ export default function App() {
     }
 
     if (activeView === 'profile') {
+      if (!userProfile || !userProfile.getPersonDetailsDto) {
+        return (
+          <div className="flex flex-col items-center justify-center p-12 text-center text-slate-500">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+            <p className="text-sm font-medium">Loading profile information...</p>
+          </div>
+        );
+      }
       return (
         <motion.div
           key="profile"
@@ -11270,7 +11873,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {allUsers && allUsers.length > 0 ? (
               allUsers
                 .filter(person => {
@@ -11362,7 +11965,7 @@ export default function App() {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <HomeIcon className="h-8 w-8 text-primary shrink-0" />
-                    <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s Room(s)</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">{userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName}'s` : 'My'} Room(s)</h1>
                   </div>
                   <p className="text-slate-500 dark:text-zinc-400">Select a room to manage its devices.</p>
                 </div>
@@ -11385,7 +11988,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
               {isViewLoading('user-room') ? (
                 <ThreeDotsLoading label="Loading your rooms..." />
               ) : filteredUserRooms && filteredUserRooms.length > 0 ? (
@@ -11443,7 +12046,8 @@ export default function App() {
         'camera': 3,
         'light': 4,
         'appliance': 5,
-        'speaker': 6
+        'utility': 6,
+        'speaker': 7
       };
 
       const sortedRoomDevices = [...roomDevices].sort((a, b) => {
@@ -11454,6 +12058,7 @@ export default function App() {
       const windows = sortedRoomDevices.filter(d => d.type === 'window');
       const lights = sortedRoomDevices.filter(d => d.type === 'light');
       const appliances = sortedRoomDevices.filter(d => d.type === 'appliance');
+      const roomUtilities = sortedRoomDevices.filter(d => d.type === 'utility');
       const cameras = sortedRoomDevices.filter(d => d.type === 'camera');
       const roomExternals = sortedRoomDevices.filter(d => d.type === 'external' as any);
 
@@ -11495,7 +12100,7 @@ export default function App() {
                 <div className="h-5 w-[2px] bg-border mx-1 shrink-0" />
               </>
               <HomeIcon className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold tracking-tight">{userProfile.getPersonDetailsDto.firstName}'s {currentRoom?.name || 'Room'}</h1>
+              <h1 className="text-3xl font-bold tracking-tight">{userProfile?.getPersonDetailsDto?.firstName ? `${userProfile.getPersonDetailsDto.firstName}'s` : 'My'} {currentRoom?.name || 'Room'}</h1>
             </div>
             <p className="text-slate-500 dark:text-zinc-400">Manage devices in your personal space.</p>
           </div>
@@ -11638,6 +12243,31 @@ export default function App() {
                         onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Utilities */}
+              {roomUtilities.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-bold">Utilities</h2>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {(roomUtilities || []).map(device => (
+                      <DeviceCard
+                        key={device.id}
+                        device={device}
+                        onToggle={handleToggle}
+                        onStatusChange={handleStatusChange}
+                        onDoorAction={handleDoorAction}
+                        onValueChange={handleValueChange}
+                        onValueChangeEnd={handleValueChangeEnd}
+                        onClick={handleDeviceClick}
                       />
                     ))}
                   </div>
@@ -12090,7 +12720,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {isViewLoading('facility-hardware') ? (
               <ThreeDotsLoading label="Loading hardware..." />
             ) : filteredHardwares && filteredHardwares.length > 0 ? (
@@ -12583,6 +13213,7 @@ export default function App() {
     const facilityType = activeView.replace('facility-', '');
     const singularTypeMap: Record<string, string> = {
       'appliances': 'Appliance',
+      'utilities': 'Utility',
       'lights': 'Light',
       'cameras': 'Camera',
       'doors': 'Door',
@@ -12593,7 +13224,7 @@ export default function App() {
     
     const TitleIcon = isRoom 
       ? (iconMap[room?.icon || ''] || Sofa) 
-      : (facilityType === 'doors' ? Lock : facilityType === 'lights' ? Lightbulb : facilityType === 'appliances' ? Power : facilityType === 'windows' ? WindowIcon : Camera);
+      : (facilityType === 'doors' ? Lock : facilityType === 'lights' ? Lightbulb : facilityType === 'appliances' ? Power : facilityType === 'utilities' ? Zap : facilityType === 'windows' ? WindowIcon : Camera);
 
     return (
       <motion.div
@@ -12629,6 +13260,7 @@ export default function App() {
                 {filteredDevices.length}{' '}
                 {(() => {
                   if (activeView === 'facility-appliances') return 'APPLIANCES';
+                  if (activeView === 'facility-utilities') return 'UTILITIES';
                   if (activeView === 'facility-doors') return 'DOORS';
                   if (activeView === 'facility-windows') return 'WINDOWS';
                   if (activeView === 'facility-cameras') return 'CAMERAS';
@@ -12739,49 +13371,204 @@ export default function App() {
           </div>
         )}
 
-        <div className={cn(
-          "grid grid-cols-1 gap-4 sm:grid-cols-2",
-          activeView === 'facility-appliances' 
-            ? (isSidebarCollapsed ? "lg:grid-cols-4" : "lg:grid-cols-3") 
-            : "lg:grid-cols-3 xl:grid-cols-4"
-        )}>
-          {isViewLoading(activeView) ? (
+        {isViewLoading(activeView) ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <ThreeDotsLoading label={`Loading ${title.toLowerCase()}...`} />
-          ) : filteredDevices && filteredDevices.length > 0 ? (
-            (filteredDevices || []).map(device => (
-              <DeviceCard 
-                key={device.id} 
-                device={device} 
-                onToggle={handleToggle}
-                onValueChange={handleValueChange}
-                        onValueChangeEnd={handleValueChangeEnd}
-                onStatusChange={handleStatusChange}
-                        onDoorAction={handleDoorAction}
-                onDelete={handleDeleteDevice}
-                onEdit={handleEditDevice}
-                onClick={handleDeviceClick}
-              />
-            ))
-          ) : (
-            <div className="col-span-full">
-              {(() => {
-                let emptyMsg = `No ${headerTitle?.toLowerCase() || 'devices'} found.`;
-                if (activeView === 'facility-appliances') {
-                  emptyMsg = "There are no appliance items in the selected appliance page to be listed.";
-                } else if (activeView === 'facility-lights') {
-                  emptyMsg = "There are no light items in the selected light page to be listed.";
-                } else if (activeView === 'facility-cameras') {
-                  emptyMsg = "There are no camera items in the selected camera page to be listed.";
-                } else if (activeView === 'facility-doors') {
-                  emptyMsg = "There are no door items in the selected door page to be listed.";
-                } else if (activeView === 'facility-windows') {
-                  emptyMsg = "There are no window items in the selected window page to be listed.";
-                }
-                return <NoItems icon={TitleIcon} message={emptyMsg} />;
-              })()}
+          </div>
+        ) : filteredDevices && filteredDevices.length > 0 ? (
+          activeView === 'facility-utilities' ? (() => {
+            const emergencyUtilities = filteredDevices.filter(
+              d => resolveUtilityTypeId(d.utilityType, appNamesDetailList) === UtilityType.Emergency
+            );
+            const regularUtilities = filteredDevices.filter(
+              d => resolveUtilityTypeId(d.utilityType, appNamesDetailList) !== UtilityType.Emergency
+            );
+
+            const utilityTypeOrder = (
+              (appNamesDetailList?.utilityType && appNamesDetailList.utilityType.length > 0)
+                ? appNamesDetailList.utilityType
+                : DEFAULT_UTILITY_TYPES
+            )
+              .map((t: any) => Number(t.id ?? t.Id))
+              .filter((id: number) => id !== UtilityType.Emergency);
+
+            const presentTypeIds = Array.from(
+              new Set(regularUtilities.map(d => resolveUtilityTypeId(d.utilityType, appNamesDetailList)))
+            );
+            const orderedGroupIds = [
+              ...utilityTypeOrder.filter((id: number) => presentTypeIds.includes(id)),
+              ...presentTypeIds.filter(id => !utilityTypeOrder.includes(id))
+            ];
+
+            const getGroupHeading = (typeId: number): string => {
+              switch (typeId) {
+                case UtilityType.Electricity:
+                  return 'Power';
+                case UtilityType.Telecommunication:
+                  return 'Telecommunications';
+                case UtilityType.Water:
+                  return 'Water';
+                case UtilityType.Gas:
+                  return 'Gas';
+                case UtilityType.HVAC:
+                  return 'HVAC';
+                case UtilityType.Irrigation:
+                  return 'Irrigation';
+                default:
+                  return formatEnumLabel(resolveUtilityTypeName(typeId, appNamesDetailList)) || 'Other';
+              }
+            };
+
+            const getGroupIcon = (typeId: number) => {
+              switch (typeId) {
+                case UtilityType.Water:
+                  return <Droplets className="h-4 w-4 text-sky-500" />;
+                case UtilityType.Gas:
+                  return <Flame className="h-4 w-4 text-orange-500" />;
+                case UtilityType.HVAC:
+                  return <Wind className="h-4 w-4 text-cyan-500" />;
+                case UtilityType.Telecommunication:
+                  return <Radio className="h-4 w-4 text-indigo-500" />;
+                case UtilityType.Irrigation:
+                  return <Sprout className="h-4 w-4 text-emerald-500" />;
+                default:
+                  return <Zap className="h-4 w-4 text-yellow-500" />;
+              }
+            };
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                {/* Left 66.66% (2:1) - Grouped by Utility Type, max 2 items per row */}
+                <div className="md:col-span-2 space-y-6 min-w-0">
+                  {orderedGroupIds.length > 0 ? (
+                    orderedGroupIds.map((typeId) => {
+                      const groupItems = regularUtilities.filter(
+                        d => resolveUtilityTypeId(d.utilityType, appNamesDetailList) === typeId
+                      );
+                      if (groupItems.length === 0) return null;
+                      return (
+                        <div key={`utility-group-${typeId}`} className="space-y-4">
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <h3 className="text-sm font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                {getGroupIcon(typeId)}
+                                <span>{getGroupHeading(typeId)}</span>
+                              </h3>
+                              <span className="text-xs font-mono text-muted-foreground">
+                                {groupItems.length}
+                              </span>
+                            </div>
+                            <div className="h-px w-full bg-muted-foreground/25 dark:bg-zinc-700/70 mt-2" />
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {groupItems.map(device => (
+                              <DeviceCard 
+                                key={device.id} 
+                                device={device} 
+                                onToggle={handleToggle}
+                                onValueChange={handleValueChange}
+                                onValueChangeEnd={handleValueChangeEnd}
+                                onStatusChange={handleStatusChange}
+                                onDoorAction={handleDoorAction}
+                                onDelete={handleDeleteDevice}
+                                onEdit={handleEditDevice}
+                                onClick={handleDeviceClick}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                      No general utility items to display.
+                    </div>
+                  )}
+                </div>
+
+                {/* Right 33.33% (2:1) - Emergency Utilities */}
+                <div className="md:col-span-1 space-y-4 min-w-0">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-rose-500" />
+                        <span>Emergency</span>
+                      </h3>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {emergencyUtilities.length}
+                      </span>
+                    </div>
+                    <div className="h-px w-full bg-muted-foreground/25 dark:bg-zinc-700/70 mt-2" />
+                  </div>
+                  {emergencyUtilities.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-4">
+                      {emergencyUtilities.map(device => (
+                        <DeviceCard 
+                          key={device.id} 
+                          device={device} 
+                          onToggle={handleToggle}
+                          onValueChange={handleValueChange}
+                          onValueChangeEnd={handleValueChangeEnd}
+                          onStatusChange={handleStatusChange}
+                          onDoorAction={handleDoorAction}
+                          onDelete={handleDeleteDevice}
+                          onEdit={handleEditDevice}
+                          onClick={handleDeviceClick}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                      No emergency utilities configured.
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })() : (
+            <div className={cn(
+              "grid grid-cols-1 gap-4 sm:grid-cols-2",
+              activeView === 'facility-appliances'
+                ? (isSidebarCollapsed ? "lg:grid-cols-4" : "lg:grid-cols-3")
+                : "lg:grid-cols-3 xl:grid-cols-4"
+            )}>
+              {(filteredDevices || []).map(device => (
+                <DeviceCard 
+                  key={device.id} 
+                  device={device} 
+                  onToggle={handleToggle}
+                  onValueChange={handleValueChange}
+                  onValueChangeEnd={handleValueChangeEnd}
+                  onStatusChange={handleStatusChange}
+                  onDoorAction={handleDoorAction}
+                  onDelete={handleDeleteDevice}
+                  onEdit={handleEditDevice}
+                  onClick={handleDeviceClick}
+                />
+              ))}
             </div>
-          )}
-        </div>
+          )
+        ) : (
+          <div className="w-full">
+            {(() => {
+              let emptyMsg = `No ${headerTitle?.toLowerCase() || 'devices'} found.`;
+              if (activeView === 'facility-appliances') {
+                emptyMsg = "There are no appliance items in the selected appliance page to be listed.";
+              } else if (activeView === 'facility-utilities') {
+                emptyMsg = "There are no utility items in the selected utility page to be listed.";
+              } else if (activeView === 'facility-lights') {
+                emptyMsg = "There are no light items in the selected light page to be listed.";
+              } else if (activeView === 'facility-cameras') {
+                emptyMsg = "There are no camera items in the selected camera page to be listed.";
+              } else if (activeView === 'facility-doors') {
+                emptyMsg = "There are no door items in the selected door page to be listed.";
+              } else if (activeView === 'facility-windows') {
+                emptyMsg = "There are no window items in the selected window page to be listed.";
+              }
+              return <NoItems icon={TitleIcon} message={emptyMsg} />;
+            })()}
+          </div>
+        )}
         
         {filteredDevices && filteredDevices.length === 0 && (
           <div className="hidden">
@@ -13558,6 +14345,7 @@ export default function App() {
       { keywords: ["facility windows", "windows"], view: 'facility-windows', label: "Windows" },
       { keywords: ["facility rooms", "all rooms"], view: 'facility-rooms', label: "Facility Rooms" },
       { keywords: ["facility sections", "sections"], view: 'facility-sections', label: "Sections" },
+      { keywords: ["facility utilities", "utilities"], view: 'facility-utilities', label: "Utilities" },
       { keywords: ["contacts", "contact list"], view: 'contacts', label: "Contacts" },
       { keywords: ["all users", "users", "user list"], view: 'all-users', label: "All Users" },
       { keywords: ["activity logs", "logs", "history"], view: 'logs', label: "Logs" },
@@ -14136,11 +14924,25 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans relative">
       <Toaster position="bottom-right" richColors />
+      
+      {/* Backdrop overlay for mobile & tablet slide-over sidebar */}
+      {!isSidebarCollapsed && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-30 lg:hidden"
+          onClick={() => setIsSidebarCollapsed(true)}
+        />
+      )}
+
       <Sidebar 
         activeView={activeView} 
-        onViewChange={setActiveView} 
+        onViewChange={(v) => {
+          setActiveView(v);
+          if (window.innerWidth < 1024) {
+            setIsSidebarCollapsed(true);
+          }
+        }} 
         rooms={rooms}
         sections={sections}
         userProfile={userProfile}
@@ -14150,18 +14952,30 @@ export default function App() {
       <main className="flex flex-1 flex-col min-h-0 overflow-hidden relative">
 
         {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b px-8 bg-card/30 backdrop-blur-md z-10 shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 mr-4 mt-1 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <header className="flex h-16 items-center justify-between border-b px-3 sm:px-6 md:px-8 bg-card/30 backdrop-blur-md z-10 shrink-0 gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg shrink-0 cursor-pointer"
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              title={isSidebarCollapsed ? "Expand Navigation" : "Collapse Navigation"}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            
+            <div className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity shrink-0" onClick={() => setActiveView('dashboard')}>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
                 <Shield className="h-5 w-5" />
               </div>
-              <span className="text-lg font-bold tracking-tight">HanssonHub</span>
+              <span className="text-base sm:text-lg font-bold tracking-tight hidden sm:inline">HanssonHub</span>
             </div>
-            <div className="h-8 w-[1px] bg-border mr-4" />
-            <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
-              <HeaderIcon className="h-4 w-4" />
-              <span className="text-sm font-medium">
+            
+            <div className="h-6 w-[1px] bg-border shrink-0 hidden sm:block" />
+            
+            <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 min-w-0">
+              <HeaderIcon className="h-4 w-4 shrink-0" />
+              <span className="text-xs sm:text-sm font-medium truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs">
                 {headerTitle}
               </span>
             </div>
@@ -14246,7 +15060,7 @@ export default function App() {
             (refreshState === 'success' ? "bg-green-500 w-full" : 
             (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
           )}
-        /><div className="p-8 pb-12 min-h-full">
+        /><div className="p-3 sm:p-6 md:p-8 pb-12 min-h-full">
             <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
               <div className="min-h-full px-2 py-1.5">
                 <AnimatePresence mode="wait">
@@ -14268,6 +15082,7 @@ export default function App() {
                 const type = activeView.replace('facility-', '');
                 const map: Record<string, string> = {
                   'appliances': 'Appliance',
+                  'utilities': 'Utility',
                   'lights': 'Light',
                   'cameras': 'Camera',
                   'doors': 'Door',
@@ -14286,13 +15101,14 @@ export default function App() {
             <Label htmlFor="name" className="flex items-center gap-2">
               {(() => {
                 const type = activeView.replace('facility-', '');
-                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
+                const Icon = type === 'doors' ? Lock : type === 'lights' ? Lightbulb : type === 'appliances' ? Power : type === 'utilities' ? Zap : type === 'windows' ? WindowIcon : type === 'cameras' ? Camera : Edit3;
                 return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
               })()}
               {(() => {
                 const type = activeView.replace('facility-', '');
                 const map: Record<string, string> = {
                   'appliances': 'Appliance Name',
+                  'utilities': 'Utility Name',
                   'lights': 'Light Name',
                   'cameras': 'Camera Name',
                   'doors': 'Door Name',
@@ -14308,6 +15124,7 @@ export default function App() {
                   if (type === 'doors') return 'Main Entrance';
                   if (type === 'cameras') return 'Backyard Camera';
                   if (type === 'appliances') return 'Coffee Maker';
+                  if (type === 'utilities') return 'Water Heater';
                   return 'My Device';
                 })()}`}
                 value={newDevice.name}
@@ -14338,6 +15155,170 @@ export default function App() {
                 </Select>
               </div>
             )}
+
+            {activeView === 'facility-utilities' && (() => {
+              const utilityTypesList = (appNamesDetailList?.utilityType && appNamesDetailList.utilityType.length > 0)
+                ? appNamesDetailList.utilityType
+                : DEFAULT_UTILITY_TYPES;
+              const selectedTypeId = resolveUtilityTypeId(newDevice.utilityType, appNamesDetailList);
+              const componentsForType = getUtilityComponentsForType(selectedTypeId, appNamesDetailList);
+              const selectedCompVal = newDevice.utilityComponent !== undefined && newDevice.utilityComponent !== null
+                ? newDevice.utilityComponent.toString()
+                : (componentsForType[0]?.id !== undefined ? componentsForType[0].id.toString() : '');
+              const availableActions = (actions && actions.length > 0)
+                ? actions.map(a => ({ id: a.id, name: a.actionName }))
+                : (appNamesDetailList?.actionIdNames || []);
+
+              return (
+                <div className="space-y-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="utility-type" className="flex items-center gap-2">
+                      <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Utility Type
+                    </Label>
+                    <Select 
+                      value={selectedTypeId.toString()} 
+                      onValueChange={(v) => {
+                        const nextType = parseInt(v, 10);
+                        const nextComps = getUtilityComponentsForType(nextType, appNamesDetailList);
+                        setNewDevice(prev => ({
+                          ...prev,
+                          utilityType: nextType,
+                          utilityComponent: nextComps.length > 0 ? nextComps[0].id : null,
+                          actionIds: nextType === UtilityType.Emergency ? (prev.actionIds || []) : [],
+                          minWaterLevel: nextType === UtilityType.Water ? (prev.minWaterLevel ?? 0) : null,
+                          maxWaterLevel: nextType === UtilityType.Water ? (prev.maxWaterLevel ?? 0) : null,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger id="utility-type">
+                        <SelectValue placeholder="Select utility type">
+                          {formatEnumLabel(utilityTypesList.find((t: any) => Number(t.id ?? t.Id) === selectedTypeId)?.name || resolveUtilityTypeName(selectedTypeId, appNamesDetailList))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {utilityTypesList.map((t: any) => (
+                          <SelectItem key={t.id} value={t.id.toString()}>{formatEnumLabel(t.name)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {componentsForType.length > 0 && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="utility-component" className="flex items-center gap-2">
+                        <Settings2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                        Utility Component
+                      </Label>
+                      <Select 
+                        value={selectedCompVal} 
+                        onValueChange={(v) => setNewDevice(prev => ({ ...prev, utilityComponent: parseInt(v, 10) }))}
+                      >
+                        <SelectTrigger id="utility-component">
+                          <SelectValue placeholder="Select component">
+                            {formatEnumLabel(
+                              componentsForType.find((c: any) => c.id.toString() === selectedCompVal)?.name ||
+                              resolveUtilityComponentName(selectedCompVal, appNamesDetailList) ||
+                              'Select component'
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {componentsForType.map((c: any) => (
+                            <SelectItem key={c.id} value={c.id.toString()}>{formatEnumLabel(c.name)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="utility-timeout" className="flex items-center gap-2">
+                      <Clock className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Time Out (minutes)
+                    </Label>
+                    <Input 
+                      autoComplete="off"
+                      id="utility-timeout"
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="0"
+                      value={newDevice.timeOut !== undefined && newDevice.timeOut !== null ? newDevice.timeOut : ''}
+                      onChange={(e) => setNewDevice(prev => ({ ...prev, timeOut: e.target.value === '' ? null : parseFloat(e.target.value) }))}
+                    />
+                  </div>
+
+                  {selectedTypeId === UtilityType.Water && (
+                    <div className="grid grid-cols-2 gap-4 pt-2 border-t">
+                      <div className="grid gap-2">
+                        <Label htmlFor="utility-min-water" className="flex items-center gap-2 text-[11px] font-semibold">
+                          <Droplets className="h-3 w-3 text-sky-500" />
+                          Min Water Level (%)
+                        </Label>
+                        <Input
+                          autoComplete="off"
+                          id="utility-min-water"
+                          type="number"
+                          placeholder="0"
+                          value={newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? newDevice.minWaterLevel : ''}
+                          onChange={(e) => setNewDevice(prev => ({ ...prev, minWaterLevel: e.target.value === '' ? null : parseInt(e.target.value, 10) }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="utility-max-water" className="flex items-center gap-2 text-[11px] font-semibold">
+                          <Droplets className="h-3 w-3 text-sky-500" />
+                          Max Water Level (%)
+                        </Label>
+                        <Input
+                          autoComplete="off"
+                          id="utility-max-water"
+                          type="number"
+                          placeholder="100"
+                          value={newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? newDevice.maxWaterLevel : ''}
+                          onChange={(e) => setNewDevice(prev => ({ ...prev, maxWaterLevel: e.target.value === '' ? null : parseInt(e.target.value, 10) }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTypeId === UtilityType.Emergency && (
+                    <div className="space-y-2 pt-2 border-t">
+                      <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
+                        <Play className="h-3 w-3 text-rose-500" />
+                        Linked Emergency Actions
+                      </Label>
+                      {availableActions.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {availableActions.map((act: any) => {
+                            const aid = Number(act.id);
+                            const isSelected = (newDevice.actionIds || []).includes(aid);
+                            return (
+                              <Badge
+                                key={`add-util-act-${aid}`}
+                                variant={isSelected ? 'default' : 'outline'}
+                                className="cursor-pointer"
+                                onClick={() => {
+                                  const ids = newDevice.actionIds || [];
+                                  setNewDevice(prev => ({
+                                    ...prev,
+                                    actionIds: isSelected ? ids.filter(id => id !== aid) : [...ids, aid]
+                                  }));
+                                }}
+                              >
+                                {act.name}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 dark:text-zinc-400">No actions configured yet.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {activeView === 'facility-cameras' && (
               <div className="space-y-4 pt-2 border-t mt-2">
@@ -14434,85 +15415,89 @@ export default function App() {
               </div>
             )}
 
-            <div className="grid gap-2">
-              <Label htmlFor="section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Section Name (Optional)
-              </Label>
-              <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
-              >
-                <SelectTrigger id="section">
-                  <SelectValue placeholder="Select section">
-                    {newDevice.section && newDevice.section !== 'none'
-                      ? ((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Select section')
-                      : 'No Section'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Section</SelectItem>
-                  {(sections || []).map(section => (
-                    <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="room" className="flex items-center gap-2">
-                <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                Room Name (Optional)
-              </Label>
-              <Select 
-                value={newDevice.room || 'none'} 
-                onValueChange={(v) => {
-                  if (v === 'none') {
-                    setNewDevice(prev => ({ ...prev, room: undefined }));
-                  } else {
-                    const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                    const sectId = getRoomSectionId(v);
-                    setNewDevice(prev => ({ 
-                      ...prev, 
-                      room: v,
-                      section: sectId || undefined
-                    }));
-                  }
-                }}
-              >
-                <SelectTrigger id="room">
-                  <SelectValue placeholder="Select room">
-                    {newDevice.room && newDevice.room !== 'none'
-                      ? ((rooms || []).find(r => r.id.toString() === newDevice.room?.toString())?.name || 'Select room')
-                      : 'No Room'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Room</SelectItem>
-                  {newDevice.section && newDevice.section !== 'none' ? (
-                    <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                        Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
-                      </div>
-                      {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+            {activeView !== 'facility-utilities' && (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="section" className="flex items-center gap-2">
+                    <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                    Section Name (Optional)
+                  </Label>
+                  <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
+                  >
+                    <SelectTrigger id="section">
+                      <SelectValue placeholder="Select section">
+                        {newDevice.section && newDevice.section !== 'none'
+                          ? ((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Select section')
+                          : 'No Section'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Section</SelectItem>
+                      {(sections || []).map(section => (
+                        <SelectItem key={section.id} value={section.id.toString()}>{section.name}</SelectItem>
                       ))}
-                    </>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="room" className="flex items-center gap-2">
+                    <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                    Room Name (Optional)
+                  </Label>
+                  <Select 
+                    value={newDevice.room || 'none'} 
+                    onValueChange={(v) => {
+                      if (v === 'none') {
+                        setNewDevice(prev => ({ ...prev, room: undefined }));
+                      } else {
+                        const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
+                        const sectId = getRoomSectionId(v);
+                        setNewDevice(prev => ({ 
+                          ...prev, 
+                          room: v,
+                          section: sectId || undefined
+                        }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="room">
+                      <SelectValue placeholder="Select room">
+                        {newDevice.room && newDevice.room !== 'none'
+                          ? ((rooms || []).find(r => r.id.toString() === newDevice.room?.toString())?.name || 'Select room')
+                          : 'No Room'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Room</SelectItem>
+                      {newDevice.section && newDevice.section !== 'none' ? (
+                        <>
+                          <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
+                            Rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'Selected Section')}
+                          </div>
+                          {rooms.filter(r => getRoomSectionId(r.id)?.toString() === newDevice.section?.toString()).map(room => (
+                            <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                          ))}
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
+                            Unassigned Rooms
+                          </div>
+                          {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                            <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                          ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {!newDevice.section || newDevice.section === 'none' ? (
+                    <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
                   ) : (
-                    <>
-                      <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                        Unassigned Rooms
-                      </div>
-                      {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                      ))}
-                    </>
+                    <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'section')}</span>
                   )}
-                </SelectContent>
-              </Select>
-              {!newDevice.section || newDevice.section === 'none' ? (
-                <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
-              ) : (
-                <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === newDevice.section?.toString())?.name || 'section')}</span>
-              )}
-            </div>
+                </div>
+              </>
+            )}
           </div>
           </div>
           <DialogFooter>
@@ -14523,6 +15508,7 @@ export default function App() {
                 const type = activeView.replace('facility-', '');
                 const map: Record<string, string> = {
                   'appliances': 'Appliance',
+                  'utilities': 'Utility',
                   'lights': 'Light',
                   'cameras': 'Camera',
                   'doors': 'Door',
@@ -14574,28 +15560,59 @@ export default function App() {
                     {newRoom.personId && newRoom.personId !== 'none'
                       ? (() => {
                           const u = (allUsers || []).find(user => user.id.toString() === newRoom.personId?.toString());
-                          return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
+                          const uName = u?.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u?.userName || 'Select person');
+                          const imgUrl = u?.getPersonDetailsDto?.imageUrl;
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="h-5 w-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                                {imgUrl ? (
+                                  <img 
+                                    src={getFullImageUrl(imgUrl)} 
+                                    alt={uName} 
+                                    className="h-full w-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <UserIcon className="h-3 w-3 text-slate-400" />
+                                )}
+                              </div>
+                              <span className="truncate">{uName}</span>
+                            </div>
+                          );
                         })()
                       : 'No Person Assigned'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Person Assigned</SelectItem>
-                  {(allUsers || []).map(u => (
-                    <SelectItem key={u.id} value={u.id.toString()}>
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
-                          <img 
-                            src={u.getPersonDetailsDto.imageUrl || undefined} 
-                            alt={u.getPersonDetailsDto.firstName} 
-                            className="h-full w-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
+                  <SelectItem value="none">
+                    <div className="flex items-center gap-2">
+                      <UserIcon className="h-4 w-4 text-slate-400 shrink-0" />
+                      <span>No Person Assigned</span>
+                    </div>
+                  </SelectItem>
+                  {(allUsers || []).map(u => {
+                    const uName = u?.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u?.userName || `User ${u.id}`);
+                    const imgUrl = u?.getPersonDetailsDto?.imageUrl;
+                    return (
+                      <SelectItem key={u.id} value={u.id.toString()}>
+                        <div className="flex items-center gap-2 py-0.5">
+                          <div className="h-6 w-6 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-zinc-700">
+                            {imgUrl ? (
+                              <img 
+                                src={getFullImageUrl(imgUrl)} 
+                                alt={uName} 
+                                className="h-full w-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <UserIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+                            )}
+                          </div>
+                          <span className="truncate font-medium">{uName}</span>
                         </div>
-                        <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -16140,7 +17157,7 @@ export default function App() {
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
               {editingDevice && (() => {
-                const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
+                const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'utility' ? Zap : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
                 return <Icon className="h-5 w-5 text-primary" />;
               })()}
               Edit {editingDevice?.name || 'Device'}
@@ -16152,13 +17169,14 @@ export default function App() {
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-name" className="flex items-center gap-2">
                   {(() => {
-                    const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
+                    const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'utility' ? Zap : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
                     return <Icon className="h-3 w-3 text-slate-500 dark:text-zinc-400" />;
                   })()}
                   {(() => {
                     if (editingDevice.type === 'window') return 'Window Name';
                     const map: Record<string, string> = {
                       'appliance': 'Appliance Name',
+                      'utility': 'Utility Name',
                       'light': 'Light Name',
                       'camera': 'Camera Name',
                       'door': 'Door Name'
@@ -16262,6 +17280,283 @@ export default function App() {
                 </div>
               )}
 
+              {editingDevice.type === 'utility' && (() => {
+                const utilityTypesList = (appNamesDetailList?.utilityType && appNamesDetailList.utilityType.length > 0)
+                  ? appNamesDetailList.utilityType
+                  : DEFAULT_UTILITY_TYPES;
+                const currentTypeId = resolveUtilityTypeId(editingDevice.utilityType, appNamesDetailList);
+                const componentsForType = getUtilityComponentsForType(currentTypeId, appNamesDetailList);
+                const currentCompVal = editingDevice.utilityComponent !== undefined && editingDevice.utilityComponent !== null
+                  ? editingDevice.utilityComponent.toString()
+                  : (componentsForType[0]?.id !== undefined ? componentsForType[0].id.toString() : '');
+                const availableActions = (actions && actions.length > 0)
+                  ? actions.map(a => ({ id: a.id, name: a.actionName }))
+                  : (appNamesDetailList?.actionIdNames || []);
+
+                return (
+                  <div className="space-y-4">
+                    <div className="grid gap-2 text-left">
+                      <Label htmlFor="edit-utility-type" className="flex items-center gap-2">
+                        <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                        Utility Type
+                      </Label>
+                      <Select 
+                        value={currentTypeId.toString()} 
+                        onValueChange={(v: any) => {
+                          const nextType = parseInt(v, 10);
+                          const nextComps = getUtilityComponentsForType(nextType, appNamesDetailList);
+                          setEditingDevice({
+                            ...editingDevice,
+                            utilityType: nextType,
+                            utilityTypeName: resolveUtilityTypeName(nextType, appNamesDetailList),
+                            utilityComponent: nextComps.length > 0 ? nextComps[0].id : null,
+                            utilityComponentName: nextComps.length > 0 ? nextComps[0].name : ''
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="edit-utility-type">
+                          <SelectValue placeholder="Select type">
+                            {formatEnumLabel(utilityTypesList.find((t: any) => Number(t.id ?? t.Id) === currentTypeId)?.name || resolveUtilityTypeName(currentTypeId, appNamesDetailList))}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {utilityTypesList.map((t: any) => (
+                            <SelectItem key={t.id} value={t.id.toString()}>{formatEnumLabel(t.name)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {componentsForType.length > 0 && (
+                      <div className="grid gap-2 text-left">
+                        <Label htmlFor="edit-utility-component" className="flex items-center gap-2">
+                          <Settings2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                          Utility Component
+                        </Label>
+                        <Select
+                          value={currentCompVal}
+                          onValueChange={(v: any) => {
+                            const nextComp = parseInt(v, 10);
+                            setEditingDevice({
+                              ...editingDevice,
+                              utilityComponent: nextComp,
+                              utilityComponentName: resolveUtilityComponentName(nextComp, appNamesDetailList)
+                            });
+                          }}
+                        >
+                          <SelectTrigger id="edit-utility-component">
+                            <SelectValue placeholder="Select component">
+                              {formatEnumLabel(
+                                componentsForType.find((c: any) => c.id.toString() === currentCompVal)?.name ||
+                                resolveUtilityComponentName(currentCompVal, appNamesDetailList) ||
+                                'Select component'
+                              )}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {componentsForType.map((c: any) => (
+                              <SelectItem key={c.id} value={c.id.toString()}>{formatEnumLabel(c.name)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4 items-end">
+                      <div className="flex items-center justify-between rounded-lg border px-3 py-2 h-10">
+                        <Label htmlFor="edit-utility-active" className="text-xs font-medium cursor-pointer">
+                          Active Status
+                        </Label>
+                        <Switch
+                          id="edit-utility-active"
+                          checked={editingDevice.status === 'on'}
+                          onCheckedChange={(checked) => setEditingDevice({ ...editingDevice, status: checked ? 'on' : 'off' })}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="edit-utility-timeout" className="flex items-center gap-2 text-xs">
+                          <Clock className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                          Time Out (minutes)
+                        </Label>
+                        <Input
+                          autoComplete="off"
+                          id="edit-utility-timeout"
+                          type="number"
+                          min="0"
+                          step="any"
+                          placeholder="0"
+                          value={editingDevice.timeOut !== undefined && editingDevice.timeOut !== null ? editingDevice.timeOut : ''}
+                          onChange={(e) => setEditingDevice({
+                            ...editingDevice,
+                            timeOut: e.target.value === '' ? null : parseFloat(e.target.value)
+                          })}
+                        />
+                      </div>
+                    </div>
+
+                    {(currentTypeId === UtilityType.Electricity || currentTypeId === UtilityType.HVAC) && (
+                      <div className="space-y-3 pt-2 border-t">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 block">
+                          Power & Electrical Telemetry
+                        </span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-current" className="text-xs">Current Level (A)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-current"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.currentLevel !== undefined && editingDevice.currentLevel !== null ? editingDevice.currentLevel : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                currentLevel: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-voltage" className="text-xs">Voltage Level (V)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-voltage"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.voltageLevel !== undefined && editingDevice.voltageLevel !== null ? editingDevice.voltageLevel : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                voltageLevel: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-power" className="text-xs">Power Consumption (W)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-power"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? editingDevice.powerConsumption : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                powerConsumption: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-power-today" className="text-xs">Today (kWh)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-power-today"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? editingDevice.powerConsumptionToday : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                powerConsumptionToday: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {currentTypeId === UtilityType.Water && (
+                      <div className="space-y-3 pt-2 border-t">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                          <Droplets className="h-3 w-3" /> Water Level Thresholds
+                        </span>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-curr-water" className="text-xs">Current (%)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-curr-water"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? editingDevice.currentWaterLevel : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                currentWaterLevel: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-min-water" className="text-xs">Min Level (%)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-min-water"
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              value={editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? editingDevice.minWaterLevel : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                minWaterLevel: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="edit-util-max-water" className="text-xs">Max Level (%)</Label>
+                            <Input
+                              autoComplete="off"
+                              id="edit-util-max-water"
+                              type="number"
+                              step="any"
+                              placeholder="100"
+                              value={editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? editingDevice.maxWaterLevel : ''}
+                              onChange={(e) => setEditingDevice({
+                                ...editingDevice,
+                                maxWaterLevel: e.target.value === '' ? null : parseFloat(e.target.value)
+                              })}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {currentTypeId === UtilityType.Emergency && (
+                      <div className="space-y-2 pt-2 border-t text-left">
+                        <Label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 flex items-center gap-2">
+                          <Play className="h-3 w-3 text-rose-500" />
+                          Linked Emergency Actions
+                        </Label>
+                        {availableActions.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {availableActions.map((act: any) => {
+                              const aid = Number(act.id);
+                              const isSelected = (editingDevice.actionIds || []).includes(aid);
+                              return (
+                                <Badge
+                                  key={`edit-util-act-${aid}`}
+                                  variant={isSelected ? 'default' : 'outline'}
+                                  className="cursor-pointer"
+                                  onClick={() => {
+                                    const ids = editingDevice.actionIds || [];
+                                    setEditingDevice({
+                                      ...editingDevice,
+                                      actionIds: isSelected ? ids.filter(id => id !== aid) : [...ids, aid]
+                                    });
+                                  }}
+                                >
+                                  {act.name}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500 dark:text-zinc-400">No actions configured yet.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {editingDevice.type === 'door' && (
                 <div className="grid gap-2">
                   <Label htmlFor="edit-door-type" className="flex items-center gap-2">
@@ -16288,92 +17583,96 @@ export default function App() {
                 </div>
               )}
 
-              <div className="grid gap-2">
-                <Label htmlFor="edit-device-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Section
-                </Label>
-                <Select 
-                  value={editingDevice.section || 'none'} 
-                  onValueChange={(v) => setEditingDevice({ 
-                    ...editingDevice, 
-                    section: v === 'none' ? undefined : v,
-                    room: undefined 
-                  })}
-                >
-                  <SelectTrigger id="edit-device-section">
-                    <SelectValue placeholder="Select section">
-                      {editingDevice.section && editingDevice.section !== 'none'
-                        ? ((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Select section')
-                        : 'No Section'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Section</SelectItem>
-                    {(sections || []).map(s => (
-                      <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {editingDevice.type !== 'utility' && (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-device-section" className="flex items-center gap-2">
+                      <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Section
+                    </Label>
+                    <Select 
+                      value={editingDevice.section || 'none'} 
+                      onValueChange={(v) => setEditingDevice({ 
+                        ...editingDevice, 
+                        section: v === 'none' ? undefined : v,
+                        room: undefined 
+                      })}
+                    >
+                      <SelectTrigger id="edit-device-section">
+                        <SelectValue placeholder="Select section">
+                          {editingDevice.section && editingDevice.section !== 'none'
+                            ? ((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Select section')
+                            : 'No Section'}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Section</SelectItem>
+                        {(sections || []).map(s => (
+                          <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="edit-device-room" className="flex items-center gap-2">
-                  <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Room
-                </Label>
-                <Select 
-                  value={editingDevice.room || 'none'} 
-                  onValueChange={(v) => {
-                    if (v === 'none') {
-                      setEditingDevice({ ...editingDevice, room: undefined });
-                    } else {
-                      const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
-                      const sectId = getRoomSectionId(v);
-                      setEditingDevice({
-                        ...editingDevice,
-                        room: v,
-                        section: sectId || undefined
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger id="edit-device-room">
-                    <SelectValue placeholder="Select room">
-                      {editingDevice.room && editingDevice.room !== 'none'
-                        ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
-                        : 'No Room (Section Level)'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Room</SelectItem>
-                    {editingDevice.section && editingDevice.section !== 'none' ? (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
-                        </div>
-                        {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-device-room" className="flex items-center gap-2">
+                      <Sofa className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Room
+                    </Label>
+                    <Select 
+                      value={editingDevice.room || 'none'} 
+                      onValueChange={(v) => {
+                        if (v === 'none') {
+                          setEditingDevice({ ...editingDevice, room: undefined });
+                        } else {
+                          const selectedRoom = rooms.find(r => r.id.toString() === v.toString());
+                          const sectId = getRoomSectionId(v);
+                          setEditingDevice({
+                            ...editingDevice,
+                            room: v,
+                            section: sectId || undefined
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="edit-device-room">
+                        <SelectValue placeholder="Select room">
+                          {editingDevice.room && editingDevice.room !== 'none'
+                            ? ((rooms || []).find(r => r.id.toString() === editingDevice.room?.toString())?.name || 'Select room')
+                            : 'No Room (Section Level)'}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Room</SelectItem>
+                        {editingDevice.section && editingDevice.section !== 'none' ? (
+                          <>
+                            <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
+                              Rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'Selected Section')}
+                            </div>
+                            {rooms.filter(r => getRoomSectionId(r.id)?.toString() === editingDevice.section?.toString()).map(room => (
+                              <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
+                              Unassigned Rooms
+                            </div>
+                            {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
+                              <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
+                            ))}
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {!editingDevice.section || editingDevice.section === 'none' ? (
+                      <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
                     ) : (
-                      <>
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 px-2 py-1.5 uppercase tracking-widest bg-slate-50 dark:bg-zinc-800/90 border-b border-slate-200 dark:border-zinc-700/60 mb-1 select-none">
-                          Unassigned Rooms
-                        </div>
-                        {rooms.filter(r => !getRoomSectionId(r.id)).map(room => (
-                          <SelectItem key={room.id} value={room.id.toString()}>{room.name}</SelectItem>
-                        ))}
-                      </>
+                      <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'section')}</span>
                     )}
-                  </SelectContent>
-                </Select>
-                {!editingDevice.section || editingDevice.section === 'none' ? (
-                  <span className="text-[9px] text-slate-500 dark:text-zinc-400 block mt-0.5">Note: Section is required to select section-attached rooms</span>
-                ) : (
-                  <span className="text-[9px] text-primary block mt-0.5">Showing rooms under {((sections || []).find(s => s.id.toString() === editingDevice.section?.toString())?.name || 'section')}</span>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -16608,28 +17907,59 @@ export default function App() {
                       {editingRoom.personId && editingRoom.personId !== 'none'
                         ? (() => {
                             const u = (allUsers || []).find(user => user.id.toString() === editingRoom.personId?.toString());
-                            return u ? `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}` : 'Select person';
+                            const uName = u?.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u?.userName || 'Select person');
+                            const imgUrl = u?.getPersonDetailsDto?.imageUrl;
+                            return (
+                              <div className="flex items-center gap-2">
+                                <div className="h-5 w-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                                  {imgUrl ? (
+                                    <img 
+                                      src={getFullImageUrl(imgUrl)} 
+                                      alt={uName} 
+                                      className="h-full w-full object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <UserIcon className="h-3 w-3 text-slate-400" />
+                                  )}
+                                </div>
+                                <span className="truncate">{uName}</span>
+                              </div>
+                            );
                           })()
                         : 'No Person Assigned'}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No Person Assigned</SelectItem>
-                    {(allUsers || []).map(u => (
-                      <SelectItem key={u.id} value={u.id.toString()}>
-                        <div className="flex items-center gap-2">
-                          <div className="h-6 w-6 rounded-full overflow-hidden bg-muted shrink-0">
-                            <img 
-                              src={u.getPersonDetailsDto.imageUrl || undefined} 
-                              alt={u.getPersonDetailsDto.firstName} 
-                              className="h-full w-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
+                    <SelectItem value="none">
+                      <div className="flex items-center gap-2">
+                        <UserIcon className="h-4 w-4 text-slate-400 shrink-0" />
+                        <span>No Person Assigned</span>
+                      </div>
+                    </SelectItem>
+                    {(allUsers || []).map(u => {
+                      const uName = u?.getPersonDetailsDto ? `${u.getPersonDetailsDto.firstName || ''} ${u.getPersonDetailsDto.lastName || ''}`.trim() : (u?.userName || `User ${u.id}`);
+                      const imgUrl = u?.getPersonDetailsDto?.imageUrl;
+                      return (
+                        <SelectItem key={u.id} value={u.id.toString()}>
+                          <div className="flex items-center gap-2 py-0.5">
+                            <div className="h-6 w-6 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-zinc-700">
+                              {imgUrl ? (
+                                <img 
+                                  src={getFullImageUrl(imgUrl)} 
+                                  alt={uName} 
+                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <UserIcon className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+                              )}
+                            </div>
+                            <span className="truncate font-medium">{uName}</span>
                           </div>
-                          <span className="truncate">{u.getPersonDetailsDto.firstName} {u.getPersonDetailsDto.lastName}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -18378,6 +19708,296 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
+      {/* Utility View Modal */}
+      <Dialog open={isUtilityModalOpen} onOpenChange={setIsUtilityModalOpen}>
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto" showCloseButton={false}>
+          <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
+            {isOwner && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    if (selectedUtility) {
+                      handleEditDevice(selectedUtility.id, 'utility');
+                      setIsUtilityModalOpen(false);
+                    }
+                  }}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-md text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                  onClick={() => {
+                    if (selectedUtility) {
+                      handleDeleteDevice(selectedUtility.id, 'utility');
+                      setIsUtilityModalOpen(false);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
+            )}
+            <DialogClose render={<Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0" />}>
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
+          {(() => {
+            const rawUtilId = selectedUtility ? getRawId(selectedUtility.id) : '';
+            const currentUtilityDto = selectedUtility
+              ? ((utilities || []).find(u => u.id.toString() === rawUtilId || u.utilityName === selectedUtility.name) as any)
+              : null;
+            const liveTypeId = selectedUtility
+              ? resolveUtilityTypeId(currentUtilityDto?.utilityType ?? selectedUtility.utilityType, appNamesDetailList)
+              : UtilityType.Electricity;
+            const liveTypeName = resolveUtilityTypeName(liveTypeId, appNamesDetailList);
+            const rawComp = currentUtilityDto?.utilityComponent !== undefined
+              ? currentUtilityDto.utilityComponent
+              : selectedUtility?.utilityComponent;
+            const liveCompId = resolveUtilityComponentId(rawComp, appNamesDetailList);
+            const liveCompName = resolveUtilityComponentName(liveCompId, appNamesDetailList);
+            const liveName = currentUtilityDto?.utilityName || selectedUtility?.name || 'Utility';
+            const liveUtilityCode = currentUtilityDto?.utilityId || selectedUtility?.utilityId || '';
+            const liveActive = currentUtilityDto ? Boolean(currentUtilityDto.isActive) : (selectedUtility?.status === 'on');
+            const livePowerActive = currentUtilityDto?.powerActive ?? liveActive;
+            const liveTimeOut = currentUtilityDto?.timeOut ?? selectedUtility?.timeOut;
+            const liveCurrent = currentUtilityDto?.currentLevel ?? selectedUtility?.currentLevel;
+            const liveVoltage = currentUtilityDto?.voltageLevel ?? selectedUtility?.voltageLevel;
+            const livePower = currentUtilityDto?.powerConsumption ?? selectedUtility?.powerConsumption;
+            const livePowerToday = currentUtilityDto?.powerConsumptionToday ?? selectedUtility?.powerConsumptionToday;
+            const liveCurrWater = currentUtilityDto?.currentWaterLevel ?? selectedUtility?.currentWaterLevel;
+            const liveMinWater = currentUtilityDto?.minWaterLevel ?? selectedUtility?.minWaterLevel;
+            const liveMaxWater = currentUtilityDto?.maxWaterLevel ?? selectedUtility?.maxWaterLevel;
+            const liveActionIds: number[] = Array.isArray(currentUtilityDto?.actionIds)
+              ? currentUtilityDto.actionIds
+              : (selectedUtility?.actionIds || []);
+            const hasSectionOrRoom = Boolean(
+              selectedUtility?.section || selectedUtility?.room || currentUtilityDto?.sectionId || currentUtilityDto?.roomId
+            );
+
+            const HeaderIcon = liveTypeId === UtilityType.Water
+              ? Droplets
+              : liveTypeId === UtilityType.Gas
+              ? Flame
+              : liveTypeId === UtilityType.HVAC
+              ? Wind
+              : liveTypeId === UtilityType.Telecommunication
+              ? Radio
+              : liveTypeId === UtilityType.Irrigation
+              ? Sprout
+              : liveTypeId === UtilityType.Emergency
+              ? ShieldAlert
+              : Zap;
+
+            return (
+              <>
+                <DialogHeader className="mb-0 pr-24">
+                  <DialogTitle className="flex items-center gap-2 flex-wrap">
+                    <HeaderIcon className="h-5 w-5 text-primary" />
+                    <span>View {liveName}</span>
+                    {liveUtilityCode && (
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        {liveUtilityCode}
+                      </Badge>
+                    )}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Detailed telemetry and configuration for {liveName}.
+                  </DialogDescription>
+                </DialogHeader>
+                {selectedUtility && (
+                  <div className="pt-[3px] pb-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
+                        <div className="flex items-center gap-2 font-medium">
+                          <div className={cn("h-2 w-2 rounded-full", liveActive ? 'bg-emerald-500' : 'bg-zinc-400')} />
+                          {liveActive ? 'Active' : 'Inactive'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Utility Type</span>
+                        <div className="font-medium">{formatEnumLabel(liveTypeName)}</div>
+                      </div>
+                      {liveCompName && (
+                        <div className="space-y-1">
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Component</span>
+                          <div className="font-medium">{formatEnumLabel(liveCompName)}</div>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Time Out</span>
+                        <div className="font-medium font-mono">
+                          {liveTimeOut !== undefined && liveTimeOut !== null && liveTimeOut > 0 ? `${liveTimeOut} min` : 'None'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Active Profile</span>
+                        <div className="font-medium">
+                          {liveActive ? <Badge variant="default" className="bg-emerald-500">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Power Active</span>
+                        <div className="font-medium">
+                          {livePowerActive ? <Badge variant="default" className="bg-amber-500">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {(liveTypeId === UtilityType.Electricity || liveTypeId === UtilityType.HVAC) && (
+                      <div className="pt-3 border-t space-y-2">
+                        <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold block">
+                          Live Electrical Telemetry
+                        </span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg border bg-muted/40 p-2.5">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Current Level</span>
+                            <span className="text-sm font-mono font-semibold">{liveCurrent ?? 0} A</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2.5">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Voltage Level</span>
+                            <span className="text-sm font-mono font-semibold">{liveVoltage ?? 0} V</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2.5">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Power Consumption</span>
+                            <span className="text-sm font-mono font-semibold">{livePower ?? 0} W</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2.5">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Today's Consumption</span>
+                            <span className="text-sm font-mono font-semibold">{livePowerToday ?? 0} kWh</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {liveTypeId === UtilityType.Water && (
+                      <div className="pt-3 border-t space-y-3">
+                        <div className="rounded-xl border bg-muted/30 p-3.5">
+                          <WaterTank
+                            currentWaterLevel={liveCurrWater}
+                            minWaterLevel={liveMinWater}
+                            maxWaterLevel={liveMaxWater}
+                            size="lg"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Current</span>
+                            <span className="text-sm font-mono font-semibold">{liveCurrWater ?? 0}%</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Min</span>
+                            <span className="text-sm font-mono font-semibold">{liveMinWater ?? 0}%</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Max</span>
+                            <span className="text-sm font-mono font-semibold">{liveMaxWater ?? 100}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {liveTypeId === UtilityType.Emergency && (
+                      <div className="pt-3 border-t space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">
+                            Severity Level
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-semibold",
+                              liveCompId === UtilityComponent.EmergencyCritical
+                                ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                                : liveCompId === UtilityComponent.EmergencySevere
+                                ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30"
+                                : liveCompId === UtilityComponent.EmergencyMild
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                : "bg-slate-500/10 text-slate-600 dark:text-zinc-400 border-slate-500/20"
+                            )}
+                          >
+                            {formatEnumLabel(liveCompName || 'EmergencyNone')}
+                          </Badge>
+                        </div>
+                        <div className="space-y-1.5">
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold block">
+                            Linked Actions
+                          </span>
+                          {liveActionIds.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {liveActionIds.map((aid) => {
+                                const actName =
+                                  (actions || []).find(a => Number(a.id) === Number(aid))?.actionName ||
+                                  (appNamesDetailList?.actionIdNames || []).find((a: any) => Number(a.id) === Number(aid))?.name ||
+                                  `Action #${aid}`;
+                                return (
+                                  <Badge key={`view-util-act-${aid}`} variant="secondary">
+                                    {actName}
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No linked actions</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {(hasSectionOrRoom || currentUtilityDto) && (
+                      <div className="grid grid-cols-2 gap-4 pt-3 border-t">
+                        {hasSectionOrRoom && (
+                          <>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
+                              <div className="font-medium">
+                                {resolveSectionName(selectedUtility, currentUtilityDto, sections, rooms)}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Room Name</span>
+                              <div className="font-medium">
+                                {selectedUtility.room ? ((rooms || []).find(r => r.id.toString() === selectedUtility.room?.toString())?.name || 'N/A') : (currentUtilityDto?.roomId ? ((rooms || []).find(r => r.id.toString() === currentUtilityDto.roomId?.toString())?.name || 'N/A') : 'N/A')}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                        {currentUtilityDto && (
+                          <>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created By</span>
+                              <div className="font-medium">{getUserNameById(currentUtilityDto.createdBy) || currentUtilityDto.createdByName || 'System'}</div>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Created On</span>
+                              <div className="font-medium">{currentUtilityDto.createdOn ? format(new Date(currentUtilityDto.createdOn), 'PPp') : 'N/A'}</div>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified By</span>
+                              <div className="font-medium">{getUserNameById(currentUtilityDto.lastModifiedBy) || currentUtilityDto.lastModifiedByName || 'System'}</div>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Last Modified</span>
+                              <div className="font-medium">{currentUtilityDto.lastModifiedOn ? format(new Date(currentUtilityDto.lastModifiedOn), 'PPp') : 'Never'}</div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       {/* Door View Modal */}
       <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
         <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
@@ -19787,27 +21407,37 @@ export default function App() {
               <div className="flex-1 flex items-center bg-white dark:bg-zinc-950 p-8 relative overflow-hidden">
                 <div className="w-full">
                   <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                    {allUsers.filter(u => u.id !== userProfile.id).map(user => (
-                      <button 
-                        key={user.id}
-                        onClick={() => startDirectChat(user)}
-                        className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 dark:bg-zinc-950 rounded-3xl shadow-sm border border-slate-200 dark:border-zinc-800 hover:shadow-md hover:border-primary transition-all shrink-0 group"
-                      >
-                        <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white dark:border-zinc-800 overflow-hidden bg-slate-100 dark:bg-zinc-800 group-hover:scale-105 transition-transform">
-                          <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={user.getPersonDetailsDto.firstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                        </div>
-                        <span className="font-semibold text-lg text-slate-800 dark:text-zinc-100">{user.getPersonDetailsDto.firstName}</span>
-                        <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tight mt-1">{user.getUserDto.roleName}</span>
-                      </button>
-                    ))}
+                    {(allUsers || []).filter(u => u.id !== userProfile?.id).map(user => {
+                      const uFirstName = user?.getPersonDetailsDto?.firstName || user?.userName || `User ${user.id}`;
+                      const uRole = user?.getUserDto?.roleName || 'Member';
+                      return (
+                        <button 
+                          key={user.id}
+                          onClick={() => startDirectChat(user)}
+                          className="min-w-[200px] flex flex-col items-center p-8 bg-slate-50 dark:bg-zinc-950 rounded-3xl shadow-sm border border-slate-200 dark:border-zinc-800 hover:shadow-md hover:border-primary transition-all shrink-0 group"
+                        >
+                          <div className="h-24 w-24 rounded-full mb-4 shadow-md border-4 border-white dark:border-zinc-800 overflow-hidden bg-slate-100 dark:bg-zinc-800 group-hover:scale-105 transition-transform">
+                            {user.getPersonDetailsDto?.imageUrl ? (
+                              <img src={getFullImageUrl(user.getPersonDetailsDto.imageUrl)} alt={uFirstName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="h-full w-full flex items-center justify-center text-slate-500 font-bold text-2xl">
+                                {uFirstName.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-semibold text-lg text-slate-800 dark:text-zinc-100">{uFirstName}</span>
+                          <span className="text-xs text-slate-500 dark:text-zinc-400 font-medium uppercase tracking-tight mt-1">{uRole}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
             </div>
           ) : (
             <>
-              {/* WhatsApp Style Sidebar - List View (30% width if call history collapsed, 25% if open) */}
-              <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", isChatCallHistoryOpen ? "w-[25%]" : "w-[30%]")}>
+              {/* WhatsApp Style Sidebar - List View */}
+              <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", activeChatId ? "hidden md:flex" : "flex", isChatCallHistoryOpen ? "w-full md:w-[35%] lg:w-[28%]" : "w-full md:w-[38%] lg:w-[32%]")}>
             <div className="p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -20340,12 +21970,22 @@ export default function App() {
                   const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
 
                   return (
-                    <header className="px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
-                      <div 
-                        className={cn(
-                          "flex items-center gap-3",
-                          chat.isGroup && "cursor-pointer hover:opacity-85 select-none transition-all duration-150"
-                        )}
+                    <header className="px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
+                      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="md:hidden h-9 w-9 text-slate-600 dark:text-zinc-300 rounded-full shrink-0" 
+                          onClick={() => setActiveChatId(null)}
+                          title="Back to Chat List"
+                        >
+                          <ChevronLeft className="h-6 w-6" />
+                        </Button>
+                        <div 
+                          className={cn(
+                            "flex items-center gap-2 sm:gap-3 min-w-0",
+                            chat.isGroup && "cursor-pointer hover:opacity-85 select-none transition-all duration-150"
+                          )}
                         onClick={() => {
                           if (chat.isGroup) {
                             setEditingGroupId(chat.id);
@@ -20411,7 +22051,8 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
+                    </div>
+                    <div className="flex items-center gap-1">
                         {/* Toggle Chat Call History Panel Button */}
                         <Button 
                           variant="ghost" 
@@ -21947,11 +23588,11 @@ export default function App() {
 
       {/* Call Dialog (WhatsApp style overlay) */}
       <Dialog 
-        open={isCallModalOpen && !!activeCall && activeCall.status !== CallStatus.Ended && activeCall.status !== CallStatus.Rejected && activeCall.status !== CallStatus.Missed && activeCall.status !== CallStatus.TimedOut && !activeCall.endedAt} 
+        open={isCallModalOpen && isCallActive(activeCall)} 
         onOpenChange={(open) => {
           setIsCallModalOpen(open);
           if (!open) {
-            if (!activeCall || activeCall.status === CallStatus.Ended || activeCall.status === CallStatus.Rejected || activeCall.status === CallStatus.Missed || activeCall.status === CallStatus.TimedOut || activeCall.endedAt) {
+            if (!isCallActive(activeCall)) {
               setActiveCall(null);
             }
           }
@@ -23878,12 +25519,12 @@ export default function App() {
             const isGroup = chat?.isGroup || false;
 
             const displayProfileImg = isGroup 
-              ? (chat?.imageUrl || popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl)
-              : (popup.senderProfileImage || sender?.getPersonDetailsDto.imageUrl);
+              ? (chat?.imageUrl || popup.senderProfileImage || sender?.getPersonDetailsDto?.imageUrl)
+              : (popup.senderProfileImage || sender?.getPersonDetailsDto?.imageUrl);
 
             const displayName = isGroup
               ? (chat?.name || "Group Chat")
-              : (popup.senderName || (sender ? `${sender.getPersonDetailsDto.firstName} ${sender.getPersonDetailsDto.lastName}` : "Unknown"));
+              : (popup.senderName || (sender?.getPersonDetailsDto ? `${sender.getPersonDetailsDto.firstName || ''} ${sender.getPersonDetailsDto.lastName || ''}`.trim() : (sender ? `User ${sender.id}` : "Unknown")));
 
             const displayInitial = displayName ? displayName.charAt(0).toUpperCase() : 'U';
             const messageContent = popup.content || popup.text || (popup.audioUrl ? '🎤 Voice Message' : (popup.attachments && popup.attachments.length > 0) ? '📎 Attachment' : 'New Message');
@@ -23937,7 +25578,7 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {activeCall && !isCallModalOpen && activeCall.status !== CallStatus.Ended && activeCall.status !== CallStatus.Rejected && activeCall.status !== CallStatus.Missed && activeCall.status !== CallStatus.TimedOut && !activeCall.endedAt && (
+      {activeCall && !isCallModalOpen && isCallActive(activeCall) && (
         <div 
           onClick={() => setIsCallModalOpen(true)}
           className="fixed bottom-24 right-6 z-[10000] bg-zinc-950/95 backdrop-blur-md text-white border border-slate-700/80 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 pointer-events-auto cursor-pointer hover:bg-slate-800/95 transition-all group shadow-[0_0_15px_rgba(16,185,129,0.2)]"

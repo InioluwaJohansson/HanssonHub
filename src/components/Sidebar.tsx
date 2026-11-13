@@ -29,7 +29,8 @@ import {
   Cpu,
   Radio,
   Video,
-  Play
+  Play,
+  Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ROOMS, SECTIONS } from '../constants';
@@ -64,6 +65,7 @@ export type NavView =
   | 'facility-doors' 
   | 'facility-lights' 
   | 'facility-appliances' 
+  | 'facility-utilities'
   | 'facility-cameras' 
   | 'facility-windows'
   | 'contacts' 
@@ -139,13 +141,18 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
     { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
+    { id: 'facility-utilities', label: 'Utilities', icon: Zap },
   ];
 
   return (
     <motion.div 
       initial={false}
       animate={{ width: isCollapsed ? 80 : 256 }}
-      className="flex h-full flex-col border-r bg-card/50 backdrop-blur-xl transition-all duration-300 overflow-hidden"
+      className={cn(
+        "flex h-full flex-col border-r bg-card/80 backdrop-blur-xl transition-all duration-300 overflow-hidden z-40 shrink-0",
+        // On screens under 1024px (tablets, foldables unfolded, cover screen), slide over when expanded
+        !isCollapsed && "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:shadow-2xl max-lg:z-50 max-lg:w-64"
+      )}
     >
       <ScrollArea className="flex-1 px-3 min-h-0">
         <div className={cn(
@@ -258,14 +265,14 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
         >
           <div className="h-8 w-8 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center justify-center overflow-hidden shrink-0 font-bold text-xs tracking-wider uppercase shadow-2xs">
             {userProfile?.getPersonDetailsDto?.imageUrl?.trim() ? (
-              <img src={getFullImageUrl(userProfile.getPersonDetailsDto.imageUrl) || undefined} alt="Profile" className="h-full w-full object-cover" />
+              <img src={getFullImageUrl(userProfile?.getPersonDetailsDto?.imageUrl) || undefined} alt="Profile" className="h-full w-full object-cover" />
             ) : (
               userInitials
             )}
           </div>
           {!isCollapsed && (
             <div className="flex flex-col text-left">
-              <span className="text-xs font-medium">{firstName} {lastName[0]}.</span>
+              <span className="text-xs font-medium">{firstName || 'User'} {lastName?.[0] ? `${lastName[0]}.` : ''}</span>
               <span className="text-[10px] text-muted-foreground">{roleName}</span>
             </div>
           )}

@@ -12,9 +12,9 @@ export const INITIAL_CHATS: ChatDto[] = [
     unreadCount: 0,
     participants: INITIAL_USERS.map(u => ({
       personId: u.id,
-      fullName: `${u.getPersonDetailsDto.firstName} ${u.getPersonDetailsDto.lastName}`,
-      profileImageUrl: u.getPersonDetailsDto.imageUrl,
-      isAdmin: u.getUserDto.role === Role.Owner,
+      fullName: `${u.getPersonDetailsDto?.firstName || ''} ${u.getPersonDetailsDto?.lastName || ''}`.trim() || 'User',
+      profileImageUrl: u.getPersonDetailsDto?.imageUrl || '',
+      isAdmin: u.getUserDto?.role === Role.Owner,
       isOnline: !u.disabled
     }))
   },
@@ -28,8 +28,8 @@ export const INITIAL_CHATS: ChatDto[] = [
     participants: [
       {
         personId: INITIAL_USER.id,
-        fullName: `${INITIAL_USER.getPersonDetailsDto.firstName} ${INITIAL_USER.getPersonDetailsDto.lastName}`,
-        profileImageUrl: INITIAL_USER.getPersonDetailsDto.imageUrl,
+        fullName: `${INITIAL_USER.getPersonDetailsDto?.firstName || ''} ${INITIAL_USER.getPersonDetailsDto?.lastName || ''}`.trim() || 'User',
+        profileImageUrl: INITIAL_USER.getPersonDetailsDto?.imageUrl || '',
         isAdmin: true,
         isOnline: true
       },

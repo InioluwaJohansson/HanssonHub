@@ -6,6 +6,7 @@ import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { HlsVideo } from './HlsVideo';
+import { WaterTank } from './WaterTank';
 import { 
   Lightbulb, 
   LightbulbOff,
@@ -26,7 +27,12 @@ import {
   Edit3,
   AppWindow as WindowIcon,
   Maximize2,
-  Radio
+  Radio,
+  Zap,
+  Flame,
+  Sprout,
+  ShieldAlert,
+  Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
@@ -76,6 +82,16 @@ const getIcon = (device: Device) => {
       return <WindowIcon className="h-5 w-5 text-muted-foreground" />;
     case 'appliance':
       return <Power className={cn("h-5 w-5 transition-colors", color)} />;
+    case 'utility': {
+      const ut = Number(device.utilityType || 1);
+      if (ut === 2) return <Droplets className={cn("h-5 w-5 transition-colors", isActive ? "text-sky-500" : "text-muted-foreground")} />;
+      if (ut === 3) return <Flame className={cn("h-5 w-5 transition-colors", isActive ? "text-orange-500" : "text-muted-foreground")} />;
+      if (ut === 4) return <Wind className={cn("h-5 w-5 transition-colors", isActive ? "text-cyan-500" : "text-muted-foreground")} />;
+      if (ut === 5) return <Radio className={cn("h-5 w-5 transition-colors", isActive ? "text-indigo-500" : "text-muted-foreground")} />;
+      if (ut === 6) return <Sprout className={cn("h-5 w-5 transition-colors", isActive ? "text-emerald-500" : "text-muted-foreground")} />;
+      if (ut === 7) return <ShieldAlert className={cn("h-5 w-5 transition-colors", isActive ? "text-rose-500" : "text-muted-foreground")} />;
+      return <Zap className={cn("h-5 w-5 transition-colors", color)} />;
+    }
     case 'camera':
       return <Camera className={cn("h-5 w-5 transition-colors", color)} />;
     case 'external' as any:
@@ -85,6 +101,11 @@ const getIcon = (device: Device) => {
     default:
       return <Power className="h-5 w-5" />;
   }
+};
+
+const formatUtilitySubLabel = (raw?: string | number | null): string => {
+  if (raw === undefined || raw === null || raw === '') return '';
+  return raw.toString().replace(/([a-z])([A-Z])/g, '$1 $2').trim();
 };
 
 export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, onStatusChange, onDoorAction, onDelete, onEdit, onClick, variant = 'default' }: DeviceCardProps) {
@@ -159,13 +180,18 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
             )}>
               {getIcon(device)}
             </div>
-            <div className="flex flex-col">
-              <CardTitle className="text-sm font-medium leading-none">
+            <div className="flex flex-col min-w-0">
+              <CardTitle className="text-sm font-medium leading-none truncate">
                 {device.name}
               </CardTitle>
               {device.doorType && !/^\d+$/.test(device.doorType.toString()) && (
                 <span className="mt-1 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {device.doorType}
+                </span>
+              )}
+              {device.type === 'utility' && (device.utilityTypeName || device.utilityComponentName) && (
+                <span className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+                  {[formatUtilitySubLabel(device.utilityTypeName), formatUtilitySubLabel(device.utilityComponentName)].filter(Boolean).join(' • ')}
                 </span>
               )}
             </div>
@@ -212,6 +238,21 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 {device.powerUsage}W
               </span>
             )}
+            {device.type === 'utility' && (
+              <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                {(device.powerConsumption !== undefined && device.powerConsumption !== null) ? (
+                  <span>{device.powerConsumption}W</span>
+                ) : (device.powerUsage !== undefined && (Number(device.utilityType) === 1 || Number(device.utilityType) === 4) && (
+                  <span>{device.powerUsage}W</span>
+                ))}
+                {device.timeOut !== undefined && device.timeOut !== null && device.timeOut > 0 && (
+                  <span className="inline-flex items-center gap-0.5">
+                    <Clock className="h-3 w-3" />
+                    {device.timeOut} min
+                  </span>
+                )}
+              </div>
+            )}
 
             {(device.type === 'door' || device.type === 'window') && !isSummary && (
               <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -253,6 +294,64 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
             )}
           </div>
             
+            {device.type === 'utility' && !isSummary && (() => {
+              const ut = Number(device.utilityType || 1);
+              if (ut === 1 || ut === 4) {
+                const hasMetrics = [device.voltageLevel, device.currentLevel, device.powerConsumptionToday].some(v => v !== undefined && v !== null);
+                if (!hasMetrics) return null;
+                return (
+                  <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-border/50 text-[10px]">
+                    <div className="rounded-lg bg-muted/60 px-2 py-1">
+                      <span className="text-muted-foreground block uppercase text-[9px]">Voltage</span>
+                      <span className="font-mono font-semibold">{device.voltageLevel ?? 0}V</span>
+                    </div>
+                    <div className="rounded-lg bg-muted/60 px-2 py-1">
+                      <span className="text-muted-foreground block uppercase text-[9px]">Current</span>
+                      <span className="font-mono font-semibold">{device.currentLevel ?? 0}A</span>
+                    </div>
+                    <div className="rounded-lg bg-muted/60 px-2 py-1">
+                      <span className="text-muted-foreground block uppercase text-[9px]">Today</span>
+                      <span className="font-mono font-semibold">{device.powerConsumptionToday ?? 0} kWh</span>
+                    </div>
+                  </div>
+                );
+              }
+              if (ut === 2) {
+                return (
+                  <div className="pt-2 border-t border-border/50">
+                    <WaterTank
+                      currentWaterLevel={device.currentWaterLevel}
+                      minWaterLevel={device.minWaterLevel}
+                      maxWaterLevel={device.maxWaterLevel}
+                      size="sm"
+                    />
+                  </div>
+                );
+              }
+              if (ut === 7) {
+                const compId = Number(device.utilityComponent);
+                const sevClass = compId === 11
+                  ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                  : compId === 10
+                  ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30"
+                  : compId === 9
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                  : "bg-slate-500/10 text-slate-600 dark:text-zinc-400 border-slate-500/20";
+                const actionsCount = device.actionIds?.length || 0;
+                return (
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/50 text-[10px]">
+                    <span className={cn("px-2 py-0.5 rounded-md border font-semibold uppercase tracking-wider", sevClass)}>
+                      {formatUtilitySubLabel(device.utilityComponentName || 'Emergency')}
+                    </span>
+                    <span className="text-muted-foreground font-mono">
+                      {actionsCount} {actionsCount === 1 ? 'Action' : 'Actions'}
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             {device.value !== undefined && isActive && device.type === 'light' && !isSummary && (
               <div className="pt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">

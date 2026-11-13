@@ -69,13 +69,39 @@ export interface ActionsResponseModel extends BaseResponse {
   data: GetActionDto[];
 }
 
-export type DeviceType = 'light' | 'door' | 'appliance' | 'camera' | 'speaker' | 'window';
+export type DeviceType = 'light' | 'door' | 'appliance' | 'utility' | 'camera' | 'speaker' | 'window';
 
 export type DoorStatus = 'locked' | 'unlocked' | 'open' | 'open-locked';
 export type LightStatus = 'on' | 'off';
 export type CameraStatus = 'active' | 'inactive';
 export type ApplianceStatus = 'on' | 'off' | 'active' | 'inactive';
+export type UtilityStatus = 'on' | 'off' | 'active' | 'inactive';
 export type WindowStatus = 'open' | 'closed' | 'locked';
+
+export enum UtilityType {
+  Electricity = 1,
+  Water = 2,
+  Gas = 3,
+  HVAC = 4,
+  Telecommunication = 5,
+  Irrigation = 6,
+  Emergency = 7,
+}
+
+export enum UtilityComponent {
+  Generator = 0,
+  SolarPanel = 1,
+  WaterTank = 2,
+  WaterPump = 3,
+  WaterMeter = 4,
+  GasCylinder = 5,
+  AirConditioner = 6,
+  Heater = 7,
+  EmergencyNone = 8,
+  EmergencyMild = 9,
+  EmergencySevere = 10,
+  EmergencyCritical = 11,
+}
 
 export interface Device {
   id: string;
@@ -94,6 +120,20 @@ export interface Device {
   streamPath?: string;
   port?: number;
   applianceType?: number;
+  utilityId?: string;
+  utilityType?: number;
+  utilityTypeName?: string;
+  utilityComponent?: number | null;
+  utilityComponentName?: string;
+  timeOut?: number | null;
+  currentLevel?: number | null;
+  voltageLevel?: number | null;
+  powerConsumption?: number | null;
+  powerConsumptionToday?: number | null;
+  actionIds?: number[];
+  currentWaterLevel?: number | null;
+  maxWaterLevel?: number | null;
+  minWaterLevel?: number | null;
 }
 
 export interface SceneAction {
@@ -130,6 +170,7 @@ export interface Section {
 
 export enum FacilityTypeApp {
   Appliance = 'Appliance',
+  Utility = 'Utility',
   Camera = 'Camera',
   Door = 'Door',
   External = 'External',
@@ -414,8 +455,14 @@ export interface GenericNames extends GenericIdNames {
   imageUrl: string;
 }
 
+export interface UtilityTypeComponentsDto {
+  utilityType: GenericIdNames;
+  components: GenericIdNames[];
+}
+
 export interface AppNamesDetailList {
   applianceIdNames: GenericNames[];
+  utilityIdNames?: GenericIdNames[] | GenericNames[];
   cameraIdNames: GenericNames[];
   lightIdNames: GenericNames[];
   windowIdNames: GenericNames[];
@@ -426,6 +473,8 @@ export interface AppNamesDetailList {
   actionIdNames: GenericIdNames[];
   hardwareIdNames: GenericIdNames[];
   applianceType: GenericIdNames[];
+  utilityType?: GenericIdNames[];
+  utilityComponent?: UtilityTypeComponentsDto[];
   gender: GenericIdNames[];
   doorType: GenericIdNames[];
   facilityType: GenericIdNames[];
@@ -607,6 +656,7 @@ export interface GetSectionDto extends UserBaseDefaultDto {
   lights: GetLightDto[];
   windows: GetWindowDto[];
   appliances: GetApplianceDto[];
+  utilities?: GetUtilityDto[];
   cameras: GetCameraDto[];
   externals: GetExternalDto[];
 }
@@ -669,6 +719,7 @@ export interface GetRoomDto extends UserBaseDefaultDto {
   lights: GetLightDto[];
   windows: GetWindowDto[];
   appliances: GetApplianceDto[];
+  utilities?: GetUtilityDto[];
   cameras: GetCameraDto[];
   externals: GetExternalDto[];
 }
@@ -712,6 +763,77 @@ export interface ApplianceResponseModel extends BaseResponse {
 
 export interface AppliancesResponseModel extends BaseResponse {
   data: GetApplianceDto[];
+}
+
+export interface CreateUtilityDto {
+  utilityName: string;
+  utilityType: UtilityType | number;
+  utilityComponent?: UtilityComponent | number | null;
+  timeOut?: number | null;
+  actionIds?: number[] | null;
+  maxWaterLevel?: number | null;
+  minWaterLevel?: number | null;
+}
+
+export interface UpdateUtilityDto {
+  id: number;
+  utilityName: string;
+  utilityId: string;
+  utilityType: UtilityType | number;
+  utilityComponent?: UtilityComponent | number | null;
+  isActive: boolean;
+  timeOut?: number | null;
+  currentLevel?: number | null;
+  voltageLevel?: number | null;
+  powerConsumption?: number | null;
+  powerConsumptionToday?: number | null;
+  actionIds?: number[] | null;
+  currentWaterLevel?: number | null;
+  maxWaterLevel?: number | null;
+  minWaterLevel?: number | null;
+}
+
+export interface GetUtilityDto extends BaseDefaultDto {
+  personId?: number;
+  id: number;
+  utilityName: string;
+  utilityId: string;
+  utilityType: UtilityType | number | string;
+  utilityComponent?: UtilityComponent | number | string | null;
+  isActive: boolean;
+  powerActive?: boolean;
+  currentLevel?: number | null;
+  voltageLevel?: number | null;
+  powerConsumption?: number | null;
+  powerConsumptionToday?: number | null;
+  timeOut?: number | null;
+  actionIds?: number[] | null;
+  currentWaterLevel?: number | null;
+  maxWaterLevel?: number | null;
+  minWaterLevel?: number | null;
+  roomId?: number;
+  roomName?: string;
+  sectionId?: number;
+  sectionName?: string;
+}
+
+export interface UtilityDataMQTT {
+  id: number;
+  utilityType: UtilityType | number | string;
+  utilityComponent?: UtilityComponent | number | string | null;
+  isActive: boolean;
+  currentLevel?: number | null;
+  voltageLevel?: number | null;
+  powerConsumptionToday?: number | null;
+  currentWaterLevel?: number | null;
+}
+
+export interface UtilityResponseModel extends BaseResponse {
+  data: GetUtilityDto;
+}
+
+export interface UtilitiesResponseModel extends BaseResponse {
+  data: GetUtilityDto[];
 }
 
 export interface CreateDoorDto extends CreateBaseDefaultDto {
