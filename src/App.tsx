@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Sidebar, NavView } from './components/Sidebar';
-import { DeviceCard } from './components/DeviceCard';
+import { DeviceCard, UtilityCountdown } from './components/DeviceCard';
 import { 
   INITIAL_DEVICES, 
   ROOMS, 
@@ -2480,6 +2480,45 @@ export default function App() {
   const [cameras, setCameras] = React.useState<GetCameraDto[]>([]);
   const [appliances, setAppliances] = React.useState<GetApplianceDto[]>([]);
   const [utilities, setUtilities] = React.useState<GetUtilityDto[]>([]);
+  const [utilityCountdownEnds, setUtilityCountdownEnds] = React.useState<Record<string, { endAt: number; timeOut: number }>>({});
+
+  React.useEffect(() => {
+    setUtilityCountdownEnds((prev) => {
+      let changed = false;
+      const next: Record<string, { endAt: number; timeOut: number }> = { ...prev };
+      const utilityIds = new Set<string>();
+
+      devices.forEach((d) => {
+        if (d.type !== 'utility') return;
+        utilityIds.add(d.id);
+        const isUtilActive = d.status === 'on' || d.status === 'active';
+        const tOut = Number(d.timeOut ?? 0);
+
+        if (isUtilActive && tOut > 0) {
+          if (!next[d.id] || next[d.id].timeOut !== tOut) {
+            next[d.id] = {
+              endAt: Date.now() + Math.round(tOut * 60 * 1000),
+              timeOut: tOut,
+            };
+            changed = true;
+          }
+        } else if (next[d.id]) {
+          delete next[d.id];
+          changed = true;
+        }
+      });
+
+      Object.keys(next).forEach((id) => {
+        if (!utilityIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [devices]);
+
   const [doors, setDoors] = React.useState<GetDoorDto[]>([]);
   const [lights, setLights] = React.useState<GetLightDto[]>([]);
   const [windows, setWindows] = React.useState<GetWindowDto[]>([]);
@@ -3297,6 +3336,42 @@ export default function App() {
       sectionIds: (sections || []).map(s => ({ id: s.id, name: s.name })),
     }));
   }, [allUsers, appliances, utilities, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
+
+  const currentEmergencySeverity = React.useMemo<'none' | 'mild' | 'severe' | 'critical' | null>(() => {
+    if (!isLoggedIn) return null;
+    const emergencyItems = (devices || []).filter(
+      (d) =>
+        d.type === 'utility' &&
+        resolveUtilityTypeId(d.utilityType, appNamesDetailList) === UtilityType.Emergency
+    );
+    if (emergencyItems.length === 0) return null;
+    let maxCompId: number = UtilityComponent.EmergencyNone;
+    emergencyItems.forEach((d) => {
+      const compId = resolveUtilityComponentId(d.utilityComponent, appNamesDetailList);
+      if (
+        compId !== null &&
+        compId >= UtilityComponent.EmergencyNone &&
+        compId <= UtilityComponent.EmergencyCritical
+      ) {
+        if (compId > maxCompId) maxCompId = compId;
+      }
+    });
+    if (maxCompId >= UtilityComponent.EmergencyCritical) return 'critical';
+    if (maxCompId === UtilityComponent.EmergencySevere) return 'severe';
+    if (maxCompId === UtilityComponent.EmergencyMild) return 'mild';
+    return 'none';
+  }, [isLoggedIn, devices, appNamesDetailList]);
+
+  React.useEffect(() => {
+    if (!currentEmergencySeverity) {
+      delete document.documentElement.dataset.emergencySeverity;
+    } else {
+      document.documentElement.dataset.emergencySeverity = currentEmergencySeverity;
+    }
+    return () => {
+      delete document.documentElement.dataset.emergencySeverity;
+    };
+  }, [currentEmergencySeverity]);
 
   const isOwner = userProfile?.getUserDto?.role === 1 || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
   const canSeeActions = isOwner || userProfile?.getUserDto?.role === 2 || userProfile?.getUserDto?.role === 3 || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
@@ -8990,6 +9065,87 @@ export default function App() {
       }
   };
 
+  const handleUtilityComponentChange = async (id: string, nextComponentId: number) => {
+    const d = devices.find(
+      (x) => x.id === id || x.id === `utility-${id}` || x.id.split('-')[1] === id
+    );
+    if (!d || d.type !== 'utility') return;
+
+    const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+    const prevDevices = [...devices];
+    const prevUtilities = [...utilities];
+    const prevSelectedUtility = selectedUtility;
+
+    const utilDto = (prevUtilities || []).find((u) => u.id.toString() === rawId.toString());
+    const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
+    const nextCompName = resolveUtilityComponentName(nextComponentId, appNamesDetailList);
+
+    setDevices((prev) =>
+      prev.map((dev) =>
+        dev.id === d.id
+          ? {
+              ...dev,
+              utilityComponent: nextComponentId,
+              utilityComponentName: nextCompName,
+            }
+          : dev
+      )
+    );
+    setUtilities((prev) =>
+      prev.map((item) =>
+        item.id.toString() === rawId.toString()
+          ? {
+              ...item,
+              utilityComponent: nextComponentId,
+              lastModifiedOn: new Date().toISOString(),
+            }
+          : item
+      )
+    );
+    if (selectedUtility && selectedUtility.id === d.id) {
+      setSelectedUtility((prev) =>
+        prev
+          ? {
+              ...prev,
+              utilityComponent: nextComponentId,
+              utilityComponentName: nextCompName,
+            }
+          : prev
+      );
+    }
+
+    try {
+      const payload = {
+        id: parseInt(rawId, 10),
+        utilityName: utilDto?.utilityName || d.name,
+        utilityId: utilDto?.utilityId || d.utilityId || '',
+        utilityType: resolvedTypeId,
+        utilityComponent: nextComponentId,
+        isActive: utilDto ? Boolean(utilDto.isActive) : (d.status === 'on' || d.status === 'active'),
+        timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
+        currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
+        voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
+        powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
+        powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
+        actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
+        currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
+        maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
+        minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null,
+      };
+      await apiFetch('/Utility/UpdateUtility', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      toast.success(`${d.name} updated to ${formatEnumLabel(nextCompName)}`);
+    } catch (err: any) {
+      console.error('Failed to update utility component', err);
+      toast.error(`Failed to update emergency level: ${err.message}`);
+      setDevices(prevDevices);
+      setUtilities(prevUtilities);
+      setSelectedUtility(prevSelectedUtility);
+    }
+  };
+
   const handleDoorAction = async (id: string, action: 'lock'|'unlock'|'open'|'close') => {
     let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `door-${id}` || x.id === `window-${id}`);
     if (!d) return;
@@ -12268,6 +12424,9 @@ export default function App() {
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
                         onClick={handleDeviceClick}
+                        onUtilityComponentChange={handleUtilityComponentChange}
+                        emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
+                        countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
                       />
                     ))}
                   </div>
@@ -13102,6 +13261,9 @@ export default function App() {
                               onStatusChange={handleStatusChange}
                         onDoorAction={handleDoorAction}
                               onClick={handleDeviceClick}
+                              onUtilityComponentChange={handleUtilityComponentChange}
+                              emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
+                              countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
                             />
                           ))}
                           {sectionDevices.length === 0 && (
@@ -13473,6 +13635,9 @@ export default function App() {
                                 onDelete={handleDeleteDevice}
                                 onEdit={handleEditDevice}
                                 onClick={handleDeviceClick}
+                                onUtilityComponentChange={handleUtilityComponentChange}
+                                emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
+                                countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
                               />
                             ))}
                           </div>
@@ -13514,6 +13679,9 @@ export default function App() {
                           onDelete={handleDeleteDevice}
                           onEdit={handleEditDevice}
                           onClick={handleDeviceClick}
+                          onUtilityComponentChange={handleUtilityComponentChange}
+                          emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
+                          countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
                         />
                       ))}
                     </div>
@@ -14952,7 +15120,7 @@ export default function App() {
       <main className="flex flex-1 flex-col min-h-0 overflow-hidden relative">
 
         {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b px-3 sm:px-6 md:px-8 bg-card/30 backdrop-blur-md z-10 shrink-0 gap-2">
+        <header data-app-header="true" className="flex h-16 items-center justify-between border-b px-3 sm:px-6 md:px-8 bg-card/30 backdrop-blur-md z-20 shrink-0 gap-2 transition-shadow duration-300">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Button
               variant="ghost"
@@ -19231,7 +19399,7 @@ export default function App() {
             return (
               <div className="flex flex-col h-full bg-background relative overflow-hidden">
                 {/* Header Section */}
-                <div className="flex items-center justify-between p-5 border-b bg-muted/30 shrink-0">
+                <div data-app-header="true" className="relative z-20 flex items-center justify-between p-5 border-b bg-muted/30 shrink-0 transition-shadow duration-300">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-primary/10 rounded-lg text-primary">
                       <Camera className="h-5 w-5" />
@@ -19823,17 +19991,22 @@ export default function App() {
                       <div className="space-y-1">
                         <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Utility Type</span>
                         <div className="font-medium">{formatEnumLabel(liveTypeName)}</div>
+                        {liveCompName && (
+                          <div className="text-xs text-muted-foreground font-medium">
+                            {formatEnumLabel(liveCompName)}
+                          </div>
+                        )}
                       </div>
-                      {liveCompName && (
-                        <div className="space-y-1">
-                          <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Component</span>
-                          <div className="font-medium">{formatEnumLabel(liveCompName)}</div>
-                        </div>
-                      )}
                       <div className="space-y-1">
                         <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Time Out</span>
                         <div className="font-medium font-mono">
-                          {liveTimeOut !== undefined && liveTimeOut !== null && liveTimeOut > 0 ? `${liveTimeOut} min` : 'None'}
+                          {liveTimeOut !== undefined && liveTimeOut !== null && liveTimeOut > 0 ? (
+                            <UtilityCountdown
+                              timeOut={liveTimeOut}
+                              isActive={liveActive}
+                              endAt={selectedUtility ? utilityCountdownEnds[selectedUtility.id]?.endAt : undefined}
+                            />
+                          ) : 'None'}
                         </div>
                       </div>
                       <div className="space-y-1">
@@ -21438,7 +21611,7 @@ export default function App() {
             <>
               {/* WhatsApp Style Sidebar - List View */}
               <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", activeChatId ? "hidden md:flex" : "flex", isChatCallHistoryOpen ? "w-full md:w-[35%] lg:w-[28%]" : "w-full md:w-[38%] lg:w-[32%]")}>
-            <div className="p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full">
+            <div data-app-header="true" className="relative z-20 p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full transition-shadow duration-300">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-slate-200 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300 shadow-inner overflow-hidden border-2 border-white dark:border-zinc-700 shrink-0">
@@ -21633,7 +21806,7 @@ export default function App() {
               /* Call History Panel replacing right side */
               <div className="flex-1 flex flex-col bg-slate-50 dark:bg-zinc-950 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
                 {/* Header */}
-                <header className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px]">
+                <header data-app-header="true" className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px] transition-shadow duration-300">
                   <div className="flex items-center gap-3 text-left">
                     <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
                       <History className="h-5 w-5" />
@@ -21970,7 +22143,7 @@ export default function App() {
                   const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
 
                   return (
-                    <header className="px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
+                    <header data-app-header="true" className="px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px] transition-shadow duration-300">
                       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                         <Button 
                           variant="ghost" 
@@ -23182,7 +23355,7 @@ export default function App() {
                         className="w-[320px] shrink-0 border-l border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full overflow-hidden shadow-xs relative z-20"
                       >
                         {/* Header */}
-                        <div className="px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px]">
+                        <div data-app-header="true" className="relative z-20 px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px] transition-shadow duration-300">
                           <div className="flex items-center gap-2.5 text-left min-w-0">
                             <div className="h-9 w-9 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 shadow-xs">
                               <History className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
