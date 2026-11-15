@@ -61,6 +61,7 @@ interface DeviceCardProps {
   emergencyOptions?: { id: number; name: string }[];
   variant?: 'default' | 'summary';
   countdownEndAt?: number;
+  canUpdate?: boolean;
 }
 
 const DEFAULT_EMERGENCY_OPTIONS: { id: number; name: string }[] = [
@@ -204,7 +205,7 @@ export function UtilityCountdown({
   );
 }
 
-export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, onStatusChange, onDoorAction, onDelete, onEdit, onClick, onUtilityComponentChange, emergencyOptions, variant = 'default', countdownEndAt }: DeviceCardProps) {
+export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, onStatusChange, onDoorAction, onDelete, onEdit, onClick, onUtilityComponentChange, emergencyOptions, variant = 'default', countdownEndAt, canUpdate = true }: DeviceCardProps) {
   const isActive = device.status === 'on' || device.status === 'unlocked' || device.status === 'active' || device.status === 'open';
   const isLocked = device.status === 'locked' || device.status === 'open-locked';
   const isOpen = device.status === 'open' || device.status === 'open-locked';
@@ -321,7 +322,10 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
               ) : (
                 <Switch 
                   checked={isActive} 
-                  onCheckedChange={() => onToggle(device.id)}
+                  disabled={!canUpdate}
+                  onCheckedChange={() => {
+                    if (canUpdate) onToggle(device.id);
+                  }}
                 />
               )}
             </div>
@@ -438,13 +442,15 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                     if (matchedOpt) compId = Number(matchedOpt.id);
                   }
                 }
-                const sevClass = compId === 11
+                const sevClass = !isActive
+                  ? "bg-muted/60 text-muted-foreground border-border focus:ring-border"
+                  : compId === 11
                   ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/40 focus:ring-red-500/40"
                   : compId === 10
                   ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/40 focus:ring-orange-500/40"
                   : compId === 9
                   ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/40 focus:ring-amber-500/40"
-                  : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 focus:ring-emerald-500/30";
+                  : "bg-muted/60 text-muted-foreground border-border focus:ring-border";
                 const actionsCount = device.actionIds?.length || 0;
                 return (
                   <div
@@ -454,19 +460,22 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                     <select
                       aria-label={`${device.name} emergency severity`}
                       value={compId.toString()}
+                      disabled={!canUpdate}
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                       onPointerDown={(e) => e.stopPropagation()}
                       onTouchStart={(e) => e.stopPropagation()}
                       onChange={(e) => {
                         e.stopPropagation();
+                        if (!canUpdate) return;
                         const nextCompId = parseInt(e.target.value, 10);
                         if (!Number.isNaN(nextCompId)) {
                           onUtilityComponentChange?.(device.id, nextCompId);
                         }
                       }}
                       className={cn(
-                        "px-2 py-1 rounded-md border font-semibold uppercase tracking-wider text-[10px] cursor-pointer outline-none focus:ring-2 transition-colors",
+                        "px-2 py-1 rounded-md border font-semibold uppercase tracking-wider text-[10px] outline-none focus:ring-2 transition-colors",
+                        canUpdate ? "cursor-pointer" : "cursor-not-allowed opacity-60",
                         sevClass
                       )}
                     >

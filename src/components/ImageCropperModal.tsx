@@ -73,7 +73,7 @@ export function ImageCropperModal({ isOpen, onClose, imageSrc, onCropComplete }:
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-xl h-[600px] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center"><Scissors className="w-5 h-5 mr-2" />Crop Image</DialogTitle>

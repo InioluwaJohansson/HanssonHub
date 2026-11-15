@@ -4,7 +4,8 @@ export enum FacilityType {
   Door,
   External,
   Light,
-  Window
+  Window,
+  Utility
 }
 
 export interface CreateActionDto {
@@ -469,6 +470,8 @@ export interface AppNamesDetailList {
   doorIdNames: GenericNames[];
   externalIdNames: GenericNames[];
   personIdNames: GenericNames[];
+  sectionIdNames?: GenericNames[];
+  roomIdNames?: GenericIdNames[];
   contactCategoryIdNames: GenericIdNames[];
   actionIdNames: GenericIdNames[];
   hardwareIdNames: GenericIdNames[];

@@ -264,7 +264,10 @@ import {
   Flame,
   Sprout,
   Gauge,
-  Wind
+  Wind,
+  DoorOpen,
+  DoorClosed,
+  LightbulbOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PullToRefresh from 'react-simple-pull-to-refresh';
@@ -2263,6 +2266,44 @@ const normalizeUtilityComponentsList = (rawList: any): UtilityTypeComponentsDto[
   });
 };
 
+const normalizeIdNamesArray = (rawList: any): any[] => {
+  if (!Array.isArray(rawList)) return [];
+  return rawList.map((item: any) => ({
+    ...item,
+    id: Number(item?.id ?? item?.Id ?? 0),
+    name: item?.name ?? item?.Name ?? '',
+  }));
+};
+
+const resolveActionStepFacilityKind = (
+  facilityTypeVal: number | string | undefined | null,
+  appList?: any
+): 'appliance' | 'camera' | 'door' | 'external' | 'light' | 'window' | 'utility' | null => {
+  if (facilityTypeVal === undefined || facilityTypeVal === null || facilityTypeVal === '') return null;
+  const num = Number(facilityTypeVal);
+  const ftList: any[] = appList?.facilityType || [];
+  const matchedFt = ftList.find((ft: any) => Number(ft?.id ?? ft?.Id) === num);
+  const matchedName = (matchedFt?.name ?? matchedFt?.Name ?? '').toString().trim().toLowerCase();
+  if (matchedName === 'utility') return 'utility';
+  if (matchedName === 'appliance') return 'appliance';
+  if (matchedName === 'camera') return 'camera';
+  if (matchedName === 'door') return 'door';
+  if (matchedName === 'external') return 'external';
+  if (matchedName === 'light') return 'light';
+  if (matchedName === 'window') return 'window';
+
+  switch (num) {
+    case FacilityType.Appliance: return 'appliance';
+    case FacilityType.Camera: return 'camera';
+    case FacilityType.Door: return 'door';
+    case FacilityType.External: return 'external';
+    case FacilityType.Light: return 'light';
+    case FacilityType.Window: return 'window';
+    case FacilityType.Utility: return 'utility';
+    default: return null;
+  }
+};
+
 const mergeAppNamesDetailList = (prev: any, rawData: any) => {
   if (!rawData || typeof rawData !== 'object') return prev;
   const next = { ...prev };
@@ -2270,10 +2311,25 @@ const mergeAppNamesDetailList = (prev: any, rawData: any) => {
     const val = rawData[key];
     if (val === null || val === undefined) return;
     const camelKey = key.charAt(0).toLowerCase() + key.slice(1);
-    next[key] = val;
-    next[camelKey] = val;
-    if (key === 'DoorType') next['doorType'] = val;
-    if (key === 'doorType') next['DoorType'] = val;
+    const normalizedVal = Array.isArray(val) && key !== 'UtilityComponent' && key !== 'utilityComponent' && key !== 'UtilityType' && key !== 'utilityType'
+      ? normalizeIdNamesArray(val)
+      : val;
+    next[key] = normalizedVal;
+    next[camelKey] = normalizedVal;
+    if (key === 'DoorType') next['doorType'] = normalizedVal;
+    if (key === 'doorType') next['DoorType'] = normalizedVal;
+    if (key === 'UtilityIdNames' || key === 'utilityIdNames') {
+      next['utilityIdNames'] = normalizeIdNamesArray(val);
+    }
+    if (key === 'FacilityType' || key === 'facilityType') {
+      const normalizedFt = normalizeIdNamesArray(val);
+      const hasUtility = normalizedFt.some(
+        (ft: any) => (ft.name || '').toLowerCase() === 'utility' || Number(ft.id) === FacilityType.Utility
+      );
+      next['facilityType'] = hasUtility
+        ? normalizedFt
+        : [...normalizedFt, { id: FacilityType.Utility, name: 'Utility' }];
+    }
     if (key === 'UtilityType' || key === 'utilityType') {
       next['utilityType'] = Array.isArray(val) && val.length > 0
         ? val.map((t: any) => ({ id: Number(t.id ?? t.Id ?? 1), name: t.name ?? t.Name ?? '' }))
@@ -3300,7 +3356,8 @@ export default function App() {
       { id: FacilityType.Door, name: 'Door' },
       { id: FacilityType.External, name: 'External' },
       { id: FacilityType.Light, name: 'Light' },
-      { id: FacilityType.Window, name: 'Window' }
+      { id: FacilityType.Window, name: 'Window' },
+      { id: FacilityType.Utility, name: 'Utility' }
     ],
     role: [
       { id: 1, name: 'Owner' },
@@ -3319,7 +3376,9 @@ export default function App() {
     setAppNamesDetailList((prev: any) => ({
       ...prev,
       applianceIdNames: (appliances || []).map(a => ({ id: a.id, name: a.applianceName })),
-      utilityIdNames: (utilities || []).map(u => ({ id: u.id, name: u.utilityName })),
+      utilityIdNames: (utilities && utilities.length > 0)
+        ? utilities.map(u => ({ id: u.id, name: u.utilityName }))
+        : (prev.utilityIdNames || []),
       cameraIdNames: (cameras || []).map(c => ({ id: c.id, name: c.cameraName })),
       lightIdNames: (lights || []).map(l => ({ id: l.id, name: l.lightName })),
       windowIdNames: (windows || []).map(w => ({ id: w.id, name: w.windowName })),
@@ -3337,16 +3396,17 @@ export default function App() {
     }));
   }, [allUsers, appliances, utilities, cameras, lights, windows, doors, externals, contactCategories, rooms, sections]);
 
-  const currentEmergencySeverity = React.useMemo<'none' | 'mild' | 'severe' | 'critical' | null>(() => {
+  const currentEmergencySeverity = React.useMemo<'mild' | 'severe' | 'critical' | null>(() => {
     if (!isLoggedIn) return null;
-    const emergencyItems = (devices || []).filter(
+    const activeEmergencyItems = (devices || []).filter(
       (d) =>
         d.type === 'utility' &&
+        (d.status === 'on' || d.status === 'active') &&
         resolveUtilityTypeId(d.utilityType, appNamesDetailList) === UtilityType.Emergency
     );
-    if (emergencyItems.length === 0) return null;
+    if (activeEmergencyItems.length === 0) return null;
     let maxCompId: number = UtilityComponent.EmergencyNone;
-    emergencyItems.forEach((d) => {
+    activeEmergencyItems.forEach((d) => {
       const compId = resolveUtilityComponentId(d.utilityComponent, appNamesDetailList);
       if (
         compId !== null &&
@@ -3359,7 +3419,7 @@ export default function App() {
     if (maxCompId >= UtilityComponent.EmergencyCritical) return 'critical';
     if (maxCompId === UtilityComponent.EmergencySevere) return 'severe';
     if (maxCompId === UtilityComponent.EmergencyMild) return 'mild';
-    return 'none';
+    return null;
   }, [isLoggedIn, devices, appNamesDetailList]);
 
   React.useEffect(() => {
@@ -3373,8 +3433,85 @@ export default function App() {
     };
   }, [currentEmergencySeverity]);
 
-  const isOwner = userProfile?.getUserDto?.role === 1 || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
-  const canSeeActions = isOwner || userProfile?.getUserDto?.role === 2 || userProfile?.getUserDto?.role === 3 || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
+  const isOwner = userProfile?.getUserDto?.role === Role.Owner || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
+  const isWifeOrChild = userProfile?.getUserDto?.role === Role.Wife || userProfile?.getUserDto?.role === Role.Child || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
+  const canSeeActions = isOwner || isWifeOrChild;
+  const canUpdateUtilityDevice = React.useCallback((device: Pick<Device, 'type' | 'utilityType'> | null | undefined): boolean => {
+    if (!device || device.type !== 'utility') return true;
+    if (isOwner) return true;
+    if (isWifeOrChild) {
+      return resolveUtilityTypeId(device.utilityType, appNamesDetailList) === UtilityType.Emergency;
+    }
+    return false;
+  }, [isOwner, isWifeOrChild, appNamesDetailList]);
+
+  const getNotificationIcon = React.useCallback((
+    kind?: string | null,
+    opts?: {
+      isActive?: boolean;
+      status?: string;
+      utilityType?: number | string | null;
+      value?: number;
+      roomIcon?: string;
+    }
+  ): React.ReactNode => {
+    const k = (kind || '').toString().trim().toLowerCase();
+    const isActive = opts?.isActive;
+    const status = (opts?.status || '').toString().toLowerCase();
+
+    switch (k) {
+      case 'appliance':
+        return <Power className={cn('h-4 w-4 shrink-0', isActive ? 'text-yellow-500' : 'text-muted-foreground')} />;
+      case 'camera':
+        return <Camera className={cn('h-4 w-4 shrink-0', isActive ? 'text-emerald-500' : 'text-muted-foreground')} />;
+      case 'door':
+        if (status === 'locked' || status === 'open-locked') return <Lock className="h-4 w-4 shrink-0 text-red-500" />;
+        if (status === 'open') return <DoorOpen className="h-4 w-4 shrink-0 text-emerald-500" />;
+        if (status === 'closed') return <DoorClosed className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        if (status === 'unlocked') return <Unlock className="h-4 w-4 shrink-0 text-yellow-500" />;
+        return <Lock className="h-4 w-4 shrink-0 text-blue-500" />;
+      case 'window':
+        if (status === 'locked') return <Lock className="h-4 w-4 shrink-0 text-red-500" />;
+        if (status === 'open') return <WindowIcon className="h-4 w-4 shrink-0 text-emerald-500" />;
+        return <WindowIcon className="h-4 w-4 shrink-0 text-cyan-500" />;
+      case 'light':
+        if (isActive === false || status === 'off' || opts?.value === 0) {
+          return <LightbulbOff className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        }
+        return <Lightbulb className="h-4 w-4 shrink-0 text-yellow-500" />;
+      case 'external':
+        return <Radio className={cn('h-4 w-4 shrink-0', isActive ? 'text-emerald-500' : 'text-muted-foreground')} />;
+      case 'utility': {
+        const ut = resolveUtilityTypeId(opts?.utilityType, appNamesDetailList);
+        if (ut === UtilityType.Water) return <Droplets className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-sky-500')} />;
+        if (ut === UtilityType.Gas) return <Flame className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-orange-500')} />;
+        if (ut === UtilityType.HVAC) return <Wind className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-cyan-500')} />;
+        if (ut === UtilityType.Telecommunication) return <Radio className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-indigo-500')} />;
+        if (ut === UtilityType.Irrigation) return <Sprout className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-emerald-500')} />;
+        if (ut === UtilityType.Emergency) return <ShieldAlert className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-rose-500')} />;
+        return <Zap className={cn('h-4 w-4 shrink-0', isActive === false ? 'text-muted-foreground' : 'text-yellow-500')} />;
+      }
+      case 'room': {
+        const RoomIc = opts?.roomIcon && iconMap[opts.roomIcon] ? iconMap[opts.roomIcon] : HomeIcon;
+        return <RoomIc className="h-4 w-4 shrink-0 text-teal-500" />;
+      }
+      case 'section':
+        return <Layers className="h-4 w-4 shrink-0 text-sky-500" />;
+      case 'hardware':
+        return <Cpu className="h-4 w-4 shrink-0 text-orange-500" />;
+      case 'action':
+        return <Play className="h-4 w-4 shrink-0 text-indigo-500" />;
+      case 'person':
+      case 'user':
+        return <UserIcon className="h-4 w-4 shrink-0 text-primary" />;
+      case 'contact':
+        return <Contact className="h-4 w-4 shrink-0 text-emerald-500" />;
+      case 'contactcategory':
+        return <Tag className="h-4 w-4 shrink-0 text-violet-500" />;
+      default:
+        return <Power className="h-4 w-4 shrink-0 text-primary" />;
+    }
+  }, [appNamesDetailList]);
 
   const getUserNameById = React.useCallback((userId: number | string | undefined | null) => {
     if (!userId) return null;
@@ -8308,9 +8445,13 @@ export default function App() {
     const roomName = currentRoomObj?.name || (rooms || []).find(r => r.id.toString() === roomId.toString())?.name || 'the room';
     if (successCount > 0) {
       addLogEntry('Door Security', `Locked ${successCount} unlocked door(s) in ${roomName}`);
-      toast.success(successCount === 1 ? `Locked 1 door in ${roomName}` : `Locked all ${successCount} doors in ${roomName}`);
+      toast.success(successCount === 1 ? `Locked 1 door in ${roomName}` : `Locked all ${successCount} doors in ${roomName}`, {
+        icon: getNotificationIcon('door', { status: 'locked' })
+      });
     } else if (lastError) {
-      toast.error(`Failed to lock door(s): ${lastError.message || 'Unknown error'}`);
+      toast.error(`Failed to lock door(s): ${lastError.message || 'Unknown error'}`, {
+        icon: getNotificationIcon('door', { status: 'locked' })
+      });
     }
   };
 
@@ -8363,11 +8504,16 @@ export default function App() {
         }
       });
       
+      const profileDisplayName = `${userProfile.getPersonDetailsDto?.firstName || ''} ${userProfile.getPersonDetailsDto?.lastName || ''}`.trim() || userProfile.getUserDto?.userName || 'Profile';
       addLogEntry('Profile Sync', 'Updated profile identity');
-      toast.success('Profile updated successfully');
+      toast.success(`${profileDisplayName} updated`, {
+        icon: getNotificationIcon('user')
+      });
       setProfileImageFile(null);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to update profile');
+      toast.error(err.message || 'Failed to update profile', {
+        icon: getNotificationIcon('user')
+      });
     }
   };
 
@@ -8452,15 +8598,20 @@ export default function App() {
           } else {
             refreshContactCategories();
           }
+          const addedCatName = newCategoryName;
           setNewCategoryName('');
           setNewCategoryDescription('');
           setNewCategoryIcon('UserCircle');
           setIsAddCategoryOpen(false);
-          toast.success("Category added successfully");
+          toast.success(`${addedCatName} created`, {
+            icon: getNotificationIcon('contactcategory')
+          });
         }
       } catch (err: any) {
         console.error("Failed to add category", err);
-        toast.error(`Failed to add category: ${err.message}`);
+        toast.error(`Failed to add category: ${err.message}`, {
+          icon: getNotificationIcon('contactcategory')
+        });
       }
     });
   };
@@ -8489,21 +8640,28 @@ export default function App() {
               ...payload
             } : cat));
           }
+          const updatedCatName = newCategoryName;
           setNewCategoryName('');
           setNewCategoryDescription('');
           setNewCategoryIcon('UserCircle');
           setIsEditCategoryOpen(false);
           setEditingCategory(null);
-          toast.success("Category updated successfully");
+          toast.success(`${updatedCatName} updated`, {
+            icon: getNotificationIcon('contactcategory')
+          });
         }
       } catch (err: any) {
         console.error("Failed to update category", err);
-        toast.error(`Failed to update category: ${err.message}`);
+        toast.error(`Failed to update category: ${err.message}`, {
+          icon: getNotificationIcon('contactcategory')
+        });
       }
     });
   };
 
   const handleDeleteCategory = (id: number) => {
+    const targetCat = (contactCategories || []).find(c => c.id === id);
+    const catName = targetCat?.name || 'Category';
     requestAuth(async () => {
       try {
         await apiFetch(`/ContactCategory/DeleteContactCategory?contactCategoryId=${id}`, {
@@ -8514,10 +8672,14 @@ export default function App() {
         if (otherCat) {
           setContacts(prev => prev.map(c => c.getContactCategoryDto.id === id ? { ...c, getContactCategoryDto: otherCat } : c));
         }
-        toast.success("Category deleted successfully");
+        toast.success(`${catName} deleted`, {
+          icon: getNotificationIcon('contactcategory')
+        });
       } catch (err: any) {
         console.error("Failed to delete category", err);
-        toast.error(`Failed to delete category: ${err.message}`);
+        toast.error(`Failed to delete category: ${err.message}`, {
+          icon: getNotificationIcon('contactcategory')
+        });
       }
     });
   };
@@ -8595,12 +8757,17 @@ export default function App() {
                 })),
               } : c));
             }
-            toast.success("Contact updated successfully");
+            const contactFullName = `${newContact.firstName} ${newContact.lastName}`.trim() || 'Contact';
+            toast.success(`${contactFullName} updated`, {
+              icon: getNotificationIcon('contact')
+            });
             setIsAddContactOpen(false);
           }
         } catch (err: any) {
           console.error("Failed to update contact", err);
-          toast.error(`Failed to update contact: ${err.message}`);
+          toast.error(`Failed to update contact: ${err.message}`, {
+            icon: getNotificationIcon('contact')
+          });
         } finally {
           setEditingContactId(null);
           setIsNewContactImageSelected(false);
@@ -8683,7 +8850,10 @@ export default function App() {
               };
               setContacts(prev => [...prev, serverContact]);
             }
-            toast.success('Contact created successfully!');
+            const createdContactName = `${newContact.firstName} ${newContact.lastName}`.trim() || 'Contact';
+            toast.success(`${createdContactName} created`, {
+              icon: getNotificationIcon('contact')
+            });
             setIsAddContactOpen(false);
           } else {
             // Fallback locally
@@ -8709,11 +8879,16 @@ export default function App() {
               })),
             };
             setContacts(prev => [...prev, contact]);
-            toast.success('Contact created locally!');
+            const createdContactName = `${newContact.firstName} ${newContact.lastName}`.trim() || 'Contact';
+            toast.success(`${createdContactName} created`, {
+              icon: getNotificationIcon('contact')
+            });
           }
         } catch (err: any) {
           console.error("Failed to create contact remotely", err);
-          toast.error(`Remote contact creation failed: ${err.message}`);
+          toast.error(`Remote contact creation failed: ${err.message}`, {
+            icon: getNotificationIcon('contact')
+          });
         } finally {
           setIsAddContactOpen(false);
           setNewContact({
@@ -8751,13 +8926,18 @@ export default function App() {
 
   const handleDeleteContact = () => {
     if (contactToDelete) {
+      const deletedContactName = `${contactToDelete.firstName || ''} ${contactToDelete.lastName || ''}`.trim() || 'Contact';
       requestAuth(async () => {
         try {
           await apiFetch(`/Contact/DeleteContact?contactId=${contactToDelete.id}`, { method: 'PUT' });
           setContacts(prev => prev.filter(c => c.id !== contactToDelete.id));
-          toast.success("Contact deleted successfully");
+          toast.success(`${deletedContactName} deleted`, {
+            icon: getNotificationIcon('contact')
+          });
         } catch (err: any) {
-          toast.error(`Error deleting contact: ${err.message}`);
+          toast.error(`Error deleting contact: ${err.message}`, {
+            icon: getNotificationIcon('contact')
+          });
         }
         setContactToDelete(null);
         setIsDeleteContactOpen(false);
@@ -8768,6 +8948,7 @@ export default function App() {
   const handleAddSection = () => {
     requestAuth(async () => {
       if (!newSectionName.trim()) return;
+      const createdSectionName = newSectionName.trim();
       try {
         const url = `/Section/CreateSection?SectionName=${encodeURIComponent(newSectionName)}&IsHidden=${newSectionIsHidden ? 'true' : 'false'}`;
         await apiFetch(url, {
@@ -8777,10 +8958,14 @@ export default function App() {
         setNewSectionType('general');
         setNewSectionIsHidden(false);
         setIsAddSectionOpen(false);
-        toast.success("Section added successfully");
+        toast.success(`${createdSectionName} created`, {
+          icon: getNotificationIcon('section')
+        });
       } catch (err: any) {
         console.error("Failed to add section", err);
-        toast.error(`Failed to add section: ${err.message}`);
+        toast.error(`Failed to add section: ${err.message}`, {
+          icon: getNotificationIcon('section')
+        });
       }
     });
   };
@@ -8905,6 +9090,13 @@ export default function App() {
     const handleToggle = async (id: string) => {
       let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `appliance-${id}` || x.id === `utility-${id}` || x.id === `light-${id}` || x.id === `camera-${id}` || x.id === `door-${id}` || x.id === `window-${id}` || x.id === `external-${id}`);
       if (!d) return;
+
+      if (d.type === 'utility' && !canUpdateUtilityDevice(d)) {
+        toast.error('Only Owner can update non-emergency utilities', {
+          icon: getNotificationIcon('utility', { utilityType: d.utilityType })
+        });
+        return;
+      }
 
       const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
 
@@ -9050,10 +9242,34 @@ export default function App() {
           }
         }
         
-        toast.success(`Device toggled successfully`);
+        let toggleMsg = `${d.name} updated`;
+        if (d.type === 'appliance') {
+          toggleMsg = `${d.name} turned ${nextActive ? 'On' : 'Off'}`;
+        } else if (d.type === 'camera') {
+          toggleMsg = `${d.name} is ${nextActive ? 'Live' : 'Disabled'}`;
+        } else if (d.type === 'door' || d.type === 'window') {
+          toggleMsg = `${d.name} is ${newStatus === 'locked' ? 'Locked' : 'Unlocked'}`;
+        } else if (d.type === 'external' as any) {
+          toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Disabled'}`;
+        } else if (d.type === 'light') {
+          toggleMsg = `${d.name} is ${nextActive ? 'On' : 'Off'}`;
+        } else if (d.type === 'utility') {
+          toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Inactive'}`;
+        }
+
+        toast.success(toggleMsg, {
+          icon: getNotificationIcon(d.type, {
+            isActive: nextActive,
+            status: newStatus,
+            utilityType: d.utilityType,
+            value: d.value
+          })
+        });
       } catch (err: any) {
         console.error("Failed to toggle device remotely", err);
-        toast.error(`Remote toggle failed: ${err.message}`);
+        toast.error(`Remote toggle failed: ${err.message}`, {
+          icon: getNotificationIcon(d.type, { utilityType: d.utilityType })
+        });
         // Revert states on failure
         setDevices(prevDevices);
         setLights(prevLights);
@@ -9070,6 +9286,12 @@ export default function App() {
       (x) => x.id === id || x.id === `utility-${id}` || x.id.split('-')[1] === id
     );
     if (!d || d.type !== 'utility') return;
+    if (!canUpdateUtilityDevice(d)) {
+      toast.error('You do not have permission to update this emergency utility', {
+        icon: getNotificationIcon('utility', { utilityType: d.utilityType })
+      });
+      return;
+    }
 
     const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
     const prevDevices = [...devices];
@@ -9114,6 +9336,8 @@ export default function App() {
       );
     }
 
+    const currentUtilActive = utilDto ? Boolean(utilDto.isActive) : (d.status === 'on' || d.status === 'active');
+
     try {
       const payload = {
         id: parseInt(rawId, 10),
@@ -9121,7 +9345,7 @@ export default function App() {
         utilityId: utilDto?.utilityId || d.utilityId || '',
         utilityType: resolvedTypeId,
         utilityComponent: nextComponentId,
-        isActive: utilDto ? Boolean(utilDto.isActive) : (d.status === 'on' || d.status === 'active'),
+        isActive: currentUtilActive,
         timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
         currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
         voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
@@ -9136,10 +9360,16 @@ export default function App() {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      toast.success(`${d.name} updated to ${formatEnumLabel(nextCompName)}`);
+      const rawCompLabel = formatEnumLabel(nextCompName);
+      const cleanLevel = rawCompLabel.replace(/^Emergency\s+/i, '').trim() || rawCompLabel;
+      toast.success(`${d.name} level is set to ${cleanLevel}`, {
+        icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
+      });
     } catch (err: any) {
       console.error('Failed to update utility component', err);
-      toast.error(`Failed to update emergency level: ${err.message}`);
+      toast.error(`Failed to update emergency level: ${err.message}`, {
+        icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
+      });
       setDevices(prevDevices);
       setUtilities(prevUtilities);
       setSelectedUtility(prevSelectedUtility);
@@ -9155,7 +9385,9 @@ export default function App() {
     const isCurrentlyLocked = d.status === 'locked' || d.status === 'open-locked';
 
     if ((action === 'open' || action === 'close') && isCurrentlyLocked) {
-      toast.error(`Cannot ${action} ${d.type} because it is locked`);
+      toast.error(`Cannot ${action} ${d.name} because it is locked`, {
+        icon: getNotificationIcon(d.type, { status: 'locked' })
+      });
       return;
     }
 
@@ -9183,10 +9415,22 @@ export default function App() {
           isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
         } : item));
       }
-      toast.success(`${d.type} ${action}ed successfully`);
+      const nextDoorStateLabel =
+        action === 'lock' ? 'Locked' :
+        action === 'unlock' ? 'Unlocked' :
+        action === 'open' ? 'Open' : 'Closed';
+      const nextDoorIconStatus =
+        action === 'lock' ? 'locked' :
+        action === 'unlock' ? 'unlocked' :
+        action === 'open' ? 'open' : 'closed';
+      toast.success(`${d.name} is ${nextDoorStateLabel}`, {
+        icon: getNotificationIcon(d.type, { status: nextDoorIconStatus })
+      });
     } catch (err: any) {
       console.error(`Failed to ${action} ${d.type} remotely`, err);
-      toast.error(`Remote action failed: ${err.message}`);
+      toast.error(`Remote action failed: ${err.message}`, {
+        icon: getNotificationIcon(d.type)
+      });
       return; 
     }
 
@@ -9253,9 +9497,17 @@ export default function App() {
             sectionId: resolveSectionId(lightDto?.sectionId, sections)
           })
         }).then(() => {
-          toast.success('Brightness updated remotely');
+          const finalLevel = d.value ?? value;
+          toast.success(
+            currentIsActive
+              ? `${d.name} brightness is set to ${finalLevel}%`
+              : `${d.name} is Off`,
+            { icon: getNotificationIcon('light', { isActive: currentIsActive, value: finalLevel }) }
+          );
         }).catch((err: any) => {
-          toast.error(`Remote slider update failed: ${err.message}`);
+          toast.error(`Remote slider update failed: ${err.message}`, {
+            icon: getNotificationIcon('light', { isActive: currentIsActive })
+          });
         });
 
         return currentDevices;
@@ -9264,6 +9516,15 @@ export default function App() {
   };
 
   const handleDeleteDevice = (id: string, type?: string) => {
+    const targetDev = devices.find(d => d.id === id);
+    const devType = type || targetDev?.type || 'device';
+    const devName = targetDev?.name || 'Item';
+    if (devType === 'utility' && !isOwner) {
+      toast.error('Only Owner can delete utilities', {
+        icon: getNotificationIcon('utility', { utilityType: targetDev?.utilityType })
+      });
+      return;
+    }
     const rawId = getRawId(id);
     requestAuth(async () => {
       let isSuccess = true;
@@ -9283,7 +9544,9 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("Failed to delete device remotely", err);
-        toast.error(`Remote deletion failed: ${err.message}`);
+        toast.error(`Remote deletion failed: ${err.message}`, {
+          icon: getNotificationIcon(devType, { utilityType: targetDev?.utilityType })
+        });
         isSuccess = false;
       }
       
@@ -9302,7 +9565,9 @@ export default function App() {
         } else if (type === 'light') {
           setLights(prev => prev.filter(l => l.id.toString() !== rawId));
         }
-        toast.success("Device deleted successfully");
+        toast.success(`${devName} deleted`, {
+          icon: getNotificationIcon(devType, { utilityType: targetDev?.utilityType })
+        });
       }
     });
   };
@@ -9310,6 +9575,12 @@ export default function App() {
   const handleEditDevice = (id: string, type?: string) => {
     const device = devices.find(d => d.id === id && (type ? d.type === type : true));
     if (device) {
+      if (device.type === 'utility' && !isOwner) {
+        toast.error('Only Owner can edit utilities', {
+          icon: getNotificationIcon('utility', { utilityType: device.utilityType })
+        });
+        return;
+      }
       let finalDevice = { ...device };
       const rawId = getRawId(device.id);
       if (device.type === 'appliance') {
@@ -9760,6 +10031,14 @@ export default function App() {
   };
 
   const handleSaveDevice = () => {
+    if (editingDevice?.type === 'utility' && !isOwner) {
+      toast.error('Only Owner can edit utilities', {
+        icon: getNotificationIcon('utility', { utilityType: editingDevice.utilityType })
+      });
+      setIsEditDeviceOpen(false);
+      setEditingDevice(null);
+      return;
+    }
     requestAuth(async () => {
       if (editingDevice && editingDevice.id) {
         let isSuccess = true;
@@ -9980,9 +10259,22 @@ export default function App() {
               sectionId: finalSectionId
             } : l));
           }
+          const updatedDeviceName = editingDevice.name || 'Item';
+          const updatedDeviceType = editingDevice.type;
+          const updatedDeviceActive = editingDevice.status === 'on' || editingDevice.status === 'active' || editingDevice.status === 'open';
+          const updatedUtilityType = editingDevice.utilityType;
+          const updatedDeviceStatus = editingDevice.status;
+          const updatedDeviceValue = editingDevice.value;
           setIsEditDeviceOpen(false);
           setEditingDevice(null);
-          toast.success("Device updated successfully");
+          toast.success(`${updatedDeviceName} updated`, {
+            icon: getNotificationIcon(updatedDeviceType, {
+              isActive: updatedDeviceActive,
+              status: updatedDeviceStatus,
+              utilityType: updatedUtilityType,
+              value: updatedDeviceValue
+            })
+          });
         }
       }
     });
@@ -10010,20 +10302,29 @@ export default function App() {
               isHidden: editingRoom.isHidden || false
             })
           });
+          const updatedRoomName = editingRoom.name || 'Room';
+          const updatedRoomIcon = editingRoom.icon;
           setRooms((prev: any) => prev.map((r: any) => r.id === editingRoom.id ? { ...r, ...editingRoom } as Room : r));
           setUserRooms((prev: any) => prev.map((r: any) => r.id === editingRoom.id ? { ...r, ...editingRoom } as Room : r));
           setIsEditRoomOpen(false);
           setEditingRoom(null);
-          toast.success("Room updated successfully");
+          toast.success(`${updatedRoomName} updated`, {
+            icon: getNotificationIcon('room', { roomIcon: updatedRoomIcon })
+          });
         } catch (err: any) {
           console.error("Failed to update room", err);
-          toast.error(`Failed to update room: ${err.message}`);
+          toast.error(`Failed to update room: ${err.message}`, {
+            icon: getNotificationIcon('room', { roomIcon: editingRoom.icon })
+          });
         }
       }
     });
   };
 
   const handleDeleteRoom = (id: string) => {
+    const targetRoom = (rooms || []).find((r: any) => r.id === id) || (userRooms || []).find((r: any) => r.id === id);
+    const deletedRoomName = targetRoom?.name || 'Room';
+    const deletedRoomIcon = targetRoom?.icon;
     requestAuth(async () => {
       try {
         await apiFetch(`/Room/DeleteRoom?roomId=${id}`, { method: 'PUT' });
@@ -10032,10 +10333,14 @@ export default function App() {
         if (activeView === `room-${id}`) {
           setActiveView('facility-rooms');
         }
-        toast.success("Room deleted successfully");
+        toast.success(`${deletedRoomName} deleted`, {
+          icon: getNotificationIcon('room', { roomIcon: deletedRoomIcon })
+        });
       } catch (err: any) {
         console.error("Failed to delete room", err);
-        toast.error(`Failed to delete room: ${err.message}`);
+        toast.error(`Failed to delete room: ${err.message}`, {
+          icon: getNotificationIcon('room', { roomIcon: deletedRoomIcon })
+        });
       }
     });
   };
@@ -10068,6 +10373,15 @@ export default function App() {
       else if (facilityType === 'cameras') inferredType = 'camera';
     }
 
+    if (inferredType === 'utility' && !isOwner) {
+      toast.error('Only Owner can create utilities', {
+        icon: getNotificationIcon('utility', { utilityType: newDevice.utilityType })
+      });
+      return;
+    }
+
+    const createdItemName = newDevice.name;
+
     requestAuth(async () => {
       try {
         if (inferredType === 'camera') {
@@ -10086,7 +10400,9 @@ export default function App() {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          toast.success('Camera added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('camera', { isActive: false })
+          }); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'appliance') {
           const appType = newDevice.applianceType || 1;
@@ -10101,7 +10417,9 @@ export default function App() {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          toast.success('Appliance added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('appliance', { isActive: false })
+          }); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'utility') {
           const utilTypeId = resolveUtilityTypeId(newDevice.utilityType, appNamesDetailList);
@@ -10135,7 +10453,9 @@ export default function App() {
               return [...prev, mapped];
             });
           }
-          toast.success('Utility added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('utility', { utilityType: utilTypeId, isActive: false })
+          }); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'door') {
           const payload = {
@@ -10154,7 +10474,9 @@ export default function App() {
             method: 'POST', 
             body: JSON.stringify(payload)
           });
-          toast.success('Door added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('door', { status: 'locked' })
+          }); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'window') {
           const payload = {
@@ -10173,7 +10495,9 @@ export default function App() {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          toast.success('Window added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('window', { status: 'locked' })
+          }); 
           setIsAddDeviceOpen(false);
         } else if (inferredType === 'light') {
           const payload = {
@@ -10187,7 +10511,9 @@ export default function App() {
             method: 'POST',
             body: JSON.stringify(payload)
           });
-          toast.success('Light added successfully'); 
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon('light', { isActive: false })
+          }); 
           setIsAddDeviceOpen(false);
         } else {
           // Fallback for other generic types mock locally
@@ -10204,7 +10530,9 @@ export default function App() {
             powerUsage: 0
           };
           setDevices(prev => [...prev, device]);
-          toast.success('Device added locally');
+          toast.success(`${createdItemName} created`, {
+            icon: getNotificationIcon(inferredType, { isActive: false })
+          });
         }
         
         setIsAddDeviceOpen(false);
@@ -10228,7 +10556,9 @@ export default function App() {
           minWaterLevel: 0
         });
       } catch (err: any) {
-        toast.error(err.message || 'Error occurred while creating the device');
+        toast.error(err.message || 'Error occurred while creating the device', {
+          icon: getNotificationIcon(inferredType, { utilityType: newDevice.utilityType })
+        });
       }
     });
   };
@@ -10236,6 +10566,8 @@ export default function App() {
   const handleAddRoom = () => {
     requestAuth(async () => {
       if (!newRoom.name) return;
+      const createdRoomName = newRoom.name;
+      const createdRoomIcon = newRoom.icon || 'Sofa';
 
       try {
         await apiFetch('/Room/CreateRoom', {
@@ -10251,10 +10583,14 @@ export default function App() {
 
         setIsAddRoomOpen(false);
         setNewRoom({ name: '', section: '', icon: 'Sofa' });
-        toast.success("Room created successfully");
+        toast.success(`${createdRoomName} created`, {
+          icon: getNotificationIcon('room', { roomIcon: createdRoomIcon })
+        });
       } catch (err: any) {
         console.error("Failed to create room", err);
-        toast.error(`Failed to create room: ${err.message}`);
+        toast.error(`Failed to create room: ${err.message}`, {
+          icon: getNotificationIcon('room', { roomIcon: createdRoomIcon })
+        });
       }
     });
   };
@@ -12427,6 +12763,7 @@ export default function App() {
                         onUtilityComponentChange={handleUtilityComponentChange}
                         emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
                         countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
+                        canUpdate={canUpdateUtilityDevice(device)}
                       />
                     ))}
                   </div>
@@ -12726,10 +13063,15 @@ export default function App() {
                                 method: 'POST',
                                 body: ''
                               });
-                              toast.success(`Action updated successfully!`);
+                              const nextActionState = !originalActive;
+                              toast.success(`${action.actionName} is ${nextActionState ? 'Active' : 'Disabled'}`, {
+                                icon: getNotificationIcon('action', { isActive: nextActionState })
+                              });
                             } catch (err: any) {
                               console.error("Failed to activate/deactivate action", err);
-                              toast.error(`Failed to update action: ${err.message}`);
+                              toast.error(`Failed to update action: ${err.message}`, {
+                                icon: getNotificationIcon('action')
+                              });
                               // Revert on failure
                               setActions(prev => prev.map(a => a.id === action.id ? { ...a, actionActive: originalActive } : a));
                             }
@@ -13079,9 +13421,13 @@ export default function App() {
                                 await apiFetch('/External/UpdateExternal', { method: 'PUT', body: JSON.stringify(dto) });
                                 setExternals(prev => prev.map(e => e.id === ext.id ? { ...e, isActive: checked } : e));
                                 addLogEntry('Hardware Security', `${ext.externalName} functional state set to ${checked ? 'enabled' : 'disabled'}`);
-                                toast.success(`External device updated successfully`);
+                                toast.success(`${ext.externalName} is ${checked ? 'Active' : 'Disabled'}`, {
+                                  icon: getNotificationIcon('external', { isActive: checked })
+                                });
                               } catch(err: any) {
-                                toast.error(`Failed to update external: ${err.message}`);
+                                toast.error(`Failed to update external: ${err.message}`, {
+                                  icon: getNotificationIcon('external')
+                                });
                               }
                             }}
                             onClick={(e) => e.stopPropagation()}
@@ -13264,6 +13610,7 @@ export default function App() {
                               onUtilityComponentChange={handleUtilityComponentChange}
                               emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
                               countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
+                              canUpdate={canUpdateUtilityDevice(device)}
                             />
                           ))}
                           {sectionDevices.length === 0 && (
@@ -13565,7 +13912,7 @@ export default function App() {
             const getGroupHeading = (typeId: number): string => {
               switch (typeId) {
                 case UtilityType.Electricity:
-                  return 'Power';
+                  return 'Electricity';
                 case UtilityType.Telecommunication:
                   return 'Telecommunications';
                 case UtilityType.Water:
@@ -13638,6 +13985,7 @@ export default function App() {
                                 onUtilityComponentChange={handleUtilityComponentChange}
                                 emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
                                 countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
+                                canUpdate={canUpdateUtilityDevice(device)}
                               />
                             ))}
                           </div>
@@ -13682,6 +14030,7 @@ export default function App() {
                           onUtilityComponentChange={handleUtilityComponentChange}
                           emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
                           countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
+                          canUpdate={canUpdateUtilityDevice(device)}
                         />
                       ))}
                     </div>
@@ -13712,6 +14061,7 @@ export default function App() {
                   onDelete={handleDeleteDevice}
                   onEdit={handleEditDevice}
                   onClick={handleDeviceClick}
+                  canUpdate={canUpdateUtilityDevice(device)}
                 />
               ))}
             </div>
@@ -15072,7 +15422,7 @@ export default function App() {
   if (!isLoggedIn) {
     return (
       <>
-        <Toaster position="bottom-right" richColors />
+        <Toaster position="bottom-right" theme={theme} duration={4000} />
         <LoginScreen 
           onLoginSuccess={handleLoginSuccess} 
           theme={theme}
@@ -15093,7 +15443,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans relative">
-      <Toaster position="bottom-right" richColors />
+      <Toaster position="bottom-right" theme={theme} duration={4000} />
       
       {/* Backdrop overlay for mobile & tablet slide-over sidebar */}
       {!isSidebarCollapsed && (
@@ -15150,22 +15500,8 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            {/* Muted div with rounded edges containing theme toggle, microphone button, and chat button */}
-            <div className="flex items-center gap-2.5 bg-muted/80 hover:bg-muted/90 p-2 px-3 rounded-full border border-border/50 shadow-2xs transition-all">
-              {/* Theme Toggle Button */}
-              <div 
-                onClick={toggleTheme}
-                className="flex items-center bg-background/90 hover:bg-background border border-border/60 rounded-full p-1 cursor-pointer transition-all shadow-2xs gap-0.5 select-none"
-                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              >
-                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'light' ? "bg-amber-500 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
-                  <Sun className="h-3.5 w-3.5" />
-                </div>
-                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'dark' ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
-                  <Moon className="h-3.5 w-3.5" />
-                </div>
-              </div>
-
+            {/* Muted div with rounded edges containing Friday assistant, chat button, theme toggle, and logout button */}
+            <div className="flex items-center gap-2 sm:gap-2.5 bg-muted/80 hover:bg-muted/90 p-1.5 sm:p-2 px-2.5 sm:px-3 rounded-full border border-border/50 shadow-2xs transition-all">
               {/* Microphone Button */}
               <button 
                 className={cn(
@@ -15199,24 +15535,38 @@ export default function App() {
                 <MessageSquare className="h-4 w-4" />
                 <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
               </button>
-            </div>
 
-            {/* Logout Button */}
-            <motion.button 
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
-              className="p-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 transition-colors rounded-xl border-0 outline-none flex items-center justify-center cursor-pointer font-sans group relative"
-              onClick={handleLogout}
-              title="Logout"
-            >
-              <motion.div
-                animate={{ x: [0, 2.5, 0] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-                className="flex items-center justify-center"
+              {/* Theme Toggle Button */}
+              <div 
+                onClick={toggleTheme}
+                className="flex items-center bg-background/90 hover:bg-background border border-border/60 rounded-full p-1 cursor-pointer transition-all shadow-2xs gap-0.5 select-none"
+                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
               >
-                <LogOut className="h-5 w-5 group-hover:translate-x-0.5 group-hover:-rotate-6 transition-transform duration-200" />
-              </motion.div>
-            </motion.button>
+                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'light' ? "bg-amber-500 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
+                  <Sun className="h-3.5 w-3.5" />
+                </div>
+                <div className={cn("flex items-center justify-center p-1 rounded-full transition-all", theme === 'dark' ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-500 dark:text-zinc-400 hover:text-foreground")}>
+                  <Moon className="h-3.5 w-3.5" />
+                </div>
+              </div>
+
+              {/* Logout Button */}
+              <motion.button 
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.92 }}
+                className="p-1.5 bg-background/90 hover:bg-rose-500/10 text-rose-500 hover:text-rose-600 border border-border/50 shadow-2xs transition-colors rounded-full outline-none flex items-center justify-center cursor-pointer font-sans group relative"
+                onClick={handleLogout}
+                title="Logout"
+              >
+                <motion.div
+                  animate={{ x: [0, 2.5, 0] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                  className="flex items-center justify-center"
+                >
+                  <LogOut className="h-4 w-4 group-hover:translate-x-0.5 group-hover:-rotate-6 transition-transform duration-200" />
+                </motion.div>
+              </motion.button>
+            </div>
           </div>
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto relative">
@@ -15911,10 +16261,14 @@ export default function App() {
                     await apiFetch(url, { method: 'PUT' });
                     setSections((prev: any) => prev.map((s: any) => s.id.toString() === editingSection.id.toString() ? mapSection({ ...s, name: editingSection.name!, isHidden: editingSection.isHidden }) : s));
                     setIsEditSectionOpen(false);
-                    toast.success("Section updated successfully");
+                    toast.success(`${editingSection.name} updated`, {
+                      icon: getNotificationIcon('section')
+                    });
                   } catch (err: any) {
                     console.error("Failed to update section", err);
-                    toast.error(`Failed to update section: ${err.message}`);
+                    toast.error(`Failed to update section: ${err.message}`, {
+                      icon: getNotificationIcon('section')
+                    });
                   }
                 });
               }
@@ -16093,31 +16447,44 @@ export default function App() {
                      tokenCode: authCodeData.token,
                      authorizationCode: authCodeData.newAuthorizationCode
                   };
+                  const targetUser = (allUsers || []).find(u => u.id === pendingUserAction.userId || u.getUserDto?.id === pendingUserAction.userId);
+                  const targetUserName = targetUser
+                    ? (`${targetUser.getPersonDetailsDto?.firstName || ''} ${targetUser.getPersonDetailsDto?.lastName || ''}`.trim() || targetUser.getUserDto?.userName || 'User')
+                    : 'User';
                   try {
                     if (pendingUserAction.type === 'delete') {
                       await apiFetch(`/Person/DeletePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
                       setAllUsers(prev => prev.filter(u => u.id !== pendingUserAction.userId));
-                      toast.success("User deleted safely");
+                      toast.success(`${targetUserName} deleted`, {
+                        icon: getNotificationIcon('user')
+                      });
                     } else if (pendingUserAction.type === 'disable' || pendingUserAction.type === 'toggle-disable') {
                       await apiFetch(`/Person/DisablePerson?personId=${pendingUserAction.userId}`, { method: 'PUT' });
+                      const nextDisabled = !(targetUser?.disabled);
                       setAllUsers(prev => prev.map(u => u.id === pendingUserAction.userId ? { 
                         ...u, 
                         disabled: !u.disabled, 
                         getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: !u.getPersonDetailsDto.disabled } 
                       } : u));
-                      toast.success(`User status updated via API`);
+                      toast.success(`${targetUserName} is ${nextDisabled ? 'Inactive' : 'Active'}`, {
+                        icon: getNotificationIcon('user')
+                      });
                     } else if (pendingUserAction.type === 'delete-address') {
                       setUserProfile(p => ({
                         ...p,
                         getPersonDetailsDto: { ...p.getPersonDetailsDto, getAddressDtos: (p.getPersonDetailsDto.getAddressDtos || []).filter((_, i) => i !== pendingUserAction.index) }
                       }));
-                      toast.success("Address removed locally");
+                      toast.success("Address removed locally", {
+                        icon: getNotificationIcon('user')
+                      });
                     } else if (pendingUserAction.type === 'delete-contact') {
                       setUserProfile(p => ({
                         ...p,
                         getPersonDetailsDto: { ...p.getPersonDetailsDto, getContactDetailsDtos: (p.getPersonDetailsDto.getContactDetailsDtos || []).filter((_, i) => i !== pendingUserAction.index) }
                       }));
-                      toast.success("Contact removed locally");
+                      toast.success("Contact removed locally", {
+                        icon: getNotificationIcon('contact')
+                      });
                     } else if (pendingUserAction.type === 'update-role' && pendingUserAction.targetRole) {
                       const targetRole = pendingUserAction.targetRole;
                       await apiFetch('/User/UpdateUserRole', {
@@ -16132,11 +16499,15 @@ export default function App() {
                         ...u,
                         getUserDto: { ...u.getUserDto, role: targetRole, roleName: Role[targetRole] }
                       } : u));
-                      toast.success("Role updated successfully");
+                      toast.success(`${targetUserName} role set to ${Role[targetRole]}`, {
+                        icon: getNotificationIcon('user')
+                      });
                     }
                   } catch (err: any) {
                     console.error("Action error", err);
-                    toast.error(`Error: ${err.message}`);
+                    toast.error(`Error: ${err.message}`, {
+                      icon: getNotificationIcon('user')
+                    });
                     return;
                   }
                   setPendingUserAction(null);
@@ -16318,14 +16689,21 @@ export default function App() {
                   } catch (reloadErr) {
                     console.error("Failed to reload members after creation", reloadErr);
                   }
+                  const createdUserName = `${newPerson.createPersonDetailsDto.firstName} ${newPerson.createPersonDetailsDto.lastName}`.trim() || newPerson.createUserDto.userName || 'Member';
                   setIsAddPersonOpen(false);
-                  toast.success("Member created successfully");
+                  toast.success(`${createdUserName} created`, {
+                    icon: getNotificationIcon('user')
+                  });
                 } else {
-                  toast.error(response?.message || "Failed to create member");
+                  toast.error(response?.message || "Failed to create member", {
+                    icon: getNotificationIcon('user')
+                  });
                 }
               } catch (err: any) {
                 console.error("Failed to create user", err);
-                toast.error(err.message || "Failed to create user");
+                toast.error(err.message || "Failed to create user", {
+                  icon: getNotificationIcon('user')
+                });
               }
             }} className="bg-primary text-primary-foreground flex items-center gap-2">
               <UserPlus className="h-4 w-4" />
@@ -16381,6 +16759,10 @@ export default function App() {
                       role: targetRole
                     })
                   });
+                  const matchedPerson = (allUsers || []).find(u => u.getUserDto?.id === updateUserRoleData.id);
+                  const roleTargetName = matchedPerson
+                    ? (`${matchedPerson.getPersonDetailsDto?.firstName || ''} ${matchedPerson.getPersonDetailsDto?.lastName || ''}`.trim() || updateUserRoleData.userName || 'User')
+                    : (updateUserRoleData.userName || 'User');
                   setAllUsers(prev => prev.map(u => u.getUserDto.id === updateUserRoleData.id ? {
                     ...u,
                     getUserDto: {
@@ -16389,12 +16771,16 @@ export default function App() {
                       roleName: Role[targetRole]
                     }
                   } : u));
-                  toast.success("User role updated successfully");
+                  toast.success(`${roleTargetName} role set to ${Role[targetRole]}`, {
+                    icon: getNotificationIcon('user')
+                  });
                   setIsEditPersonRoleOpen(false);
                   setIsViewPersonDetailsOpen(false);
                 } catch (err: any) {
                   console.error("Failed to update user role", err);
-                  toast.error(`Failed to update role: ${err.message}`);
+                  toast.error(`Failed to update role: ${err.message}`, {
+                    icon: getNotificationIcon('user')
+                  });
                 }
               });
             }} className="bg-transparent border-2 border-primary text-foreground dark:text-zinc-100 hover:bg-primary/5 flex items-center gap-2">
@@ -16452,16 +16838,21 @@ export default function App() {
                               const pId = viewingPerson.id;
                               await apiFetch(`/Person/DisablePerson?personId=${pId}`, { method: 'PUT' });
                               const nextDisabled = !viewingPerson.disabled;
+                              const viewingName = `${viewingPerson.getPersonDetailsDto?.firstName || ''} ${viewingPerson.getPersonDetailsDto?.lastName || ''}`.trim() || viewingPerson.getUserDto?.userName || 'User';
                               setAllUsers(prev => prev.map(u => u.id === viewingPerson.id ? { 
                                 ...u, 
                                 disabled: nextDisabled, 
                                 getPersonDetailsDto: { ...u.getPersonDetailsDto, disabled: nextDisabled } 
                               } : u));
                               setIsViewPersonDetailsOpen(false);
-                              toast.success(`User status updated successfully`);
+                              toast.success(`${viewingName} is ${nextDisabled ? 'Inactive' : 'Active'}`, {
+                                icon: getNotificationIcon('user')
+                              });
                             } catch (err: any) {
                               console.error("Failed to disable person", err);
-                              toast.error(`Failed to update status: ${err.message}`);
+                              toast.error(`Failed to update status: ${err.message}`, {
+                                icon: getNotificationIcon('user')
+                              });
                             }
                           });
                         }
@@ -16478,13 +16869,18 @@ export default function App() {
                           requestAuth(async () => {
                             try {
                               const pId = viewingPerson.id;
+                              const viewingName = `${viewingPerson.getPersonDetailsDto?.firstName || ''} ${viewingPerson.getPersonDetailsDto?.lastName || ''}`.trim() || viewingPerson.getUserDto?.userName || 'User';
                               await apiFetch(`/Person/DeletePerson?personId=${pId}`, { method: 'PUT' });
                               setAllUsers(prev => prev.filter(u => u.id !== viewingPerson.id));
                               setIsViewPersonDetailsOpen(false);
-                              toast.success("User deleted successfully");
+                              toast.success(`${viewingName} deleted`, {
+                                icon: getNotificationIcon('user')
+                              });
                             } catch (err: any) {
                               console.error("Failed to delete person", err);
-                              toast.error(`Deletion failed: ${err.message}`);
+                              toast.error(`Deletion failed: ${err.message}`, {
+                                icon: getNotificationIcon('user')
+                              });
                             }
                           });
                         }
@@ -16827,9 +17223,14 @@ export default function App() {
                               await apiFetch(`/Contact/DeleteContactDetails?contactId=${editingContactId}&contactDetailId=${detailId}`, { method: 'PUT' });
                               const contactDetails = newContact.contactDetails.filter((_, i) => i !== idx);
                               setNewContact(prev => ({ ...prev, contactDetails }));
-                              toast.success('Contact detail deleted successfully');
+                              const contactDisplay = `${newContact.firstName} ${newContact.lastName}`.trim() || 'Contact';
+                              toast.success(`${contactDisplay} detail deleted`, {
+                                icon: getNotificationIcon('contact')
+                              });
                             } catch (err: any) {
-                              toast.error(`Error deleting contact detail: ${err.message}`);
+                              toast.error(`Error deleting contact detail: ${err.message}`, {
+                                icon: getNotificationIcon('contact')
+                              });
                             }
                           });
                         } else {
@@ -16902,9 +17303,14 @@ export default function App() {
                               await apiFetch(`/Contact/DeleteContactAddress?contactId=${editingContactId}&contactAddressId=${addrId}`, { method: 'PUT' });
                               const address = newContact.address.filter((_, i) => i !== idx);
                               setNewContact(prev => ({ ...prev, address }));
-                              toast.success('Contact address deleted successfully');
+                              const contactDisplay = `${newContact.firstName} ${newContact.lastName}`.trim() || 'Contact';
+                              toast.success(`${contactDisplay} address deleted`, {
+                                icon: getNotificationIcon('contact')
+                              });
                             } catch (err: any) {
-                              toast.error(`Error deleting contact address: ${err.message}`);
+                              toast.error(`Error deleting contact address: ${err.message}`, {
+                                icon: getNotificationIcon('contact')
+                              });
                             }
                           });
                         } else {
@@ -17320,7 +17726,7 @@ export default function App() {
       </Dialog>
 
       {/* Edit Device Dialog */}
-      <Dialog open={isEditDeviceOpen} onOpenChange={setIsEditDeviceOpen}>
+      <Dialog open={isEditDeviceOpen && !(editingDevice?.type === 'utility' && !isOwner)} onOpenChange={setIsEditDeviceOpen}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
@@ -17562,75 +17968,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {(currentTypeId === UtilityType.Electricity || currentTypeId === UtilityType.HVAC) && (
-                      <div className="space-y-3 pt-2 border-t">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 block">
-                          Power & Electrical Telemetry
-                        </span>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="grid gap-1.5">
-                            <Label htmlFor="edit-util-current" className="text-xs">Current Level (A)</Label>
-                            <Input
-                              autoComplete="off"
-                              id="edit-util-current"
-                              type="number"
-                              step="any"
-                              placeholder="0"
-                              value={editingDevice.currentLevel !== undefined && editingDevice.currentLevel !== null ? editingDevice.currentLevel : ''}
-                              onChange={(e) => setEditingDevice({
-                                ...editingDevice,
-                                currentLevel: e.target.value === '' ? null : parseFloat(e.target.value)
-                              })}
-                            />
-                          </div>
-                          <div className="grid gap-1.5">
-                            <Label htmlFor="edit-util-voltage" className="text-xs">Voltage Level (V)</Label>
-                            <Input
-                              autoComplete="off"
-                              id="edit-util-voltage"
-                              type="number"
-                              step="any"
-                              placeholder="0"
-                              value={editingDevice.voltageLevel !== undefined && editingDevice.voltageLevel !== null ? editingDevice.voltageLevel : ''}
-                              onChange={(e) => setEditingDevice({
-                                ...editingDevice,
-                                voltageLevel: e.target.value === '' ? null : parseFloat(e.target.value)
-                              })}
-                            />
-                          </div>
-                          <div className="grid gap-1.5">
-                            <Label htmlFor="edit-util-power" className="text-xs">Power Consumption (W)</Label>
-                            <Input
-                              autoComplete="off"
-                              id="edit-util-power"
-                              type="number"
-                              step="any"
-                              placeholder="0"
-                              value={editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? editingDevice.powerConsumption : ''}
-                              onChange={(e) => setEditingDevice({
-                                ...editingDevice,
-                                powerConsumption: e.target.value === '' ? null : parseFloat(e.target.value)
-                              })}
-                            />
-                          </div>
-                          <div className="grid gap-1.5">
-                            <Label htmlFor="edit-util-power-today" className="text-xs">Today (kWh)</Label>
-                            <Input
-                              autoComplete="off"
-                              id="edit-util-power-today"
-                              type="number"
-                              step="any"
-                              placeholder="0"
-                              value={editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? editingDevice.powerConsumptionToday : ''}
-                              onChange={(e) => setEditingDevice({
-                                ...editingDevice,
-                                powerConsumptionToday: e.target.value === '' ? null : parseFloat(e.target.value)
-                              })}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* Power & Electrical Telemetry fields hidden from edit UI while preserving values in UpdateUtility payload */}
 
                     {currentTypeId === UtilityType.Water && (
                       <div className="space-y-3 pt-2 border-t">
@@ -18504,13 +18842,18 @@ export default function App() {
                     })
                   });
                   if (res && res.data) {
+                    const createdHwName = hardwareForm.hardwareName || 'Hardware';
                     setHardwares(prev => [...prev, res.data]);
                     setIsAddHardwareOpen(false);
-                    toast.success("Hardware created successfully");
+                    toast.success(`${createdHwName} created`, {
+                      icon: getNotificationIcon('hardware')
+                    });
                   }
                 } catch (err: any) {
                   console.error("Failed to create hardware", err);
-                  toast.error(`Creation failed: ${err.message}`);
+                  toast.error(`Creation failed: ${err.message}`, {
+                    icon: getNotificationIcon('hardware')
+                  });
                 }
               });
             }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700"><PlusCircle className="mr-2 h-4 w-4" /> Add Hardware</Button>
@@ -18875,7 +19218,9 @@ export default function App() {
 
                 setIsEditHardwareOpen(false);
                 addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
-                toast.success('Hardware updated successfully');
+                toast.success(`${updateDto.hardwareName} updated`, {
+                  icon: getNotificationIcon('hardware')
+                });
               });
             }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
               <CheckCheck className="mr-2 h-4 w-4" />
@@ -19040,12 +19385,17 @@ export default function App() {
                       method: 'POST',
                       body: JSON.stringify(payload)
                     });
-                    toast.success('External device added successfully!');
+                    const createdExtName = externalForm.externalName || 'External';
+                    toast.success(`${createdExtName} created`, {
+                      icon: getNotificationIcon('external', { isActive: false })
+                    });
                     setIsAddExternalOpen(false);
                     addLogEntry('Window Control', `Added Boundary Device: ${externalForm.externalName}`);
                     setExternalForm({});
                   } catch (err: any) {
-                    toast.error(`Error adding external device: ${err.message}`);
+                    toast.error(`Error adding external device: ${err.message}`, {
+                      icon: getNotificationIcon('external')
+                    });
                   }
                 });
               }}
@@ -19085,14 +19435,19 @@ export default function App() {
                   onClick={() => requestAuth(async () => {
                     try {
                       if (selectedExternal) {
+                        const removedExtName = selectedExternal.externalName || 'External';
                         await apiFetch(`/External/DeleteExternal?externalId=${selectedExternal.id}`, { method: 'PUT' });
                         setExternals(prev => prev.filter(e => e.id !== selectedExternal.id));
                         setIsViewExternalOpen(false);
                         addLogEntry('Hardware Security', `Removed external device: ${selectedExternal.externalName}`);
-                        toast.success('External device removed successfully');
+                        toast.success(`${removedExtName} deleted`, {
+                          icon: getNotificationIcon('external')
+                        });
                       }
                     } catch (err: any) {
-                      toast.error(`Error deleting external device: ${err.message}`);
+                      toast.error(`Error deleting external device: ${err.message}`, {
+                        icon: getNotificationIcon('external')
+                      });
                     }
                   })}
                 >
@@ -19362,9 +19717,13 @@ export default function App() {
                     section: externalForm.section
                   } : item));
                   setIsEditExternalOpen(false);
-                  toast.success('External device updated successfully!');
+                  toast.success(`${externalForm.externalName} updated`, {
+                    icon: getNotificationIcon('external', { isActive: externalForm.isActive !== false })
+                  });
                 } catch (err: any) {
-                  toast.error(`Failed to update external device: ${err.message}`);
+                  toast.error(`Failed to update external device: ${err.message}`, {
+                    icon: getNotificationIcon('external')
+                  });
                 }
               });
             }} className="bg-black text-white hover:bg-black/90 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:border dark:border-zinc-700">
@@ -19399,7 +19758,7 @@ export default function App() {
             return (
               <div className="flex flex-col h-full bg-background relative overflow-hidden">
                 {/* Header Section */}
-                <div data-app-header="true" className="relative z-20 flex items-center justify-between p-5 border-b bg-muted/30 shrink-0 transition-shadow duration-300">
+                <div className="flex items-center justify-between p-5 border-b bg-muted/30 shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-primary/10 rounded-lg text-primary">
                       <Camera className="h-5 w-5" />
@@ -20440,13 +20799,18 @@ export default function App() {
                     if (viewingSection) {
                       requestAuth(async () => {
                         try {
+                          const deletedSectionName = viewingSection.name || 'Section';
                           await apiFetch(`/Section/DeleteSection?sectionId=${viewingSection.id}`, { method: 'PUT' });
                           setSections((prev: any) => prev.filter((s: any) => s.id !== viewingSection.id));
                           setIsViewSectionOpen(false);
-                          toast.success("Section deleted successfully");
+                          toast.success(`${deletedSectionName} deleted`, {
+                            icon: getNotificationIcon('section')
+                          });
                         } catch (err: any) {
                           console.error("Failed to delete section", err);
-                          toast.error(`Failed to delete section: ${err.message}`);
+                          toast.error(`Failed to delete section: ${err.message}`, {
+                            icon: getNotificationIcon('section')
+                          });
                         }
                       });
                     }
@@ -20691,12 +21055,17 @@ export default function App() {
               onClick={() => requestAuth(async () => { 
                 if (selectedAction) {
                   try {
+                    const deletedActionName = selectedAction.actionName || 'Action';
                     await apiFetch(`/Action/DeleteAction?actionId=${selectedAction.id}`, { method: 'PUT' });
                     setActions(prev => prev.filter(a => a.id !== selectedAction.id));
                     setIsViewActionOpen(false);
-                    toast.success('Action deleted successfully!');
+                    toast.success(`${deletedActionName} deleted`, {
+                      icon: getNotificationIcon('action')
+                    });
                   } catch (err: any) {
-                    toast.error(`Error deleting action: ${err.message}`);
+                    toast.error(`Error deleting action: ${err.message}`, {
+                      icon: getNotificationIcon('action')
+                    });
                   }
                 }
               })}
@@ -20777,19 +21146,21 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-foreground">
                             {(() => {
-                              switch (step.facilityType) {
-                                case FacilityType.Appliance: return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || 'Appliance';
-                                case FacilityType.Camera: return (cameras || []).find(x => x.id === step.facilityTypeId)?.cameraName || 'Camera';
-                                case FacilityType.Door: return (doors || []).find(x => x.id === step.facilityTypeId)?.doorName || 'Door';
-                                case FacilityType.External: return (externals || []).find(x => x.id === step.facilityTypeId)?.externalName || 'External';
-                                case FacilityType.Light: return (lights || []).find(x => x.id === step.facilityTypeId)?.lightName || 'Light';
-                                case FacilityType.Window: return (windows || []).find(x => x.id === step.facilityTypeId)?.windowName || 'Window';
+                              const stepKind = resolveActionStepFacilityKind(step.facilityType, appNamesDetailList);
+                              switch (stepKind) {
+                                case 'appliance': return (appliances || []).find(x => x.id === step.facilityTypeId)?.applianceName || (appNamesDetailList?.applianceIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Appliance';
+                                case 'camera': return (cameras || []).find(x => x.id === step.facilityTypeId)?.cameraName || (appNamesDetailList?.cameraIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Camera';
+                                case 'door': return (doors || []).find(x => x.id === step.facilityTypeId)?.doorName || (appNamesDetailList?.doorIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Door';
+                                case 'external': return (externals || []).find(x => x.id === step.facilityTypeId)?.externalName || (appNamesDetailList?.externalIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'External';
+                                case 'light': return (lights || []).find(x => x.id === step.facilityTypeId)?.lightName || (appNamesDetailList?.lightIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Light';
+                                case 'window': return (windows || []).find(x => x.id === step.facilityTypeId)?.windowName || (appNamesDetailList?.windowIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Window';
+                                case 'utility': return (utilities || []).find(x => x.id === step.facilityTypeId)?.utilityName || (appNamesDetailList?.utilityIdNames || []).find((x: any) => Number(x.id) === Number(step.facilityTypeId))?.name || 'Utility';
                                 default: return 'Device';
                               }
                             })()}
                           </span>
                           <span className="text-[10px] uppercase font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
-                            {FacilityType[step.facilityType]}
+                            {(appNamesDetailList?.facilityType || []).find((ft: any) => Number(ft.id) === Number(step.facilityType))?.name || FacilityType[step.facilityType] || 'Device'}
                           </span>
                         </div>
                         <div className="flex items-center gap-3 mt-1.5 overflow-x-auto pb-1 scrollbar-hide">
@@ -20849,9 +21220,13 @@ export default function App() {
                                 const updatedAction = { ...selectedAction, getActionStepDtos: updatedSteps };
                                 setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
                                 setSelectedAction(updatedAction);
-                                toast.success('Action step deleted successfully!');
+                                toast.success(`${selectedAction.actionName} step deleted`, {
+                                  icon: getNotificationIcon('action')
+                                });
                               } catch (err: any) {
-                                toast.error(`Error deleting action step: ${err.message}`);
+                                toast.error(`Error deleting action step: ${err.message}`, {
+                                  icon: getNotificationIcon('action')
+                                });
                               }
                             }
                           })}
@@ -21017,11 +21392,16 @@ export default function App() {
                       method: 'POST', 
                       body: JSON.stringify(payload) 
                     });
-                    toast.success('Action created successfully!');
+                    const createdActionName = actionForm.actionName || 'Action';
+                    toast.success(`${createdActionName} created`, {
+                      icon: getNotificationIcon('action')
+                    });
                     setIsAddActionOpen(false);
                     setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
                   } catch (err: any) {
-                    toast.error(`Error creating action: ${err.message}`);
+                    toast.error(`Error creating action: ${err.message}`, {
+                      icon: getNotificationIcon('action')
+                    });
                   }
                 });
               }}
@@ -21143,9 +21523,13 @@ export default function App() {
                       setSelectedAction(updatedAction);
                       setIsEditActionOpen(false);
                       setActionForm({ actionName: '', description: '', isPrivate: false, isRecurring: false, time: '00:00:00' });
-                      toast.success('Action updated successfully!');
+                      toast.success(`${updatedAction.actionName} updated`, {
+                        icon: getNotificationIcon('action')
+                      });
                     } catch (err: any) {
-                      toast.error(`Error updating action: ${err.message}`);
+                      toast.error(`Error updating action: ${err.message}`, {
+                        icon: getNotificationIcon('action')
+                      });
                     }
                   });
                 }
@@ -21204,24 +21588,28 @@ export default function App() {
                         const idStr = actionStepForm.facilityTypeId?.toString();
                         if (!idStr || idStr === "0") return "Select device";
                         let foundName = "";
-                        switch (actionStepForm.facilityType) {
-                          case FacilityType.Appliance:
-                            foundName = (appNamesDetailList?.applianceIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                        const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
+                        switch (stepKind) {
+                          case 'appliance':
+                            foundName = (appNamesDetailList?.applianceIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Camera:
-                            foundName = (appNamesDetailList?.cameraIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'camera':
+                            foundName = (appNamesDetailList?.cameraIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Door:
-                            foundName = (appNamesDetailList?.doorIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'door':
+                            foundName = (appNamesDetailList?.doorIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.External:
-                            foundName = (appNamesDetailList?.externalIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'external':
+                            foundName = (appNamesDetailList?.externalIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Light:
-                            foundName = (appNamesDetailList?.lightIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'light':
+                            foundName = (appNamesDetailList?.lightIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Window:
-                            foundName = (appNamesDetailList?.windowIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'window':
+                            foundName = (appNamesDetailList?.windowIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
+                            break;
+                          case 'utility':
+                            foundName = (appNamesDetailList?.utilityIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
                         }
                         return foundName || "Select device";
@@ -21230,13 +21618,20 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
                     {(() => {
-                      switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                      const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
+                      switch (stepKind) {
+                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case 'door': return (appNamesDetailList?.doorIdNames || []).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case 'external': return (appNamesDetailList?.externalIdNames || []).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case 'light': return (appNamesDetailList?.lightIdNames || []).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case 'window': return (appNamesDetailList?.windowIdNames || []).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                        case 'utility': {
+                          const utilList = appNamesDetailList?.utilityIdNames || [];
+                          return utilList.length > 0
+                            ? utilList.map((u: any) => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)
+                            : <SelectItem value="0" disabled>No utilities found</SelectItem>;
+                        }
                         default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
                       }
                     })()}
@@ -21343,9 +21738,13 @@ export default function App() {
                       setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
                       setSelectedAction(updatedAction);
                       setIsAddActionStepOpen(false);
-                      toast.success('Action step created successfully!');
+                      toast.success(`${selectedAction.actionName} step created`, {
+                        icon: getNotificationIcon('action')
+                      });
                     } catch (err: any) {
-                      toast.error(`Error creating action step: ${err.message}`);
+                      toast.error(`Error creating action step: ${err.message}`, {
+                        icon: getNotificationIcon('action')
+                      });
                     }
                   });
                 }
@@ -21403,24 +21802,28 @@ export default function App() {
                         const idStr = actionStepForm.facilityTypeId?.toString();
                         if (!idStr || idStr === "0") return "Select device";
                         let foundName = "";
-                        switch (actionStepForm.facilityType) {
-                          case FacilityType.Appliance:
-                            foundName = (appNamesDetailList?.applianceIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                        const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
+                        switch (stepKind) {
+                          case 'appliance':
+                            foundName = (appNamesDetailList?.applianceIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Camera:
-                            foundName = (appNamesDetailList?.cameraIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'camera':
+                            foundName = (appNamesDetailList?.cameraIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Door:
-                            foundName = (appNamesDetailList?.doorIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'door':
+                            foundName = (appNamesDetailList?.doorIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.External:
-                            foundName = (appNamesDetailList?.externalIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'external':
+                            foundName = (appNamesDetailList?.externalIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Light:
-                            foundName = (appNamesDetailList?.lightIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'light':
+                            foundName = (appNamesDetailList?.lightIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
-                          case FacilityType.Window:
-                            foundName = (appNamesDetailList?.windowIdNames || []).find(x => x.id.toString() === idStr)?.name;
+                          case 'window':
+                            foundName = (appNamesDetailList?.windowIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
+                            break;
+                          case 'utility':
+                            foundName = (appNamesDetailList?.utilityIdNames || []).find((x: any) => x.id.toString() === idStr)?.name;
                             break;
                         }
                         return foundName || "Select device";
@@ -21429,13 +21832,20 @@ export default function App() {
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border-slate-100 shadow-xl">
                     {(() => {
-                      switch (actionStepForm.facilityType) {
-                        case FacilityType.Appliance: return (appNamesDetailList?.applianceIdNames || []).map(a => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case FacilityType.Camera: return (appNamesDetailList?.cameraIdNames || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case FacilityType.Door: return (appNamesDetailList?.doorIdNames || []).map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case FacilityType.External: return (appNamesDetailList?.externalIdNames || []).map(e => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case FacilityType.Light: return (appNamesDetailList?.lightIdNames || []).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case FacilityType.Window: return (appNamesDetailList?.windowIdNames || []).map(w => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                      const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
+                      switch (stepKind) {
+                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case 'door': return (appNamesDetailList?.doorIdNames || []).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case 'external': return (appNamesDetailList?.externalIdNames || []).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case 'light': return (appNamesDetailList?.lightIdNames || []).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case 'window': return (appNamesDetailList?.windowIdNames || []).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                        case 'utility': {
+                          const utilList = appNamesDetailList?.utilityIdNames || [];
+                          return utilList.length > 0
+                            ? utilList.map((u: any) => <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>)
+                            : <SelectItem value="0" disabled>No utilities found</SelectItem>;
+                        }
                         default: return <SelectItem value="0" disabled>No devices found</SelectItem>;
                       }
                     })()}
@@ -21542,9 +21952,13 @@ export default function App() {
                       setActions(prev => prev.map(a => a.id === selectedAction.id ? updatedAction : a));
                       setSelectedAction(updatedAction);
                       setIsEditActionStepOpen(false);
-                      toast.success('Action step updated successfully!');
+                      toast.success(`${selectedAction.actionName} step updated`, {
+                        icon: getNotificationIcon('action')
+                      });
                     } catch (err: any) {
-                      toast.error(`Error updating action step: ${err.message}`);
+                      toast.error(`Error updating action step: ${err.message}`, {
+                        icon: getNotificationIcon('action')
+                      });
                     }
                   });
                 }
@@ -21611,7 +22025,7 @@ export default function App() {
             <>
               {/* WhatsApp Style Sidebar - List View */}
               <div className={cn("bg-[#ffffff] dark:bg-zinc-950 flex flex-col shrink-0 relative z-10 border-r border-slate-200 dark:border-zinc-800 transition-all duration-300", activeChatId ? "hidden md:flex" : "flex", isChatCallHistoryOpen ? "w-full md:w-[35%] lg:w-[28%]" : "w-full md:w-[38%] lg:w-[32%]")}>
-            <div data-app-header="true" className="relative z-20 p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full transition-shadow duration-300">
+            <div className="p-5 bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 border-b border-slate-200 dark:border-zinc-800 space-y-4 w-full">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-slate-200 dark:bg-zinc-800 flex items-center justify-center text-slate-600 dark:text-zinc-300 shadow-inner overflow-hidden border-2 border-white dark:border-zinc-700 shrink-0">
@@ -21806,7 +22220,7 @@ export default function App() {
               /* Call History Panel replacing right side */
               <div className="flex-1 flex flex-col bg-slate-50 dark:bg-zinc-950 h-full relative z-10 animate-in fade-in slide-in-from-right duration-300">
                 {/* Header */}
-                <header data-app-header="true" className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px] transition-shadow duration-300">
+                <header className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-950 shrink-0 z-20 shadow-xs h-[60px]">
                   <div className="flex items-center gap-3 text-left">
                     <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
                       <History className="h-5 w-5" />
@@ -22143,7 +22557,7 @@ export default function App() {
                   const isOnline = chat.isGroup ? (chat?.participants || []).some(p => p.isOnline && p.personId !== userProfile.id) : (chat?.participants || []).find(p => p.personId !== userProfile.id)?.isOnline;
 
                   return (
-                    <header data-app-header="true" className="px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px] transition-shadow duration-300">
+                    <header className="px-3 sm:px-5 py-3 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between bg-[#f0f2f5] dark:bg-zinc-950 shrink-0 z-20 shadow-sm h-[60px]">
                       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                         <Button 
                           variant="ghost" 
@@ -23355,7 +23769,7 @@ export default function App() {
                         className="w-[320px] shrink-0 border-l border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full overflow-hidden shadow-xs relative z-20"
                       >
                         {/* Header */}
-                        <div data-app-header="true" className="relative z-20 px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px] transition-shadow duration-300">
+                        <div className="px-4 py-3 border-b border-slate-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-950 flex items-center justify-between shrink-0 h-[60px]">
                           <div className="flex items-center gap-2.5 text-left min-w-0">
                             <div className="h-9 w-9 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 shadow-xs">
                               <History className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
