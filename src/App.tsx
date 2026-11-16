@@ -5578,6 +5578,27 @@ export default function App() {
   // Door Modal
   const [isDoorModalOpen, setIsDoorModalOpen] = React.useState(false);
   const [selectedDoor, setSelectedDoor] = React.useState<Device | null>(null);
+  const [criticalDoorConfirm, setCriticalDoorConfirm] = React.useState<{
+    doorName: string;
+    action: 'open' | 'unlock';
+    onConfirm: () => void;
+  } | null>(null);
+  const [criticalDoorCountdown, setCriticalDoorCountdown] = React.useState<number>(3);
+
+  React.useEffect(() => {
+    if (!criticalDoorConfirm) return;
+    setCriticalDoorCountdown(3);
+    const timer = setInterval(() => {
+      setCriticalDoorCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [criticalDoorConfirm]);
 
   // Light Modal
   const [isLightModalOpen, setIsLightModalOpen] = React.useState(false);
@@ -9478,6 +9499,22 @@ export default function App() {
         }
       }
 
+      if (
+        d.type === 'door' &&
+        (d.status === 'locked' || d.status === 'open-locked') &&
+        currentEmergencySeverity === 'critical'
+      ) {
+        setCriticalDoorCountdown(3);
+        setCriticalDoorConfirm({
+          doorName: d.name,
+          action: 'unlock',
+          onConfirm: () => {
+            void executeToggle();
+          },
+        });
+        return;
+      }
+
       await executeToggle();
     };
 
@@ -9581,7 +9618,6 @@ export default function App() {
     if (!d) return;
 
     const rawId = getRawId(d.id);
-    const isCurrentlyOpen = d.status === 'open' || d.status === 'open-locked';
     const isCurrentlyLocked = d.status === 'locked' || d.status === 'open-locked';
 
     if ((action === 'open' || action === 'close') && isCurrentlyLocked) {
@@ -9591,66 +9627,86 @@ export default function App() {
       return;
     }
 
-    try {
-      if (d.type === 'door') {
-        if (action === 'lock' || action === 'unlock') {
-          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open' || action === 'close') {
-          await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+    const executeDoorAction = async () => {
+      try {
+        if (d.type === 'door') {
+          if (action === 'lock' || action === 'unlock') {
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'open' || action === 'close') {
+            await apiFetch(`/Door/UnlockDoor?id=${rawId}`, { method: 'PUT' });
+          }
+          setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
+            ...item, 
+            isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
+            isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
+          } : item));
+        } else if (d.type === 'window') {
+          if (action === 'lock' || action === 'unlock') {
+            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+          } else if (action === 'open' || action === 'close') {
+            await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
+          }
+          setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
+            ...item, 
+            isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
+            isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
+          } : item));
         }
-        setDoors(prev => prev.map(item => item.id.toString() === rawId ? { 
-          ...item, 
-          isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
-          isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
-        } : item));
-      } else if (d.type === 'window') {
-        if (action === 'lock' || action === 'unlock') {
-          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-        } else if (action === 'open' || action === 'close') {
-          await apiFetch(`/Window/UnlockWindow?id=${rawId}`, { method: 'PUT' });
-        }
-        setWindows(prev => prev.map(item => item.id.toString() === rawId ? { 
-          ...item, 
-          isLocked: action === 'lock' ? true : action === 'unlock' ? false : item.isLocked,
-          isOpen: action === 'open' ? true : action === 'close' ? false : (action === 'lock' ? false : item.isOpen)
-        } : item));
+        const nextDoorStateLabel =
+          action === 'lock' ? 'Locked' :
+          action === 'unlock' ? 'Unlocked' :
+          action === 'open' ? 'Open' : 'Closed';
+        const nextDoorIconStatus =
+          action === 'lock' ? 'locked' :
+          action === 'unlock' ? 'unlocked' :
+          action === 'open' ? 'open' : 'closed';
+        toast.success(`${d.name} is ${nextDoorStateLabel}`, {
+          icon: getNotificationIcon(d.type, { status: nextDoorIconStatus })
+        });
+      } catch (err: any) {
+        console.error(`Failed to ${action} ${d.type} remotely`, err);
+        toast.error(`Remote action failed: ${err.message}`, {
+          icon: getNotificationIcon(d.type)
+        });
+        return; 
       }
-      const nextDoorStateLabel =
-        action === 'lock' ? 'Locked' :
-        action === 'unlock' ? 'Unlocked' :
-        action === 'open' ? 'Open' : 'Closed';
-      const nextDoorIconStatus =
-        action === 'lock' ? 'locked' :
-        action === 'unlock' ? 'unlocked' :
-        action === 'open' ? 'open' : 'closed';
-      toast.success(`${d.name} is ${nextDoorStateLabel}`, {
-        icon: getNotificationIcon(d.type, { status: nextDoorIconStatus })
+
+      setDevices(prev => prev.map(dev => {
+        if (dev.id !== d.id) return dev;
+        let newStatus = dev.status;
+        const isLocked = dev.status === 'locked' || dev.status === 'open-locked';
+        const isOpen = dev.status === 'open' || dev.status === 'open-locked';
+
+        if (action === 'lock') {
+          newStatus = 'locked';
+        } else if (action === 'unlock') {
+          newStatus = isOpen ? 'open' : 'unlocked';
+        } else if (action === 'open') {
+          newStatus = isLocked ? 'open-locked' : 'open';
+        } else if (action === 'close') {
+          newStatus = isLocked ? 'locked' : 'unlocked';
+        }
+        return { ...dev, status: newStatus as any };
+      }));
+    };
+
+    if (
+      d.type === 'door' &&
+      (action === 'open' || action === 'unlock') &&
+      currentEmergencySeverity === 'critical'
+    ) {
+      setCriticalDoorCountdown(3);
+      setCriticalDoorConfirm({
+        doorName: d.name,
+        action,
+        onConfirm: () => {
+          void executeDoorAction();
+        },
       });
-    } catch (err: any) {
-      console.error(`Failed to ${action} ${d.type} remotely`, err);
-      toast.error(`Remote action failed: ${err.message}`, {
-        icon: getNotificationIcon(d.type)
-      });
-      return; 
+      return;
     }
 
-    setDevices(prev => prev.map(dev => {
-      if (dev.id !== d.id) return dev;
-      let newStatus = dev.status;
-      const isLocked = dev.status === 'locked' || dev.status === 'open-locked';
-      const isOpen = dev.status === 'open' || dev.status === 'open-locked';
-
-      if (action === 'lock') {
-        newStatus = 'locked';
-      } else if (action === 'unlock') {
-        newStatus = isOpen ? 'open' : 'unlocked';
-      } else if (action === 'open') {
-        newStatus = isLocked ? 'open-locked' : 'open';
-      } else if (action === 'close') {
-        newStatus = isLocked ? 'locked' : 'unlocked';
-      }
-      return { ...dev, status: newStatus as any };
-    }));
+    await executeDoorAction();
   };
 
   const handleStatusChange = (id: string, status: string) => {
@@ -17786,6 +17842,79 @@ export default function App() {
             >
               <LogOut className="h-4 w-4" />
               {isLoggingOutAllUsers ? 'Logging out...' : 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Critical Emergency Door Open / Unlock Warning Overlay */}
+      <Dialog
+        open={!!criticalDoorConfirm}
+        onOpenChange={(open) => {
+          if (!open) setCriticalDoorConfirm(null);
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-[460px] border-2 border-red-500/60 bg-popover text-popover-foreground shadow-2xl"
+          showCloseButton={false}
+        >
+          <DialogHeader className="mb-0">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400 text-lg font-bold">
+                <AlertTriangle className="h-5 w-5 shrink-0 animate-pulse" />
+                Critical Emergency Warning
+              </DialogTitle>
+              <DialogClose
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-md text-slate-500 dark:text-zinc-400 hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                  />
+                }
+              >
+                <X className="h-4 w-4" />
+              </DialogClose>
+            </div>
+            <DialogDescription className="sr-only">
+              Confirm door state change during a critical emergency.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-relaxed text-foreground">
+              The house is currently in an emergency state, restriction of movement is strongly advised. Are you sure you want to{' '}
+              <span className="font-semibold">{criticalDoorConfirm?.action}</span>{' '}
+              <span className="font-semibold">{criticalDoorConfirm?.doorName}</span>?
+            </div>
+          </div>
+          <DialogFooter className="flex flex-row items-center justify-end">
+            <Button
+              type="button"
+              disabled={criticalDoorCountdown > 0}
+              className={cn(
+                "min-w-[120px] font-semibold transition-all inline-flex items-center justify-center gap-2",
+                criticalDoorCountdown > 0
+                  ? "bg-red-600/40 text-white/80 cursor-not-allowed"
+                  : "bg-red-600 hover:bg-red-700 text-white shadow-sm"
+              )}
+              onClick={() => {
+                if (!criticalDoorConfirm || criticalDoorCountdown > 0) return;
+                const actionToRun = criticalDoorConfirm.onConfirm;
+                setCriticalDoorConfirm(null);
+                requestAuth(() => {
+                  actionToRun();
+                });
+              }}
+            >
+              {criticalDoorConfirm?.action === 'open' ? (
+                <DoorOpen className="h-4 w-4 shrink-0" />
+              ) : (
+                <Unlock className="h-4 w-4 shrink-0" />
+              )}
+              <span>
+                {criticalDoorConfirm?.action === 'open' ? 'Open' : 'Unlock'}
+                {criticalDoorCountdown > 0 ? ` (${criticalDoorCountdown}s)` : ''}
+              </span>
             </Button>
           </DialogFooter>
         </DialogContent>
