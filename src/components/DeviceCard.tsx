@@ -5,6 +5,13 @@ import { Switch } from './ui/switch';
 import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 import { HlsVideo } from './HlsVideo';
 import { WaterTank } from './WaterTank';
 import { 
@@ -442,54 +449,99 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                     if (matchedOpt) compId = Number(matchedOpt.id);
                   }
                 }
-                const sevClass = !isActive
-                  ? "bg-muted/60 text-muted-foreground border-border focus:ring-border"
+                const selectedOpt = options.find((o) => Number(o.id) === compId) || options[0];
+                const severityTextClass = !isActive
+                  ? "text-muted-foreground font-medium"
                   : compId === 11
-                  ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/40 focus:ring-red-500/40"
+                  ? "text-red-600 dark:text-red-400 font-semibold"
                   : compId === 10
-                  ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/40 focus:ring-orange-500/40"
+                  ? "text-orange-600 dark:text-orange-400 font-semibold"
                   : compId === 9
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/40 focus:ring-amber-500/40"
-                  : "bg-muted/60 text-muted-foreground border-border focus:ring-border";
+                  ? "text-amber-600 dark:text-amber-400 font-semibold"
+                  : "text-muted-foreground font-medium";
+                const severityDotClass = !isActive
+                  ? "bg-muted-foreground/50"
+                  : compId === 11
+                  ? "bg-red-500"
+                  : compId === 10
+                  ? "bg-orange-500"
+                  : compId === 9
+                  ? "bg-amber-500"
+                  : "bg-slate-400";
                 const actionsCount = device.actionIds?.length || 0;
                 return (
                   <div
-                    className="flex items-center justify-between gap-2 pt-2 border-t border-border/50 text-[10px]"
+                    className="flex items-center justify-between gap-3 pt-2 border-t border-border/50"
                     onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                   >
-                    <select
-                      aria-label={`${device.name} emergency severity`}
-                      value={compId.toString()}
-                      disabled={!canUpdate}
+                    <div
+                      className="flex-1 min-w-0 max-w-[185px]"
                       onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
                       onPointerDown={(e) => e.stopPropagation()}
-                      onTouchStart={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        if (!canUpdate) return;
-                        const nextCompId = parseInt(e.target.value, 10);
-                        if (!Number.isNaN(nextCompId)) {
-                          onUtilityComponentChange?.(device.id, nextCompId);
-                        }
-                      }}
-                      className={cn(
-                        "px-2 py-1 rounded-md border font-semibold uppercase tracking-wider text-[10px] outline-none focus:ring-2 transition-colors",
-                        canUpdate ? "cursor-pointer" : "cursor-not-allowed opacity-60",
-                        sevClass
-                      )}
                     >
-                      {options.map((opt) => (
-                        <option
-                          key={opt.id}
-                          value={opt.id.toString()}
-                          className="bg-background text-foreground normal-case font-medium"
+                      <Select
+                        value={compId.toString()}
+                        disabled={!canUpdate}
+                        onValueChange={(val) => {
+                          if (!canUpdate || val === null || val === undefined) return;
+                          const nextCompId = parseInt(String(val), 10);
+                          if (!Number.isNaN(nextCompId)) {
+                            onUtilityComponentChange?.(device.id, nextCompId);
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          aria-label={`${device.name} emergency severity`}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className={cn(
+                            "h-7 text-xs pl-1.5 pr-1.5",
+                            canUpdate ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+                            severityTextClass
+                          )}
                         >
-                          {formatUtilitySubLabel(opt.name)}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="text-muted-foreground font-mono shrink-0">
+                          <SelectValue placeholder="Select severity">
+                            <span className="flex items-center gap-1.5 truncate">
+                              <span className={cn("h-2 w-2 rounded-full shrink-0", severityDotClass)} />
+                              <span className="truncate">{formatUtilitySubLabel(selectedOpt?.name || 'EmergencyNone')}</span>
+                            </span>
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent
+                          align="start"
+                          sideOffset={4}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          {options.map((opt) => {
+                            const optId = Number(opt.id);
+                            const optDot =
+                              optId === 11
+                                ? "bg-red-500"
+                                : optId === 10
+                                ? "bg-orange-500"
+                                : optId === 9
+                                ? "bg-amber-500"
+                                : "bg-slate-400";
+                            return (
+                              <SelectItem
+                                key={opt.id}
+                                value={opt.id.toString()}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className={cn("h-2 w-2 rounded-full shrink-0", optDot)} />
+                                  <span>{formatUtilitySubLabel(opt.name)}</span>
+                                </span>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                       {actionsCount} {actionsCount === 1 ? 'Action' : 'Actions'}
                     </span>
                   </div>

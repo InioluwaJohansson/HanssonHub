@@ -402,7 +402,8 @@ export const INITIAL_HARDWARES: GetHardwareDto[] = [
     lightIdNames: [{ id: 1, name: "Main Light" }, { id: 5, name: "Ceiling Light" }],
     windowIdNames: [{ id: 31, name: "Living Room Window" }],
     doorIdNames: [{ id: 31, name: "Bedroom Door" }],
-    externalIdNames: [{ id: 1, name: "Outdoor Motion Sensor" }]
+    externalIdNames: [{ id: 1, name: "Outdoor Motion Sensor" }],
+    utilityIdNames: []
   },
   {
     id: 2,
@@ -416,7 +417,8 @@ export const INITIAL_HARDWARES: GetHardwareDto[] = [
     lightIdNames: [{ id: 5, name: "Ceiling Light" }],
     windowIdNames: [],
     doorIdNames: [],
-    externalIdNames: []
+    externalIdNames: [],
+    utilityIdNames: []
   },
   {
     id: 3,
@@ -430,7 +432,8 @@ export const INITIAL_HARDWARES: GetHardwareDto[] = [
     lightIdNames: [{ id: 13, name: "Pool Light" }],
     windowIdNames: [],
     doorIdNames: [],
-    externalIdNames: [{ id: 2, name: "Driveway Beam Gate" }]
+    externalIdNames: [{ id: 2, name: "Driveway Beam Gate" }],
+    utilityIdNames: []
   }
 ];
 

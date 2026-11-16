@@ -499,6 +499,7 @@ export interface GetHardwareDto {
   windowIdNames: GenericIdNames[];
   doorIdNames: GenericIdNames[];
   externalIdNames: GenericIdNames[];
+  utilityIdNames: GenericIdNames[];
 }
 
 export interface HardwareResponseModel extends BaseResponse {
@@ -569,6 +570,7 @@ export interface UpdateHardwareDto {
   windowIds: number[];
   doorIds: number[];
   externalIds: number[];
+  utilityIds: number[];
 }
 
 export interface CreateBaseDefaultDto {

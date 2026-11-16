@@ -44,6 +44,7 @@ import {
   PersonResponseModel,
   GetAddressDto,
   GetContactDetailsDto,
+  GenericIdNames,
   GetHardwareDto,
   GetExternalDto,
   GetCameraDto,
@@ -2275,6 +2276,85 @@ const normalizeIdNamesArray = (rawList: any): any[] => {
   }));
 };
 
+const resolveHardwareUtilities = (
+  hw: any,
+  appList?: any,
+  utilityList?: GetUtilityDto[]
+): GenericIdNames[] => {
+  if (!hw) return [];
+  const rawList =
+    hw.utilityIdNames ??
+    hw.UtilityIdNames ??
+    hw.utilityIds ??
+    hw.UtilityIds ??
+    hw.utilities ??
+    hw.Utilities ??
+    [];
+  if (!Array.isArray(rawList)) return [];
+
+  const appUtilityMap = new Map<number, string>();
+  const appUtilEntries = appList?.utilityIdNames ?? appList?.UtilityIdNames ?? [];
+  if (Array.isArray(appUtilEntries)) {
+    appUtilEntries.forEach((u: any) => {
+      const uid = Number(u?.id ?? u?.Id ?? 0);
+      const uname = (u?.name ?? u?.Name ?? u?.utilityName ?? '').toString().trim();
+      if (uid && !Number.isNaN(uid) && uname) {
+        appUtilityMap.set(uid, uname);
+      }
+    });
+  }
+  if (Array.isArray(utilityList)) {
+    utilityList.forEach((u: any) => {
+      const uid = Number(u?.id ?? u?.Id ?? 0);
+      const uname = (u?.utilityName ?? u?.name ?? u?.Name ?? '').toString().trim();
+      if (uid && !Number.isNaN(uid) && uname && !appUtilityMap.has(uid)) {
+        appUtilityMap.set(uid, uname);
+      }
+    });
+  }
+
+  const seen = new Set<number>();
+  const resolved: GenericIdNames[] = [];
+  rawList.forEach((entry: any) => {
+    const id =
+      typeof entry === 'number' || typeof entry === 'string'
+        ? Number(entry)
+        : Number(entry?.id ?? entry?.Id ?? entry?.utilityId ?? entry?.UtilityId ?? 0);
+    if (!id || Number.isNaN(id) || seen.has(id)) return;
+    seen.add(id);
+
+    const mappedName =
+      appUtilityMap.get(id) ||
+      (entry?.name ?? entry?.Name ?? entry?.utilityName ?? entry?.UtilityName ?? '').toString().trim() ||
+      `Utility #${id}`;
+    resolved.push({ id, name: mappedName });
+  });
+  return resolved;
+};
+
+const normalizeHardwareDto = (
+  raw: any,
+  appList?: any,
+  utilityList?: GetUtilityDto[]
+): GetHardwareDto => {
+  return {
+    ...raw,
+    id: Number(raw?.id ?? raw?.Id ?? 0),
+    hardwareName: raw?.hardwareName ?? raw?.HardwareName ?? '',
+    hardwareId: raw?.hardwareId ?? raw?.HardwareId ?? '',
+    authKey: raw?.authKey ?? raw?.AuthKey ?? '',
+    isActive: Boolean(raw?.isActive ?? raw?.IsActive ?? false),
+    powerActive: Boolean(raw?.powerActive ?? raw?.PowerActive ?? false),
+    applianceIdNames: normalizeIdNamesArray(raw?.applianceIdNames ?? raw?.ApplianceIdNames ?? []),
+    cameraIdNames: normalizeIdNamesArray(raw?.cameraIdNames ?? raw?.CameraIdNames ?? []),
+    lightIdNames: normalizeIdNamesArray(raw?.lightIdNames ?? raw?.LightIdNames ?? []),
+    windowIdNames: normalizeIdNamesArray(raw?.windowIdNames ?? raw?.WindowIdNames ?? []),
+    doorIdNames: normalizeIdNamesArray(raw?.doorIdNames ?? raw?.DoorIdNames ?? []),
+    externalIdNames: normalizeIdNamesArray(raw?.externalIdNames ?? raw?.ExternalIdNames ?? []),
+    utilityIdNames: resolveHardwareUtilities(raw, appList, utilityList),
+  };
+};
+
 const resolveActionStepFacilityKind = (
   facilityTypeVal: number | string | undefined | null,
   appList?: any
@@ -3802,7 +3882,14 @@ export default function App() {
         .catch(() => { setWindows([]); syncDevicesFromFetchedType('window', []); });
 
       apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
-        .then((res: any) => { if (res && res.data && Array.isArray(res.data)) { setHardwares(res.data); } else { setHardwares([]); } })
+        .then((res: any) => {
+          const rawList = res?.data ?? res?.Data;
+          if (Array.isArray(rawList)) {
+            setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
+          } else {
+            setHardwares([]);
+          }
+        })
         .catch(() => setHardwares([]));
 
       apiFetch('/Person/GetAllPersons', { method: 'POST' })
@@ -3846,7 +3933,10 @@ export default function App() {
             .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection)); })
             .catch(err => console.error("Failed to reload sections for overview", err)),
           apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
-            .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); })
+            .then((res: any) => {
+              const rawList = res?.data ?? res?.Data;
+              if (Array.isArray(rawList)) setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
+            })
             .catch(err => console.error("Failed to reload hardwares for overview", err)),
           apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
             .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setActions(res.data); })
@@ -3889,7 +3979,11 @@ export default function App() {
         fetchedViewsRef.current['facility-hardware'] = true;
         setLoadingViews(prev => ({ ...prev, 'facility-hardware': true }));
         apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setHardwares(res.data); else setHardwares([]); })
+          .then((res: any) => {
+            const rawList = res?.data ?? res?.Data;
+            if (Array.isArray(rawList)) setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
+            else setHardwares([]);
+          })
           .catch(err => { console.error("Failed to load hardwares", err); setHardwares([]); })
           .finally(() => setLoadingViews(prev => ({ ...prev, 'facility-hardware': false })));
       }
@@ -6895,11 +6989,17 @@ export default function App() {
     });
     
     hs.on("HardwareCreated", (data) => setHardwares(prev => {
-      const dataId = data.id ?? data.Id;
-      if (dataId !== undefined && dataId !== null && prev.some(h => h.id.toString() === dataId.toString())) return prev;
-      return [...prev, data];
+      const normalized = normalizeHardwareDto(data, appNamesDetailList, utilities);
+      if (normalized.id && prev.some(h => h.id.toString() === normalized.id.toString())) return prev;
+      return [...prev, normalized];
     }));
-    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => (h.id !== undefined && h.id !== null && (data.id ?? data.Id) !== undefined && (data.id ?? data.Id) !== null) && h.id.toString() === (data.id ?? data.Id).toString() ? { ...h, ...data } : h)));
+    hs.on("HardwareUpdated", (data) => setHardwares(prev => prev.map(h => {
+      const dataId = data?.id ?? data?.Id;
+      if (h.id !== undefined && h.id !== null && dataId !== undefined && dataId !== null && h.id.toString() === dataId.toString()) {
+        return normalizeHardwareDto({ ...h, ...data }, appNamesDetailList, utilities);
+      }
+      return h;
+    })));
     
     hs.on("ActionCreated", (data) => setActions(prev => {
       const dataId = data.id ?? data.Id ?? data.actionId ?? data.ActionId;
@@ -8364,7 +8464,10 @@ export default function App() {
         const p6 = apiFetch('/Door/GetAllDoors', { method: 'POST' }).then((res: any) => { if (res && res.data) { setDoors(res.data); syncDevicesFromFetchedType('door', res.data); } });
         const p7 = apiFetch('/Window/GetAllWindows', { method: 'POST' }).then((res: any) => { if (res && res.data) { setWindows(res.data); syncDevicesFromFetchedType('window', res.data); } });
         const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) { setExternals(res.data); syncDevicesFromFetchedType('external', res.data); } });
-        const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => { if (res && res.data) setHardwares(res.data); });
+        const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => {
+          const rawList = res?.data ?? res?.Data;
+          if (Array.isArray(rawList)) setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
+        });
         const p10 = apiFetch('/Person/GetAllPersons', { method: 'POST' }).then((res: any) => { if (res && res.data) setAllUsers(res.data); });
         const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
           .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
@@ -13226,12 +13329,14 @@ export default function App() {
               <ThreeDotsLoading label="Loading hardware..." />
             ) : filteredHardwares && filteredHardwares.length > 0 ? (
               (filteredHardwares || []).map(hw => {
+                const resolvedHwUtilities = resolveHardwareUtilities(hw, appNamesDetailList, utilities);
                 const deviceCount = (hw.applianceIdNames?.length || 0) + 
                                    (hw.cameraIdNames?.length || 0) + 
                                    (hw.lightIdNames?.length || 0) + 
                                    (hw.windowIdNames?.length || 0) + 
                                    (hw.doorIdNames?.length || 0) + 
-                                   (hw.externalIdNames?.length || 0);
+                                   (hw.externalIdNames?.length || 0) +
+                                   resolvedHwUtilities.length;
 
                 return (
                   <Card 
@@ -15470,7 +15575,7 @@ export default function App() {
       <main className="flex flex-1 flex-col min-h-0 overflow-hidden relative">
 
         {/* Header */}
-        <header data-app-header="true" className="flex h-16 items-center justify-between border-b px-3 sm:px-6 md:px-8 bg-card/30 backdrop-blur-md z-20 shrink-0 gap-2 transition-shadow duration-300">
+        <header data-app-header="true" className="flex min-h-16 flex-wrap md:flex-nowrap items-center justify-between border-b px-3 sm:px-6 md:px-8 py-2 md:py-0 bg-card/30 backdrop-blur-md z-20 shrink-0 gap-2 transition-shadow duration-300">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Button
               variant="ghost"
@@ -15498,8 +15603,33 @@ export default function App() {
               </span>
             </div>
           </div>
+
+          {(currentEmergencySeverity === 'severe' || currentEmergencySeverity === 'critical') && (
+            <div
+              role="alert"
+              className={cn(
+                "order-last w-full md:order-none md:w-auto flex items-center justify-center md:justify-start gap-2 px-3 py-1.5 rounded-lg border shadow-2xs min-w-0 md:max-w-md lg:max-w-lg transition-colors",
+                currentEmergencySeverity === 'critical'
+                  ? "border-red-500/60 bg-red-500/15 text-red-700 dark:text-red-300"
+                  : "border-orange-500/50 bg-orange-500/15 text-orange-700 dark:text-orange-300"
+              )}
+              title="Restriction of movement is advised for safety reasons"
+            >
+              <AlertTriangle
+                className={cn(
+                  "h-4 w-4 shrink-0 animate-pulse",
+                  currentEmergencySeverity === 'critical'
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-orange-600 dark:text-orange-400"
+                )}
+              />
+              <span className="text-[11px] sm:text-xs font-semibold leading-tight truncate">
+                Restriction of movement is advised for safety reasons
+              </span>
+            </div>
+          )}
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 shrink-0">
             {/* Muted div with rounded edges containing Friday assistant, chat button, theme toggle, and logout button */}
             <div className="flex items-center gap-2 sm:gap-2.5 bg-muted/80 hover:bg-muted/90 p-1.5 sm:p-2 px-2.5 sm:px-3 rounded-full border border-border/50 shadow-2xs transition-all">
               {/* Microphone Button */}
@@ -15590,8 +15720,8 @@ export default function App() {
 
       {/* Add Device Dialog */}
       <Dialog open={isAddDeviceOpen} onOpenChange={setIsAddDeviceOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               {(() => {
                 return <PlusCircle className="h-5 w-5 text-primary" />;
@@ -15613,7 +15743,7 @@ export default function App() {
             Connect a new smart device to your HanssonHub.
           </DialogDescription>
         </DialogHeader>
-        <div className="overflow-y-auto max-h-[60vh] pr-4 scrollbar-hide">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2 scrollbar-hide">
         <div className="grid gap-4 pt-[3px] pb-4 px-1">
           <div className="grid gap-2">
             <Label htmlFor="name" className="flex items-center gap-2">
@@ -16203,15 +16333,15 @@ export default function App() {
         </DialogContent>
       </Dialog>
       <Dialog open={isEditSectionOpen} onOpenChange={setIsEditSectionOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
               Edit {editingSection?.name || 'Section'}
             </DialogTitle>
             <DialogDescription>Update the details and visibility of this section.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
                 <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
@@ -16281,8 +16411,8 @@ export default function App() {
       </Dialog>
       {/* Password Change Dialog */}
       <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
-        <DialogContent className="sm:max-w-[400px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <Key className="h-5 w-5 text-blue-500" />
               Change Password
@@ -16291,7 +16421,7 @@ export default function App() {
               Update your account password. You will need your current password and your authorization code.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="password-token" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Key className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Security Token</Label>
               <Input autoComplete="off" id="password-token" 
@@ -16374,8 +16504,8 @@ export default function App() {
 
       {/* Authorization Code Dialog */}
       <Dialog open={isAuthCodeModalOpen} onOpenChange={setIsAuthCodeModalOpen}>
-        <DialogContent className="sm:max-w-[400px] border-2 border-slate-300 dark:border-zinc-600 bg-popover text-popover-foreground">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden border-2 border-slate-300 dark:border-zinc-600 bg-popover text-popover-foreground">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 font-bold">
               <ShieldAlert className="h-5 w-5" />
               Change Authorization Code
@@ -16384,7 +16514,7 @@ export default function App() {
               This is a sensitive operation. Please enter your credentials to authorize the action.
             </DialogDescription>
           </DialogHeader>
-        <div className="grid gap-4 pt-[3px] pb-4">
+        <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
           <div className="grid gap-2">
             <Label htmlFor="auth-pwd" className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300"><Lock className="h-3 w-3 text-slate-500 dark:text-zinc-400" /> Login Password</Label>
             <div className="relative">
@@ -16544,7 +16674,7 @@ export default function App() {
       </Dialog>
       {/* Add New Person Dialog */}
       <Dialog open={isAddPersonOpen} onOpenChange={setIsAddPersonOpen}>
-        <DialogContent className="sm:max-w-[600px] flex flex-col max-h-[90vh]">
+        <DialogContent className="sm:max-w-[600px] flex flex-col max-h-[90vh] overflow-hidden">
           <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-primary" />
@@ -16552,7 +16682,7 @@ export default function App() {
             </DialogTitle>
             <DialogDescription>Create a new person and their associated login credentials.</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto px-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="flex-1 min-h-0 overflow-y-auto px-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <div className="grid gap-6 pt-[3px] py-4">
               <div className="space-y-4">
                 <h4 className="text-sm font-bold flex items-center gap-2 text-primary uppercase tracking-wider border-b pb-1">
@@ -16715,15 +16845,15 @@ export default function App() {
 
       {/* Edit Person Role Dialog */}
       <Dialog open={isEditPersonRoleOpen} onOpenChange={setIsEditPersonRoleOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-primary" />
               Update {updateUserRoleData.userName || 'User'} Role
             </DialogTitle>
             <DialogDescription>Modify the system access level for {updateUserRoleData.userName}.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="edit-role-select" className="flex items-center gap-1.5">
                 <ShieldCheck className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
@@ -17043,15 +17173,15 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Edit3 className="h-5 w-5 text-primary" />
               Edit Category
             </DialogTitle>
             <DialogDescription>Update category details and icon.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
+          <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="edit-cat-name">Category Name</Label>
               <Input autoComplete="off" id="edit-cat-name" 
@@ -17104,7 +17234,7 @@ export default function App() {
 
       <Dialog open={isAddContactOpen} onOpenChange={(open) => { setIsAddContactOpen(open); if (!open) { setEditingContactId(null); setIsNewContactImageSelected(false); } }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-[9px] border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 shadow-2xl">
-          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16">
+          <DialogHeader className="mt-0 mx-0 pt-5 px-8 pb-3 mb-0 shrink-0 border-b border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pr-16">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {editingContactId ? <UserCog className="h-5 w-5 text-primary" /> : <UserPlus className="h-5 w-5 text-primary" />}
@@ -17115,7 +17245,7 @@ export default function App() {
             </div>
             <DialogDescription className="text-xs font-medium mt-1 text-slate-500 dark:text-zinc-400">Fill in the contact details and addresses.</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 pr-4 overflow-y-auto max-h-[60vh] p-8 pt-2 bg-slate-50 dark:bg-zinc-900">
+          <div className="flex-1 min-h-0 pr-4 overflow-y-auto p-8 pt-2 bg-slate-50 dark:bg-zinc-900">
             <div className="grid gap-6 pt-[3px] pb-4">
               <div className="flex gap-8 items-start">
                 <div className="flex-1 space-y-5">
@@ -17727,8 +17857,8 @@ export default function App() {
 
       {/* Edit Device Dialog */}
       <Dialog open={isEditDeviceOpen && !(editingDevice?.type === 'utility' && !isOwner)} onOpenChange={setIsEditDeviceOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               {editingDevice && (() => {
                 const Icon = editingDevice.type === 'door' ? Lock : editingDevice.type === 'light' ? Lightbulb : editingDevice.type === 'appliance' ? Power : editingDevice.type === 'utility' ? Zap : editingDevice.type === 'window' ? WindowIcon : editingDevice.type === 'camera' ? Camera : Edit3;
@@ -17739,7 +17869,7 @@ export default function App() {
             <DialogDescription>Update the details of this {editingDevice?.type || 'device'}.</DialogDescription>
           </DialogHeader>
           {editingDevice && (
-            <div className="grid gap-4 pt-[3px] pb-4 max-h-[60vh] overflow-y-auto px-1">
+            <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-device-name" className="flex items-center gap-2">
                   {(() => {
@@ -18193,7 +18323,7 @@ export default function App() {
 
       {/* View Room Dialog */}
       <Dialog open={isViewRoomOpen} onOpenChange={setIsViewRoomOpen}>
-        <DialogContent className="sm:max-w-[500px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -18231,7 +18361,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
               View {viewingRoom?.name || 'Room'}
@@ -18243,7 +18373,7 @@ export default function App() {
           {viewingRoom && (() => {
             const currentRoomDto = (rooms || []).find((r: any) => r.id.toString() === viewingRoom.id.toString()) as any;
             return (
-              <div className="pt-[3px] pb-4 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-5 pr-1">
                 <div className="grid grid-cols-2 gap-4">
                   
                   <div className="space-y-1">
@@ -18333,8 +18463,8 @@ export default function App() {
 
       {/* Edit Room Dialog */}
       <Dialog open={isEditRoomOpen} onOpenChange={setIsEditRoomOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Sofa className="h-5 w-5 text-primary" />
               Edit {editingRoom?.name || 'Room'}
@@ -18342,7 +18472,7 @@ export default function App() {
             <DialogDescription>Update the details of this room.</DialogDescription>
           </DialogHeader>
           {editingRoom && (
-            <ScrollArea className="max-h-[60vh] pr-2 px-1">
+            <div className="flex-1 min-h-0 overflow-y-auto px-1">
             <div className="grid gap-4 pt-[3px] pb-4 pr-1">
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-name" className="flex items-center gap-2">
@@ -18483,7 +18613,7 @@ export default function App() {
                 />
               </div>
             </div>
-            </ScrollArea>
+            </div>
           )}
           <DialogFooter>
             
@@ -18621,7 +18751,7 @@ export default function App() {
 
       {/* Hardware Detail Modal */}
       <Dialog open={isHardwareDetailOpen} onOpenChange={setIsHardwareDetailOpen}>
-        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto w-[90vw]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[800px] max-h-[85vh] flex flex-col overflow-hidden w-[90vw]" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -18639,6 +18769,7 @@ export default function App() {
                           windowIdNames: selectedHardware.windowIdNames || [],
                           doorIdNames: selectedHardware.doorIdNames || [],
                           externalIdNames: selectedHardware.externalIdNames || [],
+                          utilityIdNames: resolveHardwareUtilities(selectedHardware, appNamesDetailList, utilities),
                         });
                         setIsHardwareDetailOpen(false);
                         setIsEditHardwareOpen(true);
@@ -18669,7 +18800,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
               View {selectedHardware?.hardwareName || 'Hardware'}
@@ -18680,7 +18811,7 @@ export default function App() {
           </DialogHeader>
 
           {selectedHardware && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] pb-4">
+            <div className="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] pb-4 pr-1">
               {/* Left Column: Details */}
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
@@ -18796,6 +18927,22 @@ export default function App() {
                       <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No external units assigned.</p>
                     )}
                   </div>
+
+                  {(() => {
+                    const resolvedUtilities = resolveHardwareUtilities(selectedHardware, appNamesDetailList, utilities);
+                    return (
+                      <div>
+                        <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Utilities ({resolvedUtilities.length})</span>
+                        {resolvedUtilities.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {resolvedUtilities.map(d => <Badge key={d.id} variant="secondary">{d.name}</Badge>)}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500 dark:text-zinc-400 italic">No utilities assigned to this controller.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -18805,8 +18952,8 @@ export default function App() {
 
       {/* Add Hardware Modal */}
       <Dialog open={isAddHardwareOpen} onOpenChange={setIsAddHardwareOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[420px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-6 w-6 text-primary" />
               Add New Hardware
@@ -18816,7 +18963,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 pt-[3px] pb-3">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-[3px] pb-3 px-1">
             <div className="grid gap-2">
               <Label htmlFor="add-hw-name" className="flex items-center gap-2">
                 <Cpu className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" /> Hardware Name
@@ -18863,8 +19010,8 @@ export default function App() {
 
       {/* Edit Hardware Modal (UpdateHardwareDto wrapper) */}
       <Dialog open={isEditHardwareOpen} onOpenChange={setIsEditHardwareOpen}>
-        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto w-[90vw]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[800px] max-h-[90vh] flex flex-col overflow-hidden w-[90vw]">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-6 w-6 text-primary" />
               Edit {hardwareForm?.hardwareName || 'Hardware'}
@@ -18874,7 +19021,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] py-4">
+          <div className="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-6 pt-[3px] py-4 pr-1">
             {/* Left Column: Editable Details */}
             <div className="space-y-6">
               <div className="space-y-2">
@@ -19161,6 +19308,53 @@ export default function App() {
                       })}
                     </div>
                   </div>
+
+                  {/* Utilities Selection */}
+                  <div className="space-y-2 bg-muted/20 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-500 dark:text-zinc-400">Select Connected Utilities</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border font-mono bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300">
+                        {hardwareForm.utilityIdNames?.length || 0} linked
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(() => {
+                        const appUtilList = (appNamesDetailList?.utilityIdNames || appNamesDetailList?.UtilityIdNames || []).map((u: any) => ({
+                          id: Number(u?.id ?? u?.Id ?? 0),
+                          name: (u?.name ?? u?.Name ?? '').toString()
+                        })).filter((u: { id: number; name: string }) => u.id && !Number.isNaN(u.id));
+                        const fallbackUtilList = (utilities || []).map(u => ({
+                          id: Number(u.id),
+                          name: u.utilityName
+                        }));
+                        const utilMap = new Map<number, string>();
+                        fallbackUtilList.forEach(u => { if (u.id) utilMap.set(u.id, u.name); });
+                        appUtilList.forEach((u: { id: number; name: string }) => { if (u.id) utilMap.set(u.id, u.name || utilMap.get(u.id) || `Utility #${u.id}`); });
+                        const availableUtilities = Array.from(utilMap.entries()).map(([id, name]) => ({ id, name }));
+
+                        return availableUtilities.map((util) => {
+                          const isSelected = hardwareForm.utilityIdNames?.some(x => Number(x.id) === Number(util.id));
+                          return (
+                            <Badge 
+                              key={`util-${util.id}`} 
+                              variant={isSelected ? 'default' : 'outline'}
+                              className="cursor-pointer hover:opacity-85"
+                              onClick={() => {
+                                const currentList = hardwareForm.utilityIdNames || [];
+                                if (isSelected) {
+                                  setHardwareForm(prev => ({ ...prev, utilityIdNames: currentList.filter(x => Number(x.id) !== Number(util.id)) }));
+                                } else {
+                                  setHardwareForm(prev => ({ ...prev, utilityIdNames: [...currentList, { id: util.id, name: util.name }] }));
+                                }
+                              }}
+                            >
+                              {util.name} {isSelected && '✓'}
+                            </Badge>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
             </div>
             </ScrollArea>
           </div>
@@ -19182,7 +19376,8 @@ export default function App() {
                   cameraIds: (hardwareForm.cameraIdNames || []).map(x => x.id),
                   windowIds: (hardwareForm.windowIdNames || []).map(x => x.id),
                   doorIds: (hardwareForm.doorIdNames || []).map(x => x.id),
-                  externalIds: (hardwareForm.externalIdNames || []).map(x => x.id)
+                  externalIds: (hardwareForm.externalIdNames || []).map(x => x.id),
+                  utilityIds: (hardwareForm.utilityIdNames || []).map(x => x.id)
                 };
 
                 try {
@@ -19214,7 +19409,21 @@ export default function App() {
                   windowIdNames: hardwareForm.windowIdNames || [],
                   doorIdNames: hardwareForm.doorIdNames || [],
                   externalIdNames: hardwareForm.externalIdNames || [],
+                  utilityIdNames: hardwareForm.utilityIdNames || [],
                 } : item));
+
+                setSelectedHardware(prev => (prev && prev.id === updateDto.id) ? {
+                  ...prev,
+                  hardwareName: updateDto.hardwareName,
+                  authKey: updateDto.authKey,
+                  lightIdNames: hardwareForm.lightIdNames || [],
+                  applianceIdNames: hardwareForm.applianceIdNames || [],
+                  cameraIdNames: hardwareForm.cameraIdNames || [],
+                  windowIdNames: hardwareForm.windowIdNames || [],
+                  doorIdNames: hardwareForm.doorIdNames || [],
+                  externalIdNames: hardwareForm.externalIdNames || [],
+                  utilityIdNames: hardwareForm.utilityIdNames || [],
+                } : prev);
 
                 setIsEditHardwareOpen(false);
                 addLogEntry('System Diagnostic', `Updated hardware infrastructure map for: ${updateDto.hardwareName}`);
@@ -19410,7 +19619,7 @@ export default function App() {
       
       {/* View External Modal */}
       <Dialog open={isViewExternalOpen} onOpenChange={setIsViewExternalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -19460,7 +19669,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Radio className="h-5 w-5 text-primary" />
               View {selectedExternal?.externalName || 'External'}
@@ -19470,7 +19679,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           {selectedExternal && (
-            <div className="pt-[3px] pb-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Triggered Status</span>
@@ -19541,8 +19750,8 @@ export default function App() {
 
       {/* Edit External Device Modal */}
       <Dialog open={isEditExternalOpen} onOpenChange={setIsEditExternalOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[420px] max-h-[85vh] flex flex-col overflow-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 shadow-2xl">
+          <DialogHeader className="mb-0 shrink-0">
             <DialogTitle className="flex items-center gap-2 text-slate-900 dark:text-zinc-100">
               <Pencil className="h-6 w-6 text-primary" />
               Edit {externalForm?.externalName || 'External'}
@@ -19552,7 +19761,7 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="edit-ext-name" className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1 flex items-center gap-2">
                 <Radio className="h-3 w-3" /> External Device Name
@@ -20119,7 +20328,7 @@ export default function App() {
       </Dialog>
       {/* Appliance View Modal */}
       <Dialog open={isApplianceModalOpen} onOpenChange={setIsApplianceModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -20156,7 +20365,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Power className="h-5 w-5 text-primary" />
               View {selectedAppliance?.name || 'Appliance'}
@@ -20169,7 +20378,7 @@ export default function App() {
             const rawAppId = getRawId(selectedAppliance.id);
             const currentApplianceDto = (appliances || []).find(a => a.id.toString() === rawAppId || a.applianceName === selectedAppliance.name) as any;
             return (
-            <div className="pt-[3px] pb-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
@@ -20237,7 +20446,7 @@ export default function App() {
 
       {/* Utility View Modal */}
       <Dialog open={isUtilityModalOpen} onOpenChange={setIsUtilityModalOpen}>
-        <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -20323,7 +20532,7 @@ export default function App() {
 
             return (
               <>
-                <DialogHeader className="mb-0 pr-24">
+                <DialogHeader className="mb-0 pr-24 shrink-0">
                   <DialogTitle className="flex items-center gap-2 flex-wrap">
                     <HeaderIcon className="h-5 w-5 text-primary" />
                     <span>View {liveName}</span>
@@ -20338,7 +20547,7 @@ export default function App() {
                   </DialogDescription>
                 </DialogHeader>
                 {selectedUtility && (
-                  <div className="pt-[3px] pb-4 space-y-4">
+                  <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
@@ -20532,7 +20741,7 @@ export default function App() {
 
       {/* Door View Modal */}
       <Dialog open={isDoorModalOpen} onOpenChange={setIsDoorModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -20569,7 +20778,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-primary" />
               View {selectedDoor?.name || 'Door'}
@@ -20582,7 +20791,7 @@ export default function App() {
             const rawDoorId = getRawId(selectedDoor.id);
             const currentDoorDto = (doors || []).find(d => d.id.toString() === rawDoorId || d.doorName === selectedDoor.name) as any;
             return (
-            <div className="pt-[3px] pb-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
@@ -20654,7 +20863,7 @@ export default function App() {
       </Dialog>
       {/* Light View Modal */}
       <Dialog open={isLightModalOpen} onOpenChange={setIsLightModalOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -20691,7 +20900,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Lightbulb className="h-5 w-5 text-primary" />
               View {selectedLight?.name || 'Light'}
@@ -20704,7 +20913,7 @@ export default function App() {
             const rawLightId = getRawId(selectedLight.id);
             const currentLightDto = (lights || []).find(l => l.lightName === selectedLight?.name || l.id.toString() === rawLightId) as any;
             return (
-              <div className="pt-[3px] pb-4 space-y-4">
+              <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Status</span>
@@ -20773,7 +20982,7 @@ export default function App() {
       </Dialog>
       {/* Section View Modal */}
       <Dialog open={isViewSectionOpen} onOpenChange={setIsViewSectionOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             {isOwner && (
               <>
@@ -20825,7 +21034,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-primary" />
               View {viewingSection?.name || 'Section'}
@@ -20837,7 +21046,7 @@ export default function App() {
           {viewingSection && (() => {
             const currentSectionDto = (sections || []).find(s => s.id.toString() === viewingSection.id.toString() || (s as any).sectionId === viewingSection.id) as any;
             return (
-              <div className="pt-[3px] pb-4 space-y-4">
+              <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Section Name</span>
@@ -20903,7 +21112,7 @@ export default function App() {
 
       {/* Window View Modal */}
       <Dialog open={isViewWindowOpen} onOpenChange={setIsViewWindowOpen}>
-        <DialogContent className="sm:max-w-[450px]" showCloseButton={false}>
+        <DialogContent className="sm:max-w-[450px] max-h-[85vh] flex flex-col overflow-hidden" showCloseButton={false}>
           <div className="absolute right-4 top-4 flex items-center gap-1 z-50">
             <Button 
               variant="ghost" 
@@ -20936,7 +21145,7 @@ export default function App() {
               <X className="h-4 w-4" />
             </DialogClose>
           </div>
-          <DialogHeader className="mb-0 pr-24">
+          <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <WindowIcon className="h-5 w-5 text-primary" />
               View {selectedWindow?.name || 'Window'}
@@ -20949,7 +21158,7 @@ export default function App() {
             const rawWinId = getRawId(selectedWindow.id);
             const currentWindowDto = (windows || []).find(w => w.windowName === selectedWindow?.name || w.id.toString() === rawWinId) as any;
             return (
-              <div className="pt-[3px] pb-4 space-y-4">
+              <div className="flex-1 min-h-0 overflow-y-auto pt-[3px] pb-4 space-y-4 pr-1">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Lock Status</span>
@@ -21414,8 +21623,8 @@ export default function App() {
       </Dialog>
 
       <Dialog open={isEditActionOpen} onOpenChange={setIsEditActionOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0">
+        <DialogContent className="sm:max-w-[420px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 shrink-0">
             <div className="space-y-1">
               <DialogTitle className="flex items-center gap-2">
                 <Edit3 className="h-5 w-5 text-primary shrink-0" />
@@ -21424,7 +21633,7 @@ export default function App() {
               <DialogDescription>Update action details</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="space-y-4 pt-[3px] pb-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pt-[3px] pb-4 px-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="grid gap-2">
               <Label htmlFor="edit-actionName" className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold ml-1 flex items-center gap-1.5">
                 <Play className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
@@ -21545,8 +21754,8 @@ export default function App() {
       {/* Add Action Step Modal */}
       {/* Add Action Step Modal */}
       <Dialog open={isAddActionStepOpen} onOpenChange={setIsAddActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+        <DialogContent className="sm:max-w-[420px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2 shrink-0">
             <div className="space-y-1">
               <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
                 <PlusCircle className="h-6 w-6 text-primary shrink-0" />
@@ -21555,7 +21764,7 @@ export default function App() {
               <DialogDescription className="text-xs font-medium">Add a new operation to this action</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="space-y-6 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pt-[3px] pb-4 px-1">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
@@ -21759,8 +21968,8 @@ export default function App() {
 
       {/* Edit Action Step Modal */}
       <Dialog open={isEditActionStepOpen} onOpenChange={setIsEditActionStepOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader className="mb-0 pt-5 px-6 pb-2">
+        <DialogContent className="sm:max-w-[420px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="mb-0 pt-5 px-6 pb-2 shrink-0">
             <div className="space-y-1">
               <DialogTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
                 <Pencil className="h-6 w-6 text-primary shrink-0" />
@@ -21769,7 +21978,7 @@ export default function App() {
               <DialogDescription className="text-xs font-medium">Modify operation settings for this step</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="space-y-6 pt-[3px] pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pt-[3px] pb-4 px-1">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Facility Type</Label>
