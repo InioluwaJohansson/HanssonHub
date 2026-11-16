@@ -240,7 +240,9 @@ import {
   Trash,
   Info,
   Maximize,
+  Maximize2,
   Minimize,
+  Minimize2,
   CameraOff,
   ScanLine,
   LogOut,
@@ -2454,11 +2456,42 @@ const resolveUtilityTypeName = (val: any, appList?: any): string => {
   return fallback?.name || 'Electricity';
 };
 
-const resolveUtilityComponentId = (val: any, appList?: any): number | null => {
+const resolveUtilityComponentId = (
+  val: any,
+  appList?: any,
+  utilityTypeId?: number | string | null
+): number | null => {
   if (val === undefined || val === null || val === '') return null;
-  if (typeof val === 'number' && !Number.isNaN(val)) return val;
+  const hasType = utilityTypeId !== undefined && utilityTypeId !== null && utilityTypeId !== '';
+  const resolvedType = hasType ? resolveUtilityTypeId(utilityTypeId, appList) : null;
+  const allowedComponents =
+    resolvedType !== null ? getUtilityComponentsForType(resolvedType, appList) : null;
+
+  if (allowedComponents !== null && allowedComponents.length === 0) {
+    return null;
+  }
+
+  if (typeof val === 'number' && !Number.isNaN(val)) {
+    if (allowedComponents !== null) {
+      return allowedComponents.some((c) => Number(c.id) === val) ? val : null;
+    }
+    return val;
+  }
+
   const str = val.toString().trim();
-  if (/^-?\d+$/.test(str)) return parseInt(str, 10);
+  if (/^-?\d+$/.test(str)) {
+    const parsed = parseInt(str, 10);
+    if (allowedComponents !== null) {
+      return allowedComponents.some((c) => Number(c.id) === parsed) ? parsed : null;
+    }
+    return parsed;
+  }
+
+  if (allowedComponents !== null) {
+    const found = allowedComponents.find((c) => c.name.toLowerCase() === str.toLowerCase());
+    return found ? found.id : null;
+  }
+
   const groups = normalizeUtilityComponentsList(appList?.utilityComponent);
   for (const g of [...groups, ...DEFAULT_UTILITY_COMPONENTS]) {
     const found = g.components.find((c) => c.name.toLowerCase() === str.toLowerCase());
@@ -2467,10 +2500,38 @@ const resolveUtilityComponentId = (val: any, appList?: any): number | null => {
   return null;
 };
 
-const resolveUtilityComponentName = (val: any, appList?: any): string => {
+const resolveUtilityComponentName = (
+  val: any,
+  appList?: any,
+  utilityTypeId?: number | string | null
+): string => {
   if (val === undefined || val === null || val === '') return '';
-  if (typeof val === 'string' && !/^-?\d+$/.test(val.trim())) return val.trim();
+  const hasType = utilityTypeId !== undefined && utilityTypeId !== null && utilityTypeId !== '';
+  const resolvedType = hasType ? resolveUtilityTypeId(utilityTypeId, appList) : null;
+  const allowedComponents =
+    resolvedType !== null ? getUtilityComponentsForType(resolvedType, appList) : null;
+
+  if (allowedComponents !== null && allowedComponents.length === 0) {
+    return '';
+  }
+
+  if (typeof val === 'string' && !/^-?\d+$/.test(val.trim())) {
+    const trimmed = val.trim();
+    if (allowedComponents !== null) {
+      const found = allowedComponents.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+      return found ? found.name : '';
+    }
+    return trimmed;
+  }
+
   const id = Number(val);
+  if (Number.isNaN(id)) return '';
+
+  if (allowedComponents !== null) {
+    const found = allowedComponents.find((c) => Number(c.id) === id);
+    return found ? found.name : '';
+  }
+
   const groups = normalizeUtilityComponentsList(appList?.utilityComponent);
   for (const g of [...groups, ...DEFAULT_UTILITY_COMPONENTS]) {
     const found = g.components.find((c) => Number(c.id) === id);
@@ -2478,6 +2539,15 @@ const resolveUtilityComponentName = (val: any, appList?: any): string => {
   }
   const enumName = (UtilityComponent as any)[id];
   return typeof enumName === 'string' ? enumName : '';
+};
+
+const isWaterPumpComponent = (compVal: any, appList?: any): boolean => {
+  const compId = resolveUtilityComponentId(compVal, appList, UtilityType.Water);
+  if (compId === UtilityComponent.WaterPump) return true;
+  const compName = resolveUtilityComponentName(compVal, appList, UtilityType.Water)
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  return compName === 'waterpump';
 };
 
 const normalizeUtilityDto = (raw: any): GetUtilityDto => {
@@ -2542,8 +2612,8 @@ const mapUtilityToDevice = (item: any, existingDev?: Device, appList?: any): Dev
 
   const hasRawComp = item?.utilityComponent !== undefined || item?.UtilityComponent !== undefined;
   const rawComp = hasRawComp ? (item?.utilityComponent ?? item?.UtilityComponent) : existingDev?.utilityComponent;
-  const utilityComponentId = resolveUtilityComponentId(rawComp, appList);
-  const utilityComponentName = resolveUtilityComponentName(utilityComponentId, appList);
+  const utilityComponentId = resolveUtilityComponentId(rawComp, appList, utilityTypeId);
+  const utilityComponentName = resolveUtilityComponentName(utilityComponentId, appList, utilityTypeId);
 
   const nameVal = item?.utilityName ?? item?.UtilityName ?? item?.name ?? existingDev?.name ?? 'Unknown Utility';
   const utilityIdVal = (item?.utilityId ?? item?.UtilityId) !== undefined
@@ -3487,7 +3557,7 @@ export default function App() {
     if (activeEmergencyItems.length === 0) return null;
     let maxCompId: number = UtilityComponent.EmergencyNone;
     activeEmergencyItems.forEach((d) => {
-      const compId = resolveUtilityComponentId(d.utilityComponent, appNamesDetailList);
+      const compId = resolveUtilityComponentId(d.utilityComponent, appNamesDetailList, UtilityType.Emergency);
       if (
         compId !== null &&
         compId >= UtilityComponent.EmergencyNone &&
@@ -4434,7 +4504,14 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
   const [isRestartingCamera, setIsRestartingCamera] = React.useState(false);
   const [isScreensaverOpen, setIsScreensaverOpen] = React.useState(false);
+  const [expandedScreensaverFeedIndex, setExpandedScreensaverFeedIndex] = React.useState<number | null>(null);
   const videoContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isScreensaverOpen) {
+      setExpandedScreensaverFeedIndex(null);
+    }
+  }, [isScreensaverOpen]);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const inactivityTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -9201,188 +9278,208 @@ export default function App() {
         return;
       }
 
-      const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
+      const executeToggle = async () => {
+        const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
 
-      // Determine next status and state
-      let newStatus = d.status;
-      let nextActive = false;
-      if (d.type === 'light') {
-        nextActive = d.status === 'off';
-        newStatus = nextActive ? 'on' : 'off';
-      } else if (d.type === 'appliance' || d.type === 'utility') {
-        nextActive = (d.status === 'off' || d.status === 'inactive');
-        newStatus = nextActive ? 'on' : 'off';
-      } else if (d.type === 'door' || d.type === 'window') {
-        newStatus = d.status === 'locked' ? 'unlocked' : 'locked';
-      } else if (d.type === 'camera') {
-        nextActive = d.status === 'inactive';
-        newStatus = nextActive ? 'active' : 'inactive';
-      } else if (d.type === 'external' as any) {
-        nextActive = d.status === 'inactive';
-        newStatus = nextActive ? 'active' : 'inactive';
-      }
-
-      // Keep original states to revert on failure
-      const prevDevices = [...devices];
-      const prevLights = [...lights];
-      const prevAppliances = [...appliances];
-      const prevUtilities = [...utilities];
-      const prevCameras = [...cameras];
-      const prevDoors = [...doors];
-      const prevExternals = [...externals];
-
-      // Optimistic update
-      setDevices(prev => prev.map(dev => dev.id === d.id ? { 
-        ...dev, 
-        status: newStatus as any,
-        value: (d.type === 'light' && nextActive && (dev.value === undefined || dev.value === 0)) ? 100 : dev.value
-      } : dev));
-      if (d.type === 'light') {
-        setLights(prev => prev.map(item => item.id.toString() === rawId ? { 
-          ...item, 
-          isActive: nextActive,
-          brightnessLevel: (nextActive && (item.brightnessLevel === undefined || item.brightnessLevel === 0)) ? 100 : item.brightnessLevel
-        } : item));
-      } else if (d.type === 'appliance') {
-        setAppliances(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
-      } else if (d.type === 'utility') {
-        setUtilities(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive, powerActive: nextActive, lastModifiedOn: new Date().toISOString() } : item));
-      } else if (d.type === 'camera') {
-        setCameras(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
-      } else if (d.type === 'external' as any) {
-        setExternals(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
-      }
-
-      try {
-        if (d.type === 'door') {
-          await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
-          setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
-        } else if (d.type === 'window') {
-          await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
-          setWindows(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
-        } else if (d.type === 'light') {
-          const lightDto = (prevLights || []).find(l => l.id.toString() === rawId.toString());
-          const calculatedBrightness = (nextActive && (d.value === 0 || d.value === undefined || (lightDto && (lightDto.brightnessLevel === 0 || lightDto.brightnessLevel === undefined)))) ? 100 : (d.value ?? lightDto?.brightnessLevel ?? 100);
-          const payload = { 
-            id: parseInt(rawId), 
-            isActive: nextActive, 
-            lightName: lightDto?.lightName || d.name,
-            brightnessLevel: calculatedBrightness,
-            roomId: resolveRoomId(lightDto?.roomId, rooms),
-            sectionId: resolveSectionId(lightDto?.sectionId, sections),
-            isHidden: false
-          };
-          await apiFetch('/Light/UpdateLight', { 
-            method: 'PUT', 
-            body: JSON.stringify(payload)
-          });
-        } else if (d.type === 'appliance') {
-          const appDto = (prevAppliances || []).find(a => a.id.toString() === rawId.toString());
-          const payload = { 
-            id: parseInt(rawId), 
-            isActive: nextActive, 
-            applianceName: appDto?.applianceName || d.name,
-            applianceType: appDto?.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1) : 1,
-            roomId: resolveRoomId(appDto?.roomId, rooms),
-            sectionId: resolveSectionId(appDto?.sectionId, sections),
-            isHidden: false
-          };
-          await apiFetch('/Appliance/UpdateAppliance', { 
-            method: 'PUT', 
-            body: JSON.stringify(payload)
-          });
-        } else if (d.type === 'utility') {
-          const utilDto = (prevUtilities || []).find(u => u.id.toString() === rawId.toString());
-          const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
-          const resolvedCompId = resolveUtilityComponentId(utilDto?.utilityComponent ?? d.utilityComponent, appNamesDetailList);
-          const payload = { 
-            id: parseInt(rawId), 
-            utilityName: utilDto?.utilityName || d.name,
-            utilityId: utilDto?.utilityId || d.utilityId || '',
-            utilityType: resolvedTypeId,
-            utilityComponent: resolvedCompId,
-            isActive: nextActive, 
-            timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
-            currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
-            voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
-            powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
-            powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
-            actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
-            currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
-            maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
-            minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null
-          };
-          await apiFetch('/Utility/UpdateUtility', { 
-            method: 'PUT', 
-            body: JSON.stringify(payload)
-          });
+        // Determine next status and state
+        let newStatus = d.status;
+        let nextActive = false;
+        if (d.type === 'light') {
+          nextActive = d.status === 'off';
+          newStatus = nextActive ? 'on' : 'off';
+        } else if (d.type === 'appliance' || d.type === 'utility') {
+          nextActive = (d.status === 'off' || d.status === 'inactive');
+          newStatus = nextActive ? 'on' : 'off';
+        } else if (d.type === 'door' || d.type === 'window') {
+          newStatus = d.status === 'locked' ? 'unlocked' : 'locked';
         } else if (d.type === 'camera') {
-          const token = localStorage.getItem('token');
-          await apiFetch(`/Camera/ToggleCamera?id=${rawId}`, { 
-            method: 'POST', 
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            body: ''
-          });
+          nextActive = d.status === 'inactive';
+          newStatus = nextActive ? 'active' : 'inactive';
         } else if (d.type === 'external' as any) {
-          const extDto = (prevExternals || []).find(e => e.id.toString() === rawId.toString());
-          if (extDto) {
-            const payload = {
-              id: parseInt(rawId),
-              externalName: extDto.externalName,
-              isActive: nextActive,
-              isTriggered: isExternalTriggered(extDto),
-              actionIds: extDto.actionIds || [],
-              roomId: resolveRoomId(extDto.roomId, rooms),
-              sectionId: resolveSectionId(extDto.sectionId, sections),
+          nextActive = d.status === 'inactive';
+          newStatus = nextActive ? 'active' : 'inactive';
+        }
+
+        // Keep original states to revert on failure
+        const prevDevices = [...devices];
+        const prevLights = [...lights];
+        const prevAppliances = [...appliances];
+        const prevUtilities = [...utilities];
+        const prevCameras = [...cameras];
+        const prevDoors = [...doors];
+        const prevExternals = [...externals];
+
+        // Optimistic update
+        setDevices(prev => prev.map(dev => dev.id === d.id ? { 
+          ...dev, 
+          status: newStatus as any,
+          value: (d.type === 'light' && nextActive && (dev.value === undefined || dev.value === 0)) ? 100 : dev.value
+        } : dev));
+        if (d.type === 'light') {
+          setLights(prev => prev.map(item => item.id.toString() === rawId ? { 
+            ...item, 
+            isActive: nextActive,
+            brightnessLevel: (nextActive && (item.brightnessLevel === undefined || item.brightnessLevel === 0)) ? 100 : item.brightnessLevel
+          } : item));
+        } else if (d.type === 'appliance') {
+          setAppliances(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+        } else if (d.type === 'utility') {
+          setUtilities(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive, powerActive: nextActive, lastModifiedOn: new Date().toISOString() } : item));
+        } else if (d.type === 'camera') {
+          setCameras(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+        } else if (d.type === 'external' as any) {
+          setExternals(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isActive: nextActive } : item));
+        }
+
+        try {
+          if (d.type === 'door') {
+            await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
+            setDoors(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
+          } else if (d.type === 'window') {
+            await apiFetch(`/Window/LockWindow?id=${rawId}`, { method: 'PUT' });
+            setWindows(prev => prev.map(item => item.id.toString() === rawId ? { ...item, isLocked: !item.isLocked } : item));
+          } else if (d.type === 'light') {
+            const lightDto = (prevLights || []).find(l => l.id.toString() === rawId.toString());
+            const calculatedBrightness = (nextActive && (d.value === 0 || d.value === undefined || (lightDto && (lightDto.brightnessLevel === 0 || lightDto.brightnessLevel === undefined)))) ? 100 : (d.value ?? lightDto?.brightnessLevel ?? 100);
+            const payload = { 
+              id: parseInt(rawId), 
+              isActive: nextActive, 
+              lightName: lightDto?.lightName || d.name,
+              brightnessLevel: calculatedBrightness,
+              roomId: resolveRoomId(lightDto?.roomId, rooms),
+              sectionId: resolveSectionId(lightDto?.sectionId, sections),
               isHidden: false
             };
-            await apiFetch('/External/UpdateExternal', { 
+            await apiFetch('/Light/UpdateLight', { 
               method: 'PUT', 
               body: JSON.stringify(payload)
             });
+          } else if (d.type === 'appliance') {
+            const appDto = (prevAppliances || []).find(a => a.id.toString() === rawId.toString());
+            const payload = { 
+              id: parseInt(rawId), 
+              isActive: nextActive, 
+              applianceName: appDto?.applianceName || d.name,
+              applianceType: appDto?.applianceType ? ((appNamesDetailList?.applianceType || []).find(t => t.name === (appDto as any).applianceType)?.id || 1) : 1,
+              roomId: resolveRoomId(appDto?.roomId, rooms),
+              sectionId: resolveSectionId(appDto?.sectionId, sections),
+              isHidden: false
+            };
+            await apiFetch('/Appliance/UpdateAppliance', { 
+              method: 'PUT', 
+              body: JSON.stringify(payload)
+            });
+          } else if (d.type === 'utility') {
+            const utilDto = (prevUtilities || []).find(u => u.id.toString() === rawId.toString());
+            const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
+            const resolvedCompId = resolveUtilityComponentId(utilDto?.utilityComponent ?? d.utilityComponent, appNamesDetailList, resolvedTypeId);
+            const payload = { 
+              id: parseInt(rawId), 
+              utilityName: utilDto?.utilityName || d.name,
+              utilityId: utilDto?.utilityId || d.utilityId || '',
+              utilityType: resolvedTypeId,
+              utilityComponent: resolvedCompId,
+              isActive: nextActive, 
+              timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
+              currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
+              voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
+              powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
+              powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
+              actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
+              currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
+              maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
+              minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null
+            };
+            await apiFetch('/Utility/UpdateUtility', { 
+              method: 'PUT', 
+              body: JSON.stringify(payload)
+            });
+          } else if (d.type === 'camera') {
+            const token = localStorage.getItem('token');
+            await apiFetch(`/Camera/ToggleCamera?id=${rawId}`, { 
+              method: 'POST', 
+              headers: {
+                'Authorization': `Bearer ${token}`
+              },
+              body: ''
+            });
+          } else if (d.type === 'external' as any) {
+            const extDto = (prevExternals || []).find(e => e.id.toString() === rawId.toString());
+            if (extDto) {
+              const payload = {
+                id: parseInt(rawId),
+                externalName: extDto.externalName,
+                isActive: nextActive,
+                isTriggered: isExternalTriggered(extDto),
+                actionIds: extDto.actionIds || [],
+                roomId: resolveRoomId(extDto.roomId, rooms),
+                sectionId: resolveSectionId(extDto.sectionId, sections),
+                isHidden: false
+              };
+              await apiFetch('/External/UpdateExternal', { 
+                method: 'PUT', 
+                body: JSON.stringify(payload)
+              });
+            }
           }
-        }
-        
-        let toggleMsg = `${d.name} updated`;
-        if (d.type === 'appliance') {
-          toggleMsg = `${d.name} turned ${nextActive ? 'On' : 'Off'}`;
-        } else if (d.type === 'camera') {
-          toggleMsg = `${d.name} is ${nextActive ? 'Live' : 'Disabled'}`;
-        } else if (d.type === 'door' || d.type === 'window') {
-          toggleMsg = `${d.name} is ${newStatus === 'locked' ? 'Locked' : 'Unlocked'}`;
-        } else if (d.type === 'external' as any) {
-          toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Disabled'}`;
-        } else if (d.type === 'light') {
-          toggleMsg = `${d.name} is ${nextActive ? 'On' : 'Off'}`;
-        } else if (d.type === 'utility') {
-          toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Inactive'}`;
-        }
+          
+          let toggleMsg = `${d.name} updated`;
+          if (d.type === 'appliance') {
+            toggleMsg = `${d.name} turned ${nextActive ? 'On' : 'Off'}`;
+          } else if (d.type === 'camera') {
+            toggleMsg = `${d.name} is ${nextActive ? 'Live' : 'Disabled'}`;
+          } else if (d.type === 'door' || d.type === 'window') {
+            toggleMsg = `${d.name} is ${newStatus === 'locked' ? 'Locked' : 'Unlocked'}`;
+          } else if (d.type === 'external' as any) {
+            toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Disabled'}`;
+          } else if (d.type === 'light') {
+            toggleMsg = `${d.name} is ${nextActive ? 'On' : 'Off'}`;
+          } else if (d.type === 'utility') {
+            toggleMsg = `${d.name} is ${nextActive ? 'Active' : 'Inactive'}`;
+          }
 
-        toast.success(toggleMsg, {
-          icon: getNotificationIcon(d.type, {
-            isActive: nextActive,
-            status: newStatus,
-            utilityType: d.utilityType,
-            value: d.value
-          })
-        });
-      } catch (err: any) {
-        console.error("Failed to toggle device remotely", err);
-        toast.error(`Remote toggle failed: ${err.message}`, {
-          icon: getNotificationIcon(d.type, { utilityType: d.utilityType })
-        });
-        // Revert states on failure
-        setDevices(prevDevices);
-        setLights(prevLights);
-        setAppliances(prevAppliances);
-        setUtilities(prevUtilities);
-        setCameras(prevCameras);
-        setDoors(prevDoors);
-        setExternals(prevExternals);
+          toast.success(toggleMsg, {
+            icon: getNotificationIcon(d.type, {
+              isActive: nextActive,
+              status: newStatus,
+              utilityType: d.utilityType,
+              value: d.value
+            })
+          });
+        } catch (err: any) {
+          console.error("Failed to toggle device remotely", err);
+          toast.error(`Remote toggle failed: ${err.message}`, {
+            icon: getNotificationIcon(d.type, { utilityType: d.utilityType })
+          });
+          // Revert states on failure
+          setDevices(prevDevices);
+          setLights(prevLights);
+          setAppliances(prevAppliances);
+          setUtilities(prevUtilities);
+          setCameras(prevCameras);
+          setDoors(prevDoors);
+          setExternals(prevExternals);
+        }
+      };
+
+      if (d.type === 'utility') {
+        const utilTypeId = resolveUtilityTypeId(d.utilityType, appNamesDetailList);
+        if (
+          utilTypeId === UtilityType.Electricity ||
+          utilTypeId === UtilityType.Water ||
+          utilTypeId === UtilityType.Gas ||
+          utilTypeId === UtilityType.HVAC ||
+          utilTypeId === UtilityType.Telecommunication
+        ) {
+          requestAuth(() => {
+            void executeToggle();
+          });
+          return;
+        }
       }
-  };
+
+      await executeToggle();
+    };
 
   const handleUtilityComponentChange = async (id: string, nextComponentId: number) => {
     const d = devices.find(
@@ -9403,7 +9500,7 @@ export default function App() {
 
     const utilDto = (prevUtilities || []).find((u) => u.id.toString() === rawId.toString());
     const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
-    const nextCompName = resolveUtilityComponentName(nextComponentId, appNamesDetailList);
+    const nextCompName = resolveUtilityComponentName(nextComponentId, appNamesDetailList, resolvedTypeId);
 
     setDevices((prev) =>
       prev.map((dev) =>
@@ -10186,8 +10283,13 @@ export default function App() {
             const utilTypeId = resolveUtilityTypeId(editingDevice.utilityType, appNamesDetailList);
             const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
             const utilCompId = compsForType.length > 0
-              ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList)
+              ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList, utilTypeId)
               : null;
+            const isWaterPump = utilTypeId === UtilityType.Water && isWaterPumpComponent(utilCompId, appNamesDetailList);
+            const hasElectricalTelemetry =
+              utilTypeId === UtilityType.Electricity ||
+              utilTypeId === UtilityType.HVAC ||
+              isWaterPump;
             await apiFetch('/Utility/UpdateUtility', {
               method: 'PUT',
               body: JSON.stringify({
@@ -10198,14 +10300,14 @@ export default function App() {
                 utilityComponent: utilCompId,
                 isActive: editingDevice.status === 'on',
                 timeOut: editingDevice.timeOut !== undefined && editingDevice.timeOut !== null && editingDevice.timeOut !== ('' as any) ? Number(editingDevice.timeOut) : null,
-                currentLevel: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.currentLevel !== undefined && editingDevice.currentLevel !== null ? Number(editingDevice.currentLevel) : null,
-                voltageLevel: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.voltageLevel !== undefined && editingDevice.voltageLevel !== null ? Number(editingDevice.voltageLevel) : null,
-                powerConsumption: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? Number(editingDevice.powerConsumption) : null,
-                powerConsumptionToday: (utilTypeId === UtilityType.Electricity || utilTypeId === UtilityType.HVAC) && editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? Number(editingDevice.powerConsumptionToday) : null,
+                currentLevel: hasElectricalTelemetry && editingDevice.currentLevel !== undefined && editingDevice.currentLevel !== null ? Number(editingDevice.currentLevel) : null,
+                voltageLevel: hasElectricalTelemetry && editingDevice.voltageLevel !== undefined && editingDevice.voltageLevel !== null ? Number(editingDevice.voltageLevel) : null,
+                powerConsumption: hasElectricalTelemetry && editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? Number(editingDevice.powerConsumption) : null,
+                powerConsumptionToday: hasElectricalTelemetry && editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? Number(editingDevice.powerConsumptionToday) : null,
                 actionIds: utilTypeId === UtilityType.Emergency ? (editingDevice.actionIds || []).map(Number) : [],
-                currentWaterLevel: utilTypeId === UtilityType.Water && editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? Number(editingDevice.currentWaterLevel) : null,
-                maxWaterLevel: utilTypeId === UtilityType.Water && editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? Number(editingDevice.maxWaterLevel) : null,
-                minWaterLevel: utilTypeId === UtilityType.Water && editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? Number(editingDevice.minWaterLevel) : null
+                currentWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? Number(editingDevice.currentWaterLevel) : null,
+                maxWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? Number(editingDevice.maxWaterLevel) : null,
+                minWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? Number(editingDevice.minWaterLevel) : null
               })
             });
           } else if (editingDevice.type === 'window') {
@@ -10311,8 +10413,8 @@ export default function App() {
             const utilTypeId = resolveUtilityTypeId(editingDevice.utilityType, appNamesDetailList);
             const utilTypeName = resolveUtilityTypeName(utilTypeId, appNamesDetailList);
             const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
-            const utilCompId = compsForType.length > 0 ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList) : null;
-            const utilCompName = resolveUtilityComponentName(utilCompId, appNamesDetailList);
+            const utilCompId = compsForType.length > 0 ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList, utilTypeId) : null;
+            const utilCompName = resolveUtilityComponentName(utilCompId, appNamesDetailList, utilTypeId);
             const nextIsActive = editingDevice.status === 'on';
             setDevices(prev => prev.map(d => d.id === editingDevice.id ? {
               ...d,
@@ -10528,16 +10630,17 @@ export default function App() {
           const utilTypeId = resolveUtilityTypeId(newDevice.utilityType, appNamesDetailList);
           const compsForType = getUtilityComponentsForType(utilTypeId, appNamesDetailList);
           const utilCompId = compsForType.length > 0
-            ? (resolveUtilityComponentId(newDevice.utilityComponent, appNamesDetailList) ?? compsForType[0]?.id ?? null)
+            ? (resolveUtilityComponentId(newDevice.utilityComponent, appNamesDetailList, utilTypeId) ?? compsForType[0]?.id ?? null)
             : null;
+          const isCreateWaterPump = utilTypeId === UtilityType.Water && isWaterPumpComponent(utilCompId, appNamesDetailList);
           const payload = {
             utilityName: newDevice.name,
             utilityType: utilTypeId,
             utilityComponent: utilCompId,
             timeOut: newDevice.timeOut !== undefined && newDevice.timeOut !== null && newDevice.timeOut !== ('' as any) ? Number(newDevice.timeOut) : null,
             actionIds: utilTypeId === UtilityType.Emergency ? (newDevice.actionIds || []).map(Number) : [],
-            maxWaterLevel: utilTypeId === UtilityType.Water && newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? Number(newDevice.maxWaterLevel) : null,
-            minWaterLevel: utilTypeId === UtilityType.Water && newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? Number(newDevice.minWaterLevel) : null
+            maxWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterPump && newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? Number(newDevice.maxWaterLevel) : null,
+            minWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterPump && newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? Number(newDevice.minWaterLevel) : null
           };
           const res: any = await apiFetch('/Utility/CreateUtility', {
             method: 'POST',
@@ -10749,7 +10852,7 @@ export default function App() {
     }
 
     // Sorting
-    if (activeView.startsWith('facility-')) {
+    if (activeView.startsWith('facility-') && activeView !== 'facility-utilities') {
       filtered = [...filtered].sort((a, b) => {
         if (facilitySortBy === 'room') {
           const roomA = (rooms || []).find(r => r.id.toString() === a.room?.toString())?.name || 'No Room';
@@ -13292,26 +13395,6 @@ export default function App() {
                 />
               </div>
               <div className="flex flex-row items-center gap-3 shrink-0">
-                <div className="flex items-center rounded-lg border bg-card p-1">
-                  <button
-                    className={cn(
-                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      facilitySortBy === 'room' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                    )}
-                    onClick={() => setFacilitySortBy('room')}
-                  >
-                    By Room
-                  </button>
-                  <button
-                    className={cn(
-                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      facilitySortBy === 'section' ? "bg-primary text-primary-foreground font-semibold" : "hover:bg-muted text-slate-500 dark:text-zinc-400"
-                    )}
-                    onClick={() => setFacilitySortBy('section')}
-                  >
-                    By Section
-                  </button>
-                </div>
                 {isOwner && (
                   <Button onClick={() => {
                     setHardwareForm({ hardwareName: '' });
@@ -13901,7 +13984,7 @@ export default function App() {
                 )}
               </div>
               <div className="flex flex-row items-center gap-3 shrink-0">
-                {!isRoom && (
+                {!isRoom && activeView !== 'facility-utilities' && (
                   <div className="flex items-center rounded-lg border bg-card p-1">
                     <button
                       className={cn(
@@ -15866,7 +15949,7 @@ export default function App() {
                           <SelectValue placeholder="Select component">
                             {formatEnumLabel(
                               componentsForType.find((c: any) => c.id.toString() === selectedCompVal)?.name ||
-                              resolveUtilityComponentName(selectedCompVal, appNamesDetailList) ||
+                              resolveUtilityComponentName(selectedCompVal, appNamesDetailList, selectedTypeId) ||
                               'Select component'
                             )}
                           </SelectValue>
@@ -15897,7 +15980,7 @@ export default function App() {
                     />
                   </div>
 
-                  {selectedTypeId === UtilityType.Water && (
+                  {selectedTypeId === UtilityType.Water && !isWaterPumpComponent(selectedCompVal, appNamesDetailList) && (
                     <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                       <div className="grid gap-2">
                         <Label htmlFor="utility-min-water" className="flex items-center gap-2 text-[11px] font-semibold">
@@ -18044,7 +18127,7 @@ export default function App() {
                             setEditingDevice({
                               ...editingDevice,
                               utilityComponent: nextComp,
-                              utilityComponentName: resolveUtilityComponentName(nextComp, appNamesDetailList)
+                              utilityComponentName: resolveUtilityComponentName(nextComp, appNamesDetailList, currentTypeId)
                             });
                           }}
                         >
@@ -18052,7 +18135,7 @@ export default function App() {
                             <SelectValue placeholder="Select component">
                               {formatEnumLabel(
                                 componentsForType.find((c: any) => c.id.toString() === currentCompVal)?.name ||
-                                resolveUtilityComponentName(currentCompVal, appNamesDetailList) ||
+                                resolveUtilityComponentName(currentCompVal, appNamesDetailList, currentTypeId) ||
                                 'Select component'
                               )}
                             </SelectValue>
@@ -18099,8 +18182,29 @@ export default function App() {
                     </div>
 
                     {/* Power & Electrical Telemetry fields hidden from edit UI while preserving values in UpdateUtility payload */}
+                    {currentTypeId === UtilityType.Water && isWaterPumpComponent(currentCompVal, appNamesDetailList) && (
+                      <div className="space-y-2.5 pt-2 border-t">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                          <Zap className="h-3 w-3" /> Pump Electrical Telemetry
+                        </span>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Current</span>
+                            <span className="text-xs font-mono font-semibold">{Number(editingDevice.currentLevel ?? 0).toFixed(2)} A</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Voltage</span>
+                            <span className="text-xs font-mono font-semibold">{Number(editingDevice.voltageLevel ?? 0).toFixed(2)} V</span>
+                          </div>
+                          <div className="rounded-lg border bg-muted/40 p-2">
+                            <span className="text-[10px] uppercase text-muted-foreground block">Today</span>
+                            <span className="text-xs font-mono font-semibold">{Number(editingDevice.powerConsumptionToday ?? 0).toFixed(2)} kWh</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                    {currentTypeId === UtilityType.Water && (
+                    {currentTypeId === UtilityType.Water && !isWaterPumpComponent(currentCompVal, appNamesDetailList) && (
                       <div className="space-y-3 pt-2 border-t">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
                           <Droplets className="h-3 w-3" /> Water Level Thresholds
@@ -20495,10 +20599,9 @@ export default function App() {
             const rawComp = currentUtilityDto?.utilityComponent !== undefined
               ? currentUtilityDto.utilityComponent
               : selectedUtility?.utilityComponent;
-            const liveCompId = resolveUtilityComponentId(rawComp, appNamesDetailList);
-            const liveCompName = resolveUtilityComponentName(liveCompId, appNamesDetailList);
+            const liveCompId = resolveUtilityComponentId(rawComp, appNamesDetailList, liveTypeId);
+            const liveCompName = resolveUtilityComponentName(liveCompId, appNamesDetailList, liveTypeId);
             const liveName = currentUtilityDto?.utilityName || selectedUtility?.name || 'Utility';
-            const liveUtilityCode = currentUtilityDto?.utilityId || selectedUtility?.utilityId || '';
             const liveActive = currentUtilityDto ? Boolean(currentUtilityDto.isActive) : (selectedUtility?.status === 'on');
             const livePowerActive = currentUtilityDto?.powerActive ?? liveActive;
             const liveTimeOut = currentUtilityDto?.timeOut ?? selectedUtility?.timeOut;
@@ -20536,11 +20639,6 @@ export default function App() {
                   <DialogTitle className="flex items-center gap-2 flex-wrap">
                     <HeaderIcon className="h-5 w-5 text-primary" />
                     <span>View {liveName}</span>
-                    {liveUtilityCode && (
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {liveUtilityCode}
-                      </Badge>
-                    )}
                   </DialogTitle>
                   <DialogDescription>
                     Detailed telemetry and configuration for {liveName}.
@@ -20591,7 +20689,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    {(liveTypeId === UtilityType.Electricity || liveTypeId === UtilityType.HVAC) && (
+                    {(liveTypeId === UtilityType.Electricity ||
+                      liveTypeId === UtilityType.HVAC ||
+                      (liveTypeId === UtilityType.Water && isWaterPumpComponent(liveCompId, appNamesDetailList))) && (
                       <div className="pt-3 border-t space-y-2">
                         <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold block">
                           Live Electrical Telemetry
@@ -20599,25 +20699,25 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-3">
                           <div className="rounded-lg border bg-muted/40 p-2.5">
                             <span className="text-[10px] uppercase text-muted-foreground block">Current Level</span>
-                            <span className="text-sm font-mono font-semibold">{liveCurrent ?? 0} A</span>
+                            <span className="text-sm font-mono font-semibold">{Number(liveCurrent ?? 0).toFixed(2)} A</span>
                           </div>
                           <div className="rounded-lg border bg-muted/40 p-2.5">
                             <span className="text-[10px] uppercase text-muted-foreground block">Voltage Level</span>
-                            <span className="text-sm font-mono font-semibold">{liveVoltage ?? 0} V</span>
+                            <span className="text-sm font-mono font-semibold">{Number(liveVoltage ?? 0).toFixed(2)} V</span>
                           </div>
                           <div className="rounded-lg border bg-muted/40 p-2.5">
                             <span className="text-[10px] uppercase text-muted-foreground block">Power Consumption</span>
-                            <span className="text-sm font-mono font-semibold">{livePower ?? 0} W</span>
+                            <span className="text-sm font-mono font-semibold">{Number(livePower ?? 0).toFixed(2)} W</span>
                           </div>
                           <div className="rounded-lg border bg-muted/40 p-2.5">
                             <span className="text-[10px] uppercase text-muted-foreground block">Today's Consumption</span>
-                            <span className="text-sm font-mono font-semibold">{livePowerToday ?? 0} kWh</span>
+                            <span className="text-sm font-mono font-semibold">{Number(livePowerToday ?? 0).toFixed(2)} kWh</span>
                           </div>
                         </div>
                       </div>
                     )}
 
-                    {liveTypeId === UtilityType.Water && (
+                    {liveTypeId === UtilityType.Water && !isWaterPumpComponent(liveCompId, appNamesDetailList) && (
                       <div className="pt-3 border-t space-y-3">
                         <div className="rounded-xl border bg-muted/30 p-3.5">
                           <WaterTank
@@ -26486,9 +26586,17 @@ export default function App() {
                 const videoUrl = rawUrl 
                   ? resolveCameraUrl(rawUrl) 
                   : (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
+                const isFeedExpanded = expandedScreensaverFeedIndex === i;
                 
                 return (
-                  <div key={i} className="relative bg-zinc-950 rounded-sm overflow-hidden border border-white/5">
+                  <div
+                    key={i}
+                    className={
+                      isFeedExpanded
+                        ? "absolute inset-0 z-30 bg-black overflow-hidden"
+                        : "relative bg-zinc-950 rounded-sm overflow-hidden border border-white/5"
+                    }
+                  >
                     {camName ? (
                       <>
                         <HlsVideo 
@@ -26497,7 +26605,7 @@ export default function App() {
                           loop 
                           muted 
                           playsInline
-                          className="w-full h-full object-cover"
+                          className={`w-full h-full ${isFeedExpanded ? 'object-contain' : 'object-cover'}`}
                         />
                         <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
                           <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
@@ -26505,8 +26613,27 @@ export default function App() {
                             {camName}
                           </span>
                         </div>
-                        <div className="absolute bottom-4 right-4 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                           <span className="text-[10px] font-mono text-white/70">{format(new Date(), 'HH:mm:ss')}</span>
+                        <div className="absolute bottom-4 left-4 z-10">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedScreensaverFeedIndex(prev => (prev === i ? null : i));
+                            }}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                            title={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
+                            aria-label={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
+                            className="h-7 w-7 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/15 backdrop-blur-sm transition-colors cursor-pointer"
+                          >
+                            {isFeedExpanded ? (
+                              <Minimize2 className="h-3.5 w-3.5" />
+                            ) : (
+                              <Maximize2 className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
+                        <div className="absolute bottom-4 right-4 z-10 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
+                          <span className="text-[10px] font-mono text-white/70">{format(new Date(), 'HH:mm:ss')}</span>
                         </div>
                         <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent group-hover:border-white/5 transition-all" />
                       </>
@@ -26540,13 +26667,7 @@ export default function App() {
                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Security Monitor</span>
                    <span className="text-xl font-bold text-white tracking-widest">{format(new Date(), 'MMM dd, yyyy')}</span>
                  </div>
-                 <div className="h-8 w-px bg-white/10" />
-                 <div className="flex flex-col items-center">
-                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Active Feeds</span>
-                   <span className="text-xl font-bold text-emerald-400">{(userProfile.cameraIds?.length || 0).toString().padStart(2, '0')}</span>
-                 </div>
               </div>
-              <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">Double tap anywhere to resume session</p>
             </div>
           </motion.div>
         )}

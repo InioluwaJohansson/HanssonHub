@@ -90,18 +90,18 @@ export enum UtilityType {
 }
 
 export enum UtilityComponent {
-  Generator = 0,
-  SolarPanel = 1,
-  WaterTank = 2,
-  WaterPump = 3,
-  WaterMeter = 4,
-  GasCylinder = 5,
-  AirConditioner = 6,
-  Heater = 7,
-  EmergencyNone = 8,
-  EmergencyMild = 9,
-  EmergencySevere = 10,
-  EmergencyCritical = 11,
+  Generator = 1,
+  SolarPanel = 2,
+  WaterTank = 3,
+  WaterPump = 4,
+  WaterMeter = 5,
+  GasCylinder = 6,
+  AirConditioner = 7,
+  Heater = 8,
+  EmergencyNone = 9,
+  EmergencyMild = 10,
+  EmergencySevere = 11,
+  EmergencyCritical = 12,
 }
 
 export interface Device {

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Device } from '../types';
+import { Device, UtilityComponent } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Switch } from './ui/switch';
 import { Slider } from './ui/slider';
@@ -72,10 +72,10 @@ interface DeviceCardProps {
 }
 
 const DEFAULT_EMERGENCY_OPTIONS: { id: number; name: string }[] = [
-  { id: 8, name: 'EmergencyNone' },
-  { id: 9, name: 'EmergencyMild' },
-  { id: 10, name: 'EmergencySevere' },
-  { id: 11, name: 'EmergencyCritical' },
+  { id: UtilityComponent.EmergencyNone, name: 'EmergencyNone' },
+  { id: UtilityComponent.EmergencyMild, name: 'EmergencyMild' },
+  { id: UtilityComponent.EmergencySevere, name: 'EmergencySevere' },
+  { id: UtilityComponent.EmergencyCritical, name: 'EmergencyCritical' },
 ];
 
 const getIcon = (device: Device) => {
@@ -217,6 +217,32 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
   const isLocked = device.status === 'locked' || device.status === 'open-locked';
   const isOpen = device.status === 'open' || device.status === 'open-locked';
   const isSummary = variant === 'summary';
+  const utilityTypeNum = Number(device.utilityType || 1);
+  const isElectricityUtility =
+    device.type === 'utility' &&
+    (utilityTypeNum === 1 ||
+      String(device.utilityType ?? '').trim().toLowerCase() === 'electricity' ||
+      String(device.utilityTypeName ?? '').trim().toLowerCase() === 'electricity');
+  const isWaterUtility =
+    device.type === 'utility' &&
+    (utilityTypeNum === 2 ||
+      String(device.utilityType ?? '').trim().toLowerCase() === 'water' ||
+      String(device.utilityTypeName ?? '').trim().toLowerCase() === 'water');
+  const isWaterPumpUtility =
+    isWaterUtility &&
+    (Number(device.utilityComponent) === UtilityComponent.WaterPump ||
+      String(device.utilityComponentName ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'waterpump' ||
+      String(device.utilityComponent ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'waterpump');
+  const hasHvacMetrics =
+    device.type === 'utility' &&
+    utilityTypeNum === 4 &&
+    [device.voltageLevel, device.currentLevel, device.powerConsumptionToday].some(
+      (v) => v !== undefined && v !== null
+    );
+  const formatMetric2Dec = (val?: number | null) => {
+    const num = Number(val ?? 0);
+    return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+  };
 
   const handleDoorAction = (action: 'lock' | 'unlock' | 'open' | 'close') => {
     if ((device.type !== 'door' && device.type !== 'window') || isSummary) return;
@@ -340,8 +366,8 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <Badge variant={isActive ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <Badge variant={isActive ? "default" : "secondary"} className="text-[10px] uppercase tracking-wider shrink-0">
               {device.status.replace('-', ' ')}
             </Badge>
             {device.value !== undefined && (!isActive || isSummary) && (
@@ -349,8 +375,21 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 {`${device.value}%`}
               </span>
             )}
+            {device.type === 'utility' && !isSummary && (isElectricityUtility || isWaterPumpUtility || hasHvacMetrics) && (
+              <>
+                <span className="text-[11px] font-mono font-semibold text-foreground/90 whitespace-nowrap">
+                  {formatMetric2Dec(device.voltageLevel)}V
+                </span>
+                <span className="text-[11px] font-mono font-semibold text-foreground/90 whitespace-nowrap">
+                  {formatMetric2Dec(device.currentLevel)}A
+                </span>
+                <span className="text-[11px] font-mono font-semibold text-foreground/90 whitespace-nowrap">
+                  {formatMetric2Dec(device.powerConsumptionToday)} kWh
+                </span>
+              </>
+            )}
             {device.type === 'utility' && device.timeOut !== undefined && device.timeOut !== null && device.timeOut > 0 && (
-              <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+              <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground shrink-0">
                 <UtilityCountdown
                   timeOut={device.timeOut}
                   isActive={isActive}
@@ -401,27 +440,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
             
             {device.type === 'utility' && !isSummary && (() => {
               const ut = Number(device.utilityType || 1);
-              if (ut === 1 || ut === 4) {
-                const hasMetrics = [device.voltageLevel, device.currentLevel, device.powerConsumptionToday].some(v => v !== undefined && v !== null);
-                if (!hasMetrics) return null;
-                return (
-                  <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-border/50 text-[10px]">
-                    <div className="rounded-lg bg-muted/60 px-2 py-1">
-                      <span className="text-muted-foreground block uppercase text-[9px]">Voltage</span>
-                      <span className="font-mono font-semibold">{device.voltageLevel ?? 0}V</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/60 px-2 py-1">
-                      <span className="text-muted-foreground block uppercase text-[9px]">Current</span>
-                      <span className="font-mono font-semibold">{device.currentLevel ?? 0}A</span>
-                    </div>
-                    <div className="rounded-lg bg-muted/60 px-2 py-1">
-                      <span className="text-muted-foreground block uppercase text-[9px]">Today</span>
-                      <span className="font-mono font-semibold">{device.powerConsumptionToday ?? 0} kWh</span>
-                    </div>
-                  </div>
-                );
-              }
-              if (ut === 2) {
+              if (ut === 2 && !isWaterPumpUtility) {
                 return (
                   <div className="pt-2 border-t border-border/50">
                     <WaterTank
@@ -436,7 +455,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
               if (ut === 7) {
                 const options = emergencyOptions && emergencyOptions.length > 0 ? emergencyOptions : DEFAULT_EMERGENCY_OPTIONS;
                 const rawComp = device.utilityComponent;
-                let compId = options[0]?.id ?? 8;
+                let compId = options[0]?.id ?? UtilityComponent.EmergencyNone;
                 if (rawComp !== undefined && rawComp !== null && String(rawComp) !== '') {
                   const numeric = Number(rawComp);
                   if (!Number.isNaN(numeric) && options.some(o => Number(o.id) === numeric)) {
@@ -452,20 +471,20 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 const selectedOpt = options.find((o) => Number(o.id) === compId) || options[0];
                 const severityTextClass = !isActive
                   ? "text-muted-foreground font-medium"
-                  : compId === 11
+                  : compId === UtilityComponent.EmergencyCritical
                   ? "text-red-600 dark:text-red-400 font-semibold"
-                  : compId === 10
+                  : compId === UtilityComponent.EmergencySevere
                   ? "text-orange-600 dark:text-orange-400 font-semibold"
-                  : compId === 9
+                  : compId === UtilityComponent.EmergencyMild
                   ? "text-amber-600 dark:text-amber-400 font-semibold"
                   : "text-muted-foreground font-medium";
                 const severityDotClass = !isActive
                   ? "bg-muted-foreground/50"
-                  : compId === 11
+                  : compId === UtilityComponent.EmergencyCritical
                   ? "bg-red-500"
-                  : compId === 10
+                  : compId === UtilityComponent.EmergencySevere
                   ? "bg-orange-500"
-                  : compId === 9
+                  : compId === UtilityComponent.EmergencyMild
                   ? "bg-amber-500"
                   : "bg-slate-400";
                 const actionsCount = device.actionIds?.length || 0;
@@ -518,11 +537,11 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                           {options.map((opt) => {
                             const optId = Number(opt.id);
                             const optDot =
-                              optId === 11
+                              optId === UtilityComponent.EmergencyCritical
                                 ? "bg-red-500"
-                                : optId === 10
+                                : optId === UtilityComponent.EmergencySevere
                                 ? "bg-orange-500"
-                                : optId === 9
+                                : optId === UtilityComponent.EmergencyMild
                                 ? "bg-amber-500"
                                 : "bg-slate-400";
                             return (

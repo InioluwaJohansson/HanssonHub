@@ -30,8 +30,17 @@ export function WaterTank({
       : Math.min(100, Math.max(0, curr));
 
   const roundedPct = Math.round(fillPct * 10) / 10;
-  const isLow = hasMin && (maxVal > 100 ? curr < minVal : fillPct < minVal);
-  const isAboveMax = hasMax && maxVal > 0 && curr > maxVal;
+  const isEmpty = curr <= 0;
+  const isLow = !isEmpty && hasMin && (maxVal > 100 ? curr < minVal : fillPct < minVal);
+  const isFull = (hasMax && maxVal > 0 && curr >= maxVal) || fillPct >= 100;
+
+  const statusLabel = isEmpty
+    ? 'Water tank is empty'
+    : isLow
+    ? 'Water tank level is low'
+    : isFull
+    ? 'Water tank is full'
+    : 'Water tank level is normal';
 
   const tankDimensions = size === 'lg' ? 'w-24 h-36' : 'w-16 h-20';
   const labelHeight = size === 'lg' ? 'h-36' : 'h-20';
@@ -55,9 +64,11 @@ export function WaterTank({
             className={cn(
               'font-mono font-bold tracking-tight',
               size === 'lg' ? 'text-2xl' : 'text-lg',
-              isLow
+              isEmpty
+                ? 'text-rose-500'
+                : isLow
                 ? 'text-amber-500'
-                : isAboveMax
+                : isFull
                 ? 'text-cyan-500'
                 : 'text-sky-600 dark:text-sky-400'
             )}
@@ -68,14 +79,16 @@ export function WaterTank({
         <span
           className={cn(
             'text-[10px] font-medium mt-0.5',
-            isLow
+            isEmpty
+              ? 'text-rose-600 dark:text-rose-400'
+              : isLow
               ? 'text-amber-600 dark:text-amber-400'
-              : isAboveMax
+              : isFull
               ? 'text-emerald-600 dark:text-emerald-400'
               : 'text-muted-foreground'
           )}
         >
-          {isLow ? 'Low Water Alert' : isAboveMax ? 'Peak Capacity' : 'Normal Level'}
+          {statusLabel}
         </span>
       </div>
 
