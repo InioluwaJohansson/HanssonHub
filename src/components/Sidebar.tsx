@@ -128,6 +128,7 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
   const isRelativeOrVisitor = ['relative', 'visitor'].includes(userRoleNameLower);
   const canSeeActions = userRoleNum === 1 || userRoleNum === 2 || userRoleNum === 3 || 
                         ['owner', 'wife', 'child'].includes(userRoleNameLower);
+  const canSeeUtilities = canSeeActions;
 
   const facilityItems = [
     { id: 'facilities', label: 'Overview', icon: Layers },
@@ -141,7 +142,7 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
     { id: 'facility-windows', label: 'Windows', icon: WindowIcon },
     { id: 'facility-rooms', label: 'Rooms', icon: Sofa },
     { id: 'facility-sections', label: 'Sections', icon: LayoutGrid },
-    { id: 'facility-utilities', label: 'Utilities', icon: Zap },
+    ...(canSeeUtilities ? [{ id: 'facility-utilities', label: 'Utilities', icon: Zap }] : []),
   ];
 
   return (

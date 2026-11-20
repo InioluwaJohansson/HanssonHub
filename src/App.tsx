@@ -270,10 +270,13 @@ import {
   Wind,
   DoorOpen,
   DoorClosed,
-  LightbulbOff
+  LightbulbOff,
+  PanelTop,
+  Scaling,
+  MoveDiagonal2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import PullToRefresh from 'react-simple-pull-to-refresh';
+import { PullToRefresh } from './components/PullToRefresh';
 import { cn } from '@/lib/utils';
 import { LoginScreen } from './components/LoginScreen';
 import { RememberedUsersManager } from './utils/rememberedUsers';
@@ -3586,6 +3589,7 @@ export default function App() {
   const isOwner = userProfile?.getUserDto?.role === Role.Owner || userProfile?.getUserDto?.roleName?.toLowerCase() === 'owner';
   const isWifeOrChild = userProfile?.getUserDto?.role === Role.Wife || userProfile?.getUserDto?.role === Role.Child || ['wife', 'child'].includes(userProfile?.getUserDto?.roleName?.toLowerCase() || '');
   const canSeeActions = isOwner || isWifeOrChild;
+  const canSeeUtilities = isOwner || isWifeOrChild;
   const canUpdateUtilityDevice = React.useCallback((device: Pick<Device, 'type' | 'utilityType'> | null | undefined): boolean => {
     if (!device || device.type !== 'utility') return true;
     if (isOwner) return true;
@@ -3674,10 +3678,11 @@ export default function App() {
   }, [appNamesDetailList, allUsers]);
 
   React.useEffect(() => {
-    if (activeView === 'facility-actions' && !canSeeActions && isLoggedIn) {
+    if (!isLoggedIn) return;
+    if ((activeView === 'facility-actions' && !canSeeActions) || (activeView === 'facility-utilities' && !canSeeUtilities)) {
       setActiveView('dashboard');
     }
-  }, [activeView, canSeeActions, isLoggedIn]);
+  }, [activeView, canSeeActions, canSeeUtilities, isLoggedIn]);
 
   const getUserDetailsById = React.useCallback((personId: number) => {
     const list = appNamesDetailList?.personIdNames || [];
@@ -4505,13 +4510,257 @@ export default function App() {
   const [isRestartingCamera, setIsRestartingCamera] = React.useState(false);
   const [isScreensaverOpen, setIsScreensaverOpen] = React.useState(false);
   const [expandedScreensaverFeedIndex, setExpandedScreensaverFeedIndex] = React.useState<number | null>(null);
+  const [screensaverLayout, setScreensaverLayout] = React.useState<'grid' | 'spotlight' | 'custom'>('grid');
+  const [selectedScreensaverCameraIndex, setSelectedScreensaverCameraIndex] = React.useState<number>(0);
+  const [screensaverRowWeights, setScreensaverRowWeights] = React.useState<number[]>([]);
+  const [screensaverColWeights, setScreensaverColWeights] = React.useState<number[][]>([]);
+  const [screensaverSingleRowTileHeights, setScreensaverSingleRowTileHeights] = React.useState<Record<number, number>>({});
+  const [resizingScreensaverFeedIndex, setResizingScreensaverFeedIndex] = React.useState<number | null>(null);
+  const screensaverFeedRefs = React.useRef<Record<number, HTMLDivElement | null>>({});
+  const activeScreensaverResizeRef = React.useRef<{
+    index: number;
+    rowIdx: number;
+    colIdx: number;
+    mode: 'left' | 'right' | 'top' | 'bottom' | 'corner';
+    startX: number;
+    startY: number;
+    startRowWeights: number[];
+    startColWeights: number[][];
+    startTileHeightPct: number;
+    containerWidth: number;
+    containerHeight: number;
+  } | null>(null);
   const videoContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const getScreensaverGridRows = React.useCallback((totalCount: number): number[][] => {
+    if (totalCount <= 0) return [];
+    if (totalCount <= 3) {
+      return [Array.from({ length: totalCount }, (_, idx) => idx)];
+    }
+    const cols = Math.ceil(Math.sqrt(totalCount));
+    const rows: number[][] = [];
+    for (let idx = 0; idx < totalCount; idx += cols) {
+      rows.push(Array.from({ length: Math.min(cols, totalCount - idx) }, (_, c) => idx + c));
+    }
+    return rows;
+  }, []);
+
+  const getResolvedScreensaverWeights = React.useCallback(
+    (totalCount: number) => {
+      const gridRows = getScreensaverGridRows(totalCount);
+      const numRows = gridRows.length;
+      const normalizedRows =
+        screensaverRowWeights.length === numRows && screensaverRowWeights.every((w) => w > 0)
+          ? (() => {
+              const sum = screensaverRowWeights.reduce((a, b) => a + b, 0);
+              return screensaverRowWeights.map((w) => w / (sum || 1));
+            })()
+          : Array.from({ length: numRows }, () => (numRows > 0 ? 1 / numRows : 1));
+
+      const normalizedCols = gridRows.map((rowItems, rIdx) => {
+        const existingRow = screensaverColWeights[rIdx];
+        if (existingRow && existingRow.length === rowItems.length && existingRow.every((w) => w > 0)) {
+          const sum = existingRow.reduce((a, b) => a + b, 0);
+          return existingRow.map((w) => w / (sum || 1));
+        }
+        return Array.from({ length: rowItems.length }, () => 1 / rowItems.length);
+      });
+
+      return { gridRows, rowWeights: normalizedRows, colWeights: normalizedCols };
+    },
+    [getScreensaverGridRows, screensaverRowWeights, screensaverColWeights]
+  );
+
+  const startScreensaverResize = React.useCallback(
+    (
+      e: React.MouseEvent | React.TouchEvent,
+      index: number,
+      mode: 'left' | 'right' | 'top' | 'bottom' | 'corner',
+      totalCount: number
+    ) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (totalCount <= 1) return;
+
+      const clientX = 'touches' in e ? e.touches[0]?.clientX ?? 0 : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0]?.clientY ?? 0 : e.clientY;
+      const { gridRows, rowWeights, colWeights } = getResolvedScreensaverWeights(totalCount);
+
+      let foundRowIdx = -1;
+      let foundColIdx = -1;
+      for (let r = 0; r < gridRows.length; r++) {
+        const c = gridRows[r].indexOf(index);
+        if (c !== -1) {
+          foundRowIdx = r;
+          foundColIdx = c;
+          break;
+        }
+      }
+      if (foundRowIdx === -1 || foundColIdx === -1) return;
+
+      const startRowWeights =
+        screensaverLayout === 'custom'
+          ? [...rowWeights]
+          : Array.from({ length: gridRows.length }, () => 1 / gridRows.length);
+      const startColWeights =
+        screensaverLayout === 'custom'
+          ? colWeights.map((r) => [...r])
+          : gridRows.map((r) => Array.from({ length: r.length }, () => 1 / r.length));
+
+      if (screensaverLayout !== 'custom') {
+        setScreensaverRowWeights(startRowWeights);
+        setScreensaverColWeights(startColWeights);
+        setScreensaverLayout('custom');
+      }
+
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : 720;
+
+      activeScreensaverResizeRef.current = {
+        index,
+        rowIdx: foundRowIdx,
+        colIdx: foundColIdx,
+        mode,
+        startX: clientX,
+        startY: clientY,
+        startRowWeights,
+        startColWeights,
+        startTileHeightPct: screensaverSingleRowTileHeights[index] ?? 100,
+        containerWidth: Math.max(320, vw - 8),
+        containerHeight: Math.max(240, vh - 8),
+      };
+      setResizingScreensaverFeedIndex(index);
+    },
+    [screensaverLayout, getResolvedScreensaverWeights, screensaverSingleRowTileHeights]
+  );
+
+  React.useEffect(() => {
+    const handleMove = (clientX: number, clientY: number) => {
+      const drag = activeScreensaverResizeRef.current;
+      if (!drag) return;
+
+      const dx = clientX - drag.startX;
+      const dy = clientY - drag.startY;
+      const numRows = drag.startRowWeights.length;
+      const rowCols = drag.startColWeights[drag.rowIdx] || [];
+      const rowLen = rowCols.length;
+
+      // Adjust column weights within row so total row width stays 100% inside viewport
+      if ((drag.mode === 'left' || drag.mode === 'right' || drag.mode === 'corner') && rowLen > 1) {
+        let partnerCol = -1;
+        let sign = 1;
+        if (drag.mode === 'left' && drag.colIdx > 0) {
+          partnerCol = drag.colIdx - 1;
+          sign = -1;
+        } else if (drag.colIdx < rowLen - 1) {
+          partnerCol = drag.colIdx + 1;
+          sign = 1;
+        } else if (drag.colIdx > 0) {
+          partnerCol = drag.colIdx - 1;
+          sign = -1;
+        }
+
+        if (partnerCol !== -1) {
+          const dFrac = (dx / drag.containerWidth) * sign;
+          const minCol = Math.min(0.16, 0.7 / rowLen);
+          const pairSum = rowCols[drag.colIdx] + rowCols[partnerCol];
+          const nextSelf = Math.min(pairSum - minCol, Math.max(minCol, rowCols[drag.colIdx] + dFrac));
+          const nextPartner = pairSum - nextSelf;
+
+          const updatedCols = drag.startColWeights.map((r, rIdx) => {
+            if (rIdx !== drag.rowIdx) return [...r];
+            const copy = [...r];
+            copy[drag.colIdx] = nextSelf;
+            copy[partnerCol] = nextPartner;
+            return copy;
+          });
+          setScreensaverColWeights(updatedCols);
+        }
+      }
+
+      // Adjust row weights vertically (or tile height <= 100% for single-row layouts)
+      if (drag.mode === 'top' || drag.mode === 'bottom' || drag.mode === 'corner') {
+        if (numRows > 1) {
+          let partnerRow = -1;
+          let sign = 1;
+          if (drag.mode === 'top' && drag.rowIdx > 0) {
+            partnerRow = drag.rowIdx - 1;
+            sign = -1;
+          } else if (drag.rowIdx < numRows - 1) {
+            partnerRow = drag.rowIdx + 1;
+            sign = 1;
+          } else if (drag.rowIdx > 0) {
+            partnerRow = drag.rowIdx - 1;
+            sign = -1;
+          }
+
+          if (partnerRow !== -1) {
+            const dFrac = (dy / drag.containerHeight) * sign;
+            const minRow = Math.min(0.18, 0.7 / numRows);
+            const pairSum = drag.startRowWeights[drag.rowIdx] + drag.startRowWeights[partnerRow];
+            const nextSelf = Math.min(pairSum - minRow, Math.max(minRow, drag.startRowWeights[drag.rowIdx] + dFrac));
+            const nextPartner = pairSum - nextSelf;
+
+            const updatedRows = [...drag.startRowWeights];
+            updatedRows[drag.rowIdx] = nextSelf;
+            updatedRows[partnerRow] = nextPartner;
+            setScreensaverRowWeights(updatedRows);
+          }
+        } else if (numRows === 1) {
+          const dPct = (dy / drag.containerHeight) * 100;
+          const nextPct = Math.min(100, Math.max(30, Math.round(drag.startTileHeightPct + dPct)));
+          setScreensaverSingleRowTileHeights((prev) => ({
+            ...prev,
+            [drag.index]: nextPct,
+          }));
+        }
+      }
+    };
+
+    const onMouseMove = (ev: MouseEvent) => handleMove(ev.clientX, ev.clientY);
+    const onTouchMove = (ev: TouchEvent) => {
+      if (activeScreensaverResizeRef.current && ev.touches[0]) {
+        handleMove(ev.touches[0].clientX, ev.touches[0].clientY);
+      }
+    };
+    const onEnd = () => {
+      if (activeScreensaverResizeRef.current) {
+        activeScreensaverResizeRef.current = null;
+        setResizingScreensaverFeedIndex(null);
+      }
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
+    window.addEventListener('touchcancel', onEnd);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onEnd);
+      window.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!isScreensaverOpen) {
       setExpandedScreensaverFeedIndex(null);
+      setResizingScreensaverFeedIndex(null);
+      activeScreensaverResizeRef.current = null;
     }
   }, [isScreensaverOpen]);
+
+  React.useEffect(() => {
+    const camCount = userProfile?.cameraIds?.length || 0;
+    if (camCount > 0 && selectedScreensaverCameraIndex >= camCount) {
+      setSelectedScreensaverCameraIndex(0);
+    }
+    setScreensaverRowWeights([]);
+    setScreensaverColWeights([]);
+    setScreensaverSingleRowTileHeights({});
+  }, [userProfile?.cameraIds?.length, selectedScreensaverCameraIndex]);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const inactivityTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -8541,44 +8790,322 @@ export default function App() {
 
   const handleRefresh = async () => {
     try {
-        setRefreshState('loading');
-        setRefreshProgress(70);
-        const p1 = apiFetch('/Room/GetAllRooms', { method: 'POST' }).then((res: any) => { if (res && res.data) setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' }))); });
-        const p1_user = apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setUserRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' }))); });
-        const p2 = apiFetch('/Section/GetAllSections', { method: 'POST' }).then((res: any) => { if (res && res.data) setSections(res.data.map(mapSection)); });
-        const p3 = apiFetch('/Appliance/GetAllAppliances', { method: 'POST' }).then((res: any) => { if (res && res.data) { setAppliances(res.data); syncDevicesFromFetchedType('appliance', res.data); } });
-        const p3_util = apiFetch('/Utility/GetAllUtilities', { method: 'POST', body: '' })
+      setRefreshState('loading');
+      setRefreshProgress(40);
+
+      const refreshRooms = () =>
+        apiFetch('/Room/GetAllRooms', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
+            } else {
+              setRooms([]);
+            }
+          })
+          .catch(err => console.error("Failed to refresh rooms", err));
+
+      const refreshUserRooms = () =>
+        apiFetch('/Room/GetAllRoomsByPersonId', { method: 'POST', body: '' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setUserRooms(res.data.map((r: any) => ({ ...r, id: r.id ?? r.Id, name: r.roomName || r.name, section: r.sectionId?.toString() || r.SectionId?.toString() || r.sectionName || r.SectionName || r.section || r.Section || '', icon: r.icon || 'Sofa' })));
+            } else {
+              setUserRooms([]);
+            }
+          })
+          .catch(err => console.error("Failed to refresh user rooms", err));
+
+      const refreshSections = () =>
+        apiFetch('/Section/GetAllSections', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) setSections(res.data.map(mapSection));
+            else setSections([]);
+          })
+          .catch(err => console.error("Failed to refresh sections", err));
+
+      const refreshAppliances = () =>
+        apiFetch('/Appliance/GetAllAppliances', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setAppliances(res.data);
+              syncDevicesFromFetchedType('appliance', res.data);
+            } else {
+              setAppliances([]);
+              syncDevicesFromFetchedType('appliance', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh appliances", err));
+
+      const refreshUtilities = () =>
+        apiFetch('/Utility/GetAllUtilities', { method: 'POST', body: '' })
           .then((res: any) => {
             const rawList = res?.data ?? res?.Data;
             if (Array.isArray(rawList)) {
               const normalized = rawList.map(normalizeUtilityDto);
               setUtilities(normalized);
               syncDevicesFromFetchedType('utility', normalized);
+            } else {
+              setUtilities([]);
+              syncDevicesFromFetchedType('utility', []);
             }
           })
           .catch(err => console.error("Failed to refresh utilities", err));
-        const p4 = apiFetch('/Light/GetAllLights', { method: 'POST' }).then((res: any) => { if (res && res.data) { setLights(res.data); syncDevicesFromFetchedType('light', res.data); } });
-        const p5 = apiFetch('/Camera/GetAllCameras', { method: 'POST' }).then((res: any) => { if (res && res.data) { setCameras(res.data); syncDevicesFromFetchedType('camera', res.data); } });
-        const p6 = apiFetch('/Door/GetAllDoors', { method: 'POST' }).then((res: any) => { if (res && res.data) { setDoors(res.data); syncDevicesFromFetchedType('door', res.data); } });
-        const p7 = apiFetch('/Window/GetAllWindows', { method: 'POST' }).then((res: any) => { if (res && res.data) { setWindows(res.data); syncDevicesFromFetchedType('window', res.data); } });
-        const p8 = apiFetch('/External/GetAllExternals', { method: 'POST' }).then((res: any) => { if (res && res.data) { setExternals(res.data); syncDevicesFromFetchedType('external', res.data); } });
-        const p9 = apiFetch('/Hardware/GetAllHardwares', { method: 'GET' }).then((res: any) => {
-          const rawList = res?.data ?? res?.Data;
-          if (Array.isArray(rawList)) setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
-        });
-        const p10 = apiFetch('/Person/GetAllPersons', { method: 'POST' }).then((res: any) => { if (res && res.data) setAllUsers(res.data); });
-        const p11 = apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data); else setContactCategories([]); })
-          .catch(() => setContactCategories([]));
-        const p12 = apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' }).then((res: any) => { if (res && res.data) setContacts(res.data); });
-        const pLogs = apiFetch('/Log/GetAllLogs?page=1&pageSize=50', { method: 'POST', body: '' })
-          .then((res: any) => { if (res && res.data && Array.isArray(res.data) && res.data.length > 0) setLogs(res.data); else setLogs(INITIAL_LOGS); })
-          .catch(() => setLogs(INITIAL_LOGS));
-        await Promise.all([p1, p1_user, p2, p3, p3_util, p4, p5, p6, p7, p8, p9, p10, p11, p12, pLogs]);
-        setRefreshProgress(100);
-        setRefreshState('success');
-        setTimeout(() => setRefreshState('idle'), 1000);
-    } catch(err) {
+
+      const refreshLights = () =>
+        apiFetch('/Light/GetAllLights', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setLights(res.data);
+              syncDevicesFromFetchedType('light', res.data);
+            } else {
+              setLights([]);
+              syncDevicesFromFetchedType('light', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh lights", err));
+
+      const refreshCameras = () =>
+        apiFetch('/Camera/GetAllCameras', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setCameras(res.data);
+              syncDevicesFromFetchedType('camera', res.data);
+            } else {
+              setCameras([]);
+              syncDevicesFromFetchedType('camera', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh cameras", err));
+
+      const refreshDoors = () =>
+        apiFetch('/Door/GetAllDoors', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setDoors(res.data);
+              syncDevicesFromFetchedType('door', res.data);
+            } else {
+              setDoors([]);
+              syncDevicesFromFetchedType('door', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh doors", err));
+
+      const refreshWindows = () =>
+        apiFetch('/Window/GetAllWindows', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setWindows(res.data);
+              syncDevicesFromFetchedType('window', res.data);
+            } else {
+              setWindows([]);
+              syncDevicesFromFetchedType('window', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh windows", err));
+
+      const refreshExternals = () =>
+        apiFetch('/External/GetAllExternals', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setExternals(res.data);
+              syncDevicesFromFetchedType('external', res.data);
+            } else {
+              setExternals([]);
+              syncDevicesFromFetchedType('external', []);
+            }
+          })
+          .catch(err => console.error("Failed to refresh externals", err));
+
+      const refreshHardwares = () =>
+        apiFetch('/Hardware/GetAllHardwares', { method: 'GET' })
+          .then((res: any) => {
+            const rawList = res?.data ?? res?.Data;
+            if (Array.isArray(rawList)) {
+              setHardwares(rawList.map((hw: any) => normalizeHardwareDto(hw, appNamesDetailList, utilities)));
+            } else {
+              setHardwares([]);
+            }
+          })
+          .catch(err => console.error("Failed to refresh hardwares", err));
+
+      const refreshPersons = () =>
+        apiFetch('/Person/GetAllPersons', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) setAllUsers(res.data);
+            else setAllUsers([]);
+          })
+          .catch(err => console.error("Failed to refresh persons", err));
+
+      const refreshContactCategories = () =>
+        apiFetch('/ContactCategory/GetAllContactCategories', { method: 'POST' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) setContactCategories(res.data);
+            else setContactCategories([]);
+          })
+          .catch(err => console.error("Failed to refresh contact categories", err));
+
+      const refreshContacts = () =>
+        apiFetch('/Contact/GetAllContacts', { method: 'POST', body: '' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) setContacts(res.data);
+            else setContacts([]);
+          })
+          .catch(err => console.error("Failed to refresh contacts", err));
+
+      const refreshActions = () =>
+        apiFetch('/Action/GetAllActions', { method: 'POST', body: '' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) setActions(res.data);
+            else setActions([]);
+          })
+          .catch(err => console.error("Failed to refresh actions", err));
+
+      const refreshAppNames = () =>
+        apiFetch('/Dashboard/GetAppNamesIdList', { method: 'POST' })
+          .then((data: any) => {
+            if (data && (data.data ?? data.Data)) {
+              const responseData = data.data ?? data.Data;
+              setAppNamesDetailList((prev: any) => mergeAppNamesDetailList(prev, responseData));
+            }
+          })
+          .catch(err => console.error("Failed to refresh app names list", err));
+
+      const refreshLogs = (useDateFilter: boolean) => {
+        const page = 1;
+        const pageSize = 50;
+        const formatDateToDDMMYYYY = (dateVal: string | Date | null) => {
+          if (!dateVal) return '';
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return '';
+          const day = String(d.getDate()).padStart(2, '0');
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const year = d.getFullYear();
+          return `${day}-${month}-${year}`;
+        };
+        const endpoint =
+          useDateFilter && (logStartDate || logEndDate)
+            ? `/Log/GetAllLogsByDate?startDate=${formatDateToDDMMYYYY(logStartDate)}&endDate=${formatDateToDDMMYYYY(logEndDate || new Date())}&page=${page}&pageSize=${pageSize}`
+            : `/Log/GetAllLogs?page=${page}&pageSize=${pageSize}`;
+        return apiFetch(endpoint, { method: 'POST', body: '' })
+          .then((res: any) => {
+            if (res && res.data && Array.isArray(res.data)) {
+              setLogs(res.data.length > 0 ? res.data : (useDateFilter ? [] : INITIAL_LOGS));
+              setLogPage(1);
+              setHasMoreLogs(res.data.length >= pageSize);
+            } else {
+              setLogs(useDateFilter ? [] : INITIAL_LOGS);
+              setHasMoreLogs(false);
+            }
+          })
+          .catch(() => {
+            setLogs(useDateFilter ? [] : INITIAL_LOGS);
+            setHasMoreLogs(false);
+          });
+      };
+
+      const refreshProfile = () => {
+        const storedPersonId = localStorage.getItem('personId') || '1';
+        return apiFetch(`/Person/GetPersonById?id=${storedPersonId}`, { method: 'POST', body: '' })
+          .then((res: any) => {
+            if (res && res.data) {
+              setUserProfile(prev => {
+                const p = prev || INITIAL_USER;
+                return {
+                  ...p,
+                  ...res.data,
+                  id: (res.data.id ?? res.data.Id) || parseInt(storedPersonId),
+                  personId: res.data.personId || parseInt(storedPersonId)
+                };
+              });
+            }
+          })
+          .catch(err => console.error("Failed to refresh profile", err));
+      };
+
+      const tasks: Promise<any>[] = [];
+
+      if (activeView === 'facility-appliances') {
+        tasks.push(refreshAppliances());
+      } else if (activeView === 'facility-utilities') {
+        tasks.push(refreshUtilities());
+      } else if (activeView === 'facility-lights') {
+        tasks.push(refreshLights());
+      } else if (activeView === 'facility-cameras') {
+        tasks.push(refreshCameras());
+      } else if (activeView === 'facility-doors') {
+        tasks.push(refreshDoors());
+      } else if (activeView === 'facility-windows') {
+        tasks.push(refreshWindows());
+      } else if (activeView === 'facility-externals') {
+        tasks.push(refreshExternals(), refreshActions());
+      } else if (activeView === 'facility-hardware') {
+        tasks.push(refreshHardwares());
+      } else if (activeView === 'facility-rooms' || activeView === 'rooms') {
+        tasks.push(refreshRooms());
+      } else if (activeView === 'facility-sections') {
+        tasks.push(refreshSections());
+      } else if (activeView === 'facility-actions') {
+        tasks.push(refreshActions());
+      } else if (activeView === 'user-room') {
+        tasks.push(refreshUserRooms());
+      } else if (activeView.startsWith('room-')) {
+        tasks.push(
+          refreshRooms(),
+          refreshAppliances(),
+          refreshUtilities(),
+          refreshLights(),
+          refreshCameras(),
+          refreshDoors(),
+          refreshWindows()
+        );
+      } else if (activeView === 'contacts') {
+        tasks.push(refreshContactCategories(), refreshContacts());
+      } else if (activeView === 'all-users' || activeView === 'manage-users') {
+        tasks.push(refreshPersons());
+      } else if (activeView === 'logs') {
+        tasks.push(refreshLogs(true));
+      } else if (activeView === 'profile') {
+        tasks.push(refreshProfile());
+      } else if (activeView === 'facilities' || activeView === 'facility-overview') {
+        tasks.push(
+          refreshSections(),
+          refreshHardwares(),
+          refreshActions(),
+          refreshRooms(),
+          refreshExternals(),
+          refreshAppliances(),
+          refreshUtilities(),
+          refreshLights(),
+          refreshCameras(),
+          refreshDoors(),
+          refreshWindows()
+        );
+      } else {
+        // Dashboard view
+        tasks.push(
+          refreshAppNames(),
+          refreshLogs(false),
+          refreshExternals(),
+          refreshRooms(),
+          refreshUserRooms(),
+          refreshSections(),
+          refreshAppliances(),
+          refreshUtilities(),
+          refreshLights(),
+          refreshCameras(),
+          refreshDoors(),
+          refreshWindows(),
+          refreshHardwares(),
+          refreshActions()
+        );
+      }
+
+      setRefreshProgress(70);
+      await Promise.all(tasks);
+      setRefreshProgress(100);
+      setRefreshState('success');
+      setTimeout(() => setRefreshState('idle'), 1000);
+    } catch (err) {
       console.error(err);
       setRefreshProgress(100);
       setRefreshState('error');
@@ -9485,12 +10012,14 @@ export default function App() {
 
       if (d.type === 'utility') {
         const utilTypeId = resolveUtilityTypeId(d.utilityType, appNamesDetailList);
+        const isCurrentlyActive = d.status !== 'off' && d.status !== 'inactive';
         if (
           utilTypeId === UtilityType.Electricity ||
           utilTypeId === UtilityType.Water ||
           utilTypeId === UtilityType.Gas ||
           utilTypeId === UtilityType.HVAC ||
-          utilTypeId === UtilityType.Telecommunication
+          utilTypeId === UtilityType.Telecommunication ||
+          (utilTypeId === UtilityType.Emergency && isCurrentlyActive)
         ) {
           requestAuth(() => {
             void executeToggle();
@@ -9537,80 +10066,94 @@ export default function App() {
 
     const utilDto = (prevUtilities || []).find((u) => u.id.toString() === rawId.toString());
     const resolvedTypeId = resolveUtilityTypeId(utilDto?.utilityType ?? d.utilityType, appNamesDetailList);
-    const nextCompName = resolveUtilityComponentName(nextComponentId, appNamesDetailList, resolvedTypeId);
-
-    setDevices((prev) =>
-      prev.map((dev) =>
-        dev.id === d.id
-          ? {
-              ...dev,
-              utilityComponent: nextComponentId,
-              utilityComponentName: nextCompName,
-            }
-          : dev
-      )
-    );
-    setUtilities((prev) =>
-      prev.map((item) =>
-        item.id.toString() === rawId.toString()
-          ? {
-              ...item,
-              utilityComponent: nextComponentId,
-              lastModifiedOn: new Date().toISOString(),
-            }
-          : item
-      )
-    );
-    if (selectedUtility && selectedUtility.id === d.id) {
-      setSelectedUtility((prev) =>
-        prev
-          ? {
-              ...prev,
-              utilityComponent: nextComponentId,
-              utilityComponentName: nextCompName,
-            }
-          : prev
-      );
-    }
-
+    const currentCompId = resolveUtilityComponentId(utilDto?.utilityComponent ?? d.utilityComponent, appNamesDetailList, resolvedTypeId);
     const currentUtilActive = utilDto ? Boolean(utilDto.isActive) : (d.status === 'on' || d.status === 'active');
 
-    try {
-      const payload = {
-        id: parseInt(rawId, 10),
-        utilityName: utilDto?.utilityName || d.name,
-        utilityId: utilDto?.utilityId || d.utilityId || '',
-        utilityType: resolvedTypeId,
-        utilityComponent: nextComponentId,
-        isActive: currentUtilActive,
-        timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
-        currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
-        voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
-        powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
-        powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
-        actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
-        currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
-        maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
-        minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null,
-      };
-      await apiFetch('/Utility/UpdateUtility', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
+    if (Number(nextComponentId) === Number(currentCompId)) return;
+
+    const executeComponentChange = async () => {
+      const nextCompName = resolveUtilityComponentName(nextComponentId, appNamesDetailList, resolvedTypeId);
+
+      setDevices((prev) =>
+        prev.map((dev) =>
+          dev.id === d.id
+            ? {
+                ...dev,
+                utilityComponent: nextComponentId,
+                utilityComponentName: nextCompName,
+              }
+            : dev
+        )
+      );
+      setUtilities((prev) =>
+        prev.map((item) =>
+          item.id.toString() === rawId.toString()
+            ? {
+                ...item,
+                utilityComponent: nextComponentId,
+                lastModifiedOn: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+      if (selectedUtility && selectedUtility.id === d.id) {
+        setSelectedUtility((prev) =>
+          prev
+            ? {
+                ...prev,
+                utilityComponent: nextComponentId,
+                utilityComponentName: nextCompName,
+              }
+            : prev
+        );
+      }
+
+      try {
+        const payload = {
+          id: parseInt(rawId, 10),
+          utilityName: utilDto?.utilityName || d.name,
+          utilityId: utilDto?.utilityId || d.utilityId || '',
+          utilityType: resolvedTypeId,
+          utilityComponent: nextComponentId,
+          isActive: currentUtilActive,
+          timeOut: utilDto?.timeOut ?? d.timeOut ?? null,
+          currentLevel: utilDto?.currentLevel ?? d.currentLevel ?? null,
+          voltageLevel: utilDto?.voltageLevel ?? d.voltageLevel ?? null,
+          powerConsumption: utilDto?.powerConsumption ?? d.powerConsumption ?? null,
+          powerConsumptionToday: utilDto?.powerConsumptionToday ?? d.powerConsumptionToday ?? null,
+          actionIds: utilDto?.actionIds ?? d.actionIds ?? [],
+          currentWaterLevel: utilDto?.currentWaterLevel ?? d.currentWaterLevel ?? null,
+          maxWaterLevel: utilDto?.maxWaterLevel ?? d.maxWaterLevel ?? null,
+          minWaterLevel: utilDto?.minWaterLevel ?? d.minWaterLevel ?? null,
+        };
+        await apiFetch('/Utility/UpdateUtility', {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        const rawCompLabel = formatEnumLabel(nextCompName);
+        const cleanLevel = rawCompLabel.replace(/^Emergency\s+/i, '').trim() || rawCompLabel;
+        toast.success(`${d.name} level is set to ${cleanLevel}`, {
+          icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
+        });
+      } catch (err: any) {
+        console.error('Failed to update utility component', err);
+        toast.error(`Failed to update emergency level: ${err.message}`, {
+          icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
+        });
+        setDevices(prevDevices);
+        setUtilities(prevUtilities);
+        setSelectedUtility(prevSelectedUtility);
+      }
+    };
+
+    if (resolvedTypeId === UtilityType.Emergency && currentUtilActive) {
+      requestAuth(() => {
+        void executeComponentChange();
       });
-      const rawCompLabel = formatEnumLabel(nextCompName);
-      const cleanLevel = rawCompLabel.replace(/^Emergency\s+/i, '').trim() || rawCompLabel;
-      toast.success(`${d.name} level is set to ${cleanLevel}`, {
-        icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
-      });
-    } catch (err: any) {
-      console.error('Failed to update utility component', err);
-      toast.error(`Failed to update emergency level: ${err.message}`, {
-        icon: getNotificationIcon('utility', { isActive: currentUtilActive, utilityType: resolvedTypeId })
-      });
-      setDevices(prevDevices);
-      setUtilities(prevUtilities);
-      setSelectedUtility(prevSelectedUtility);
+      return;
     }
+
+    await executeComponentChange();
   };
 
   const handleDoorAction = async (id: string, action: 'lock'|'unlock'|'open'|'close') => {
@@ -10067,6 +10610,10 @@ export default function App() {
         }
       }
     } else if (lowerType === 'utility') {
+      if (!canSeeUtilities) {
+        toast.error("You do not have permission to view Utilities.");
+        return;
+      }
       setActiveView('facility-utilities');
       if (fId) {
         const found = devices.find(dev => dev.type === 'utility' && (dev.id === fId.toString() || dev.id === `utility-${fId}` || dev.id.endsWith(`-${fId}`) || (dev as any).dbId === fId))
@@ -11039,7 +11586,7 @@ export default function App() {
         { id: 'windows', label: 'Windows', icon: WindowIcon, count: windows?.length || 0, targetView: 'facility-windows', visible: true },
         { id: 'rooms', label: 'Rooms', icon: Sofa, count: rooms?.length || 0, targetView: 'facility-rooms', visible: true },
         { id: 'sections', label: 'Sections', icon: LayoutGrid, count: sections?.length || 0, targetView: 'facility-sections', visible: true },
-        { id: 'utilities', label: 'Utilities', icon: Zap, count: utilities?.length || 0, targetView: 'facility-utilities', visible: true },
+        { id: 'utilities', label: 'Utilities', icon: Zap, count: utilities?.length || 0, targetView: 'facility-utilities', visible: canSeeUtilities },
         { id: 'actions', label: 'Actions', icon: Play, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
       ];
 
@@ -11176,20 +11723,69 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">Logs</p>
-                    <p className="text-xs text-slate-500 dark:text-zinc-400">Security & activity audit</p>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      {logs?.length || 0} {logs?.length === 1 ? 'Entry' : 'Entries'}
+                    </p>
                   </div>
                 </div>
                 <ArrowRight className="h-4 w-4 text-slate-400 dark:text-zinc-500 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
               </div>
 
-              <div className="flex flex-col justify-between gap-3 pt-2">
-                <div className="text-2xl font-black text-slate-900 dark:text-zinc-100">
-                  {logs?.length || 50} <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-normal">Entries</span>
-                </div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-400 line-clamp-2 leading-tight">
-                  Track Create, Update, Delete, Lock, Unlock, Open, and Close operations in real time.
-                </div>
-              </div>
+              {(() => {
+                const recentLogs = (logs && logs.length > 0)
+                  ? [...logs]
+                      .sort((a, b) => new Date(b.timeOfAction || 0).getTime() - new Date(a.timeOfAction || 0).getTime())
+                      .slice(0, 2)
+                  : [];
+                if (recentLogs.length === 0) {
+                  return (
+                    <div className="pt-3 text-xs text-slate-500 dark:text-zinc-400">
+                      No recent log entries found.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="flex flex-col divide-y divide-slate-100 dark:divide-zinc-800/80 pt-1">
+                    {recentLogs.map((logItem, idx) => {
+                      const actorDetails = logItem.getPersonDto?.getPersonDetailsDto;
+                      const actorName = actorDetails
+                        ? `${actorDetails.firstName || ''} ${actorDetails.lastName || ''}`.trim() || 'System'
+                        : 'System';
+                      const actorImg = actorDetails?.imageUrl;
+
+                      return (
+                        <div key={logItem.id ?? `recent-log-${idx}`} className="flex flex-col gap-1 py-2 first:pt-1.5 last:pb-0">
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="h-5 w-5 rounded-full overflow-hidden bg-muted shrink-0 flex items-center justify-center border border-border">
+                                {actorImg ? (
+                                  <img src={getFullImageUrl(actorImg)} alt={actorName} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <UserIcon className="h-3 w-3 text-slate-400 dark:text-zinc-500" />
+                                )}
+                              </div>
+                              <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 truncate">
+                                {actorName}
+                              </span>
+                            </div>
+                            <Badge variant="outline" className="text-[10px] px-2 py-0 h-4 shrink-0 font-semibold">
+                              {logItem.actionType || 'Activity'}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-zinc-300 line-clamp-1 leading-snug">
+                            {logItem.logDetails}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-zinc-400">
+                            <Clock className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
+                            <span className="truncate">{formatRelativeTime(logItem.timeOfAction)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </Card>
           </div>
 
@@ -11311,7 +11907,7 @@ export default function App() {
         { id: 'facility-windows', name: 'Windows', icon: WindowIcon, type: 'window' },
         { id: 'facility-rooms', name: 'Rooms', icon: Sofa, type: 'room' },
         { id: 'facility-sections', name: 'Sections', icon: LayoutGrid, type: 'section' },
-        { id: 'facility-utilities', name: 'Utilities', icon: Zap, type: 'utility' },
+        { id: 'facility-utilities', name: 'Utilities', icon: Zap, type: 'utility', visible: canSeeUtilities },
       ].filter(cat => cat.visible !== false);
 
       return (
@@ -15116,6 +15712,18 @@ export default function App() {
 
     for (const item of navMap) {
       if (item.keywords.some(kw => lower.includes(kw))) {
+        if (item.view === 'facility-utilities' && !canSeeUtilities) {
+          const denied = "You do not have permission to access Utilities.";
+          speakVoiceResponse(denied);
+          toast.error(denied);
+          return;
+        }
+        if (item.view === 'facility-actions' && !canSeeActions) {
+          const denied = "You do not have permission to access Actions.";
+          speakVoiceResponse(denied);
+          toast.error(denied);
+          return;
+        }
         setActiveView(item.view);
         setIsMicMinimized(true);
         const resp = `Navigating to ${item.label}.`;
@@ -15839,22 +16447,40 @@ export default function App() {
           </div>
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto relative">
-        <div 
-          className={cn(
-            "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
-            refreshState === 'idle' ? "opacity-0 w-0" : "opacity-100",
-            refreshState === 'loading' ? "bg-black w-[70%]" : 
-            (refreshState === 'success' ? "bg-green-500 w-full" : 
-            (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
-          )}
-        /><div className="p-3 sm:p-6 md:p-8 pb-12 min-h-full">
-            <PullToRefresh onRefresh={handleRefresh} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+          <div 
+            className={cn(
+              "absolute top-0 left-0 h-[2px] z-50 transition-all duration-300 ease-out",
+              refreshState === 'idle' ? "opacity-0 w-0" : "opacity-100",
+              refreshState === 'loading' ? "bg-black dark:bg-white w-[70%]" : 
+              (refreshState === 'success' ? "bg-green-500 w-full" : 
+              (refreshState === 'error' ? "bg-yellow-500 w-full" : ""))
+            )}
+          />
+          <PullToRefresh
+            className="min-h-full"
+            onRefresh={handleRefresh}
+            pullingContent={
+              <div className="text-center p-3 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest flex items-center justify-center gap-2">
+                <ArrowDownUp className="h-4 w-4 text-primary" />
+                <span>Pull down to refresh</span>
+              </div>
+            }
+            refreshingContent={
+              <div className="text-center p-3 text-xs font-bold text-primary uppercase tracking-widest flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Refreshing...</span>
+              </div>
+            }
+          >
+            <div className="p-3 sm:p-6 md:p-8 pb-12 min-h-full">
               <div className="min-h-full px-2 py-1.5">
                 <AnimatePresence mode="wait">
                   {renderView()}
                 </AnimatePresence>
               </div>
-            </PullToRefresh></div></div>
+            </div>
+          </PullToRefresh>
+        </div>
       </main>
 
       {/* Add Device Dialog */}
@@ -17890,12 +18516,13 @@ export default function App() {
           <DialogFooter className="flex flex-row items-center justify-end">
             <Button
               type="button"
+              variant="outline"
               disabled={criticalDoorCountdown > 0}
               className={cn(
-                "min-w-[120px] font-semibold transition-all inline-flex items-center justify-center gap-2",
+                "min-w-[120px] font-semibold transition-all inline-flex items-center justify-center gap-2 border-2 border-red-600 !bg-transparent text-red-600 dark:text-red-500 shadow-none",
                 criticalDoorCountdown > 0
-                  ? "bg-red-600/40 text-white/80 cursor-not-allowed"
-                  : "bg-red-600 hover:bg-red-700 text-white shadow-sm"
+                  ? "opacity-60 cursor-not-allowed"
+                  : "hover:text-red-700 dark:hover:text-red-400 hover:border-red-700 dark:hover:border-red-400"
               )}
               onClick={() => {
                 if (!criticalDoorConfirm || criticalDoorCountdown > 0) return;
@@ -22528,7 +23155,7 @@ export default function App() {
             </div>
 
             <div className="flex-1 bg-white dark:bg-zinc-950 overflow-y-auto no-scrollbar">
-              <PullToRefresh onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-4 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Pull down to refresh</div>} refreshingContent={<div className="text-center p-4 text-xs font-bold text-primary uppercase tracking-widest"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" /> Refreshing...</div>}>
+              <PullToRefresh className="min-h-full" onRefresh={() => loadMyChats(true)} pullingContent={<div className="text-center p-3 text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-widest flex items-center justify-center gap-2"><ArrowDownUp className="h-4 w-4 text-primary" /> <span>Pull down to refresh</span></div>} refreshingContent={<div className="text-center p-3 text-xs font-bold text-primary uppercase tracking-widest flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> <span>Refreshing...</span></div>}>
                 <div className="w-full">
                   {isChatsLoading || (!hasLoadedChats && chats.length === 0) ? (
                     <div className="p-6">
@@ -22775,6 +23402,7 @@ export default function App() {
                 {/* Body Content with PullToRefresh */}
                 <div className="flex-1 overflow-y-auto no-scrollbar relative bg-slate-50 dark:bg-zinc-950" onScroll={handleCallLogsScroll}>
                   <PullToRefresh
+                    className="min-h-full"
                     onRefresh={() => fetchCallLogs(true)}
                     pullingContent={
                       <div className="text-center py-3 text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-1.5">
@@ -26693,113 +27321,445 @@ export default function App() {
       )}
 
       <AnimatePresence>
-        {isScreensaverOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] bg-black cursor-pointer"
-            onDoubleClick={() => setIsScreensaverOpen(false)}
-          >
-            
-            <div className={`h-full w-full grid gap-1 p-1 ${
-              (userProfile.cameraIds?.length || 0) <= 1 ? 'grid-cols-1 grid-rows-1' :
-              (userProfile.cameraIds?.length || 0) <= 2 ? 'grid-cols-1 sm:grid-cols-2 grid-rows-1' :
-              (userProfile.cameraIds?.length || 0) <= 4 ? 'grid-cols-2 grid-rows-2' :
-              'grid-cols-3 grid-rows-2'
-            }`}>
-              {userProfile.cameraIds?.map((camId, i) => {
-                const camDto = (cameras || []).find(c => c.id.toString() === camId.toString());
-                const camName = camDto?.cameraName || (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name || `Camera ${camId}`;
-                const rawUrl = camDto?.liveStreamUrl;
-                const videoUrl = rawUrl 
-                  ? resolveCameraUrl(rawUrl) 
-                  : (i % 2 === 0 ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
-                const isFeedExpanded = expandedScreensaverFeedIndex === i;
-                
-                return (
-                  <div
-                    key={i}
-                    className={
-                      isFeedExpanded
-                        ? "absolute inset-0 z-30 bg-black overflow-hidden"
-                        : "relative bg-zinc-950 rounded-sm overflow-hidden border border-white/5"
-                    }
-                  >
-                    {camName ? (
-                      <>
-                        <HlsVideo 
-                          src={videoUrl || undefined} 
-                          autoPlay 
-                          loop 
-                          muted 
-                          playsInline
-                          className={`w-full h-full ${isFeedExpanded ? 'object-contain' : 'object-cover'}`}
-                        />
-                        <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                          <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
-                          <span className="text-[10px] font-bold text-white uppercase tracking-widest">
-                            {camName}
-                          </span>
-                        </div>
-                        <div className="absolute bottom-4 left-4 z-10">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedScreensaverFeedIndex(prev => (prev === i ? null : i));
-                            }}
-                            onDoubleClick={(e) => e.stopPropagation()}
-                            title={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
-                            aria-label={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
-                            className="h-7 w-7 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/15 backdrop-blur-sm transition-colors cursor-pointer"
-                          >
-                            {isFeedExpanded ? (
-                              <Minimize2 className="h-3.5 w-3.5" />
-                            ) : (
-                              <Maximize2 className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                        </div>
-                        <div className="absolute bottom-4 right-4 z-10 bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                          <span className="text-[10px] font-mono text-white/70">{format(new Date(), 'HH:mm:ss')}</span>
-                        </div>
-                        <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent group-hover:border-white/5 transition-all" />
-                      </>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600">
-                        <CameraOff className="h-12 w-12 opacity-20" />
-                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Signal - CAM {i+1}</span>
+        {isScreensaverOpen && (() => {
+          const isDarkTheme = theme === 'dark';
+          const camIds = userProfile.cameraIds || [];
+          const camCount = camIds.length;
+          const canResizeFeeds = camCount > 1;
+          const safeSpotlightIdx = camCount > 0 ? Math.min(selectedScreensaverCameraIndex, camCount - 1) : 0;
+          const { gridRows, rowWeights, colWeights } = getResolvedScreensaverWeights(camCount);
+
+          const getGridStyle = (): React.CSSProperties => {
+            if (camCount <= 1) {
+              return { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' };
+            }
+            if (camCount === 2 || camCount === 3) {
+              return {
+                gridTemplateColumns: `repeat(${camCount}, minmax(0, 1fr))`,
+                gridTemplateRows: 'minmax(0, 1fr)',
+              };
+            }
+            const cols = Math.ceil(Math.sqrt(camCount));
+            const rows = Math.ceil(camCount / cols);
+            return {
+              gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+            };
+          };
+
+          const renderFeedTile = (
+            camId: number | string,
+            i: number,
+            options?: {
+              containerClassName?: string;
+              containerStyle?: React.CSSProperties;
+              isStripItem?: boolean;
+              allowResizeHandles?: boolean;
+              rowIdx?: number;
+              colIdx?: number;
+              rowLen?: number;
+              numRows?: number;
+            }
+          ) => {
+            const camDto = (cameras || []).find(c => c.id.toString() === camId.toString());
+            const camName =
+              camDto?.cameraName ||
+              (appNamesDetailList?.cameraIdNames || []).find(c => c.id === camId)?.name ||
+              `Camera ${camId}`;
+            const rawUrl = camDto?.liveStreamUrl;
+            const videoUrl = rawUrl
+              ? resolveCameraUrl(rawUrl)
+              : (i % 2 === 0
+                  ? "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                  : "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
+            const isFeedExpanded = expandedScreensaverFeedIndex === i;
+            const isResizingThis = resizingScreensaverFeedIndex === i;
+            const liveRect = isResizingThis ? screensaverFeedRefs.current[i]?.getBoundingClientRect() : null;
+            const showResizeHandles =
+              Boolean(options?.allowResizeHandles) && canResizeFeeds && !isFeedExpanded;
+
+            return (
+              <div
+                key={`${camId}-${i}`}
+                ref={(el) => {
+                  screensaverFeedRefs.current[i] = el;
+                }}
+                onClick={
+                  options?.isStripItem
+                    ? (e) => {
+                        e.stopPropagation();
+                        setSelectedScreensaverCameraIndex(i);
+                      }
+                    : undefined
+                }
+                onDoubleClick={options?.isStripItem ? (e) => e.stopPropagation() : undefined}
+                style={isFeedExpanded ? undefined : options?.containerStyle}
+                className={
+                  isFeedExpanded
+                    ? cn("fixed inset-0 z-30 overflow-hidden", isDarkTheme ? "bg-black" : "bg-slate-100")
+                    : cn(
+                        "relative rounded-sm overflow-hidden border group select-none",
+                        isDarkTheme
+                          ? "bg-zinc-950 border-white/10"
+                          : "bg-white border-slate-200 shadow-sm",
+                        options?.isStripItem && (isDarkTheme ? "cursor-pointer hover:border-white/40 transition-colors" : "cursor-pointer hover:border-primary/60 transition-colors"),
+                        isResizingThis && "ring-2 ring-primary/80 border-primary",
+                        options?.containerClassName
+                      )
+                }
+              >
+                {camName ? (
+                  <>
+                    <HlsVideo
+                      src={videoUrl || undefined}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className={`w-full h-full ${isFeedExpanded ? 'object-contain' : 'object-cover'}`}
+                    />
+                    <div
+                      className={cn(
+                        "absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-full border backdrop-blur-sm pointer-events-none",
+                        isDarkTheme
+                          ? "bg-black/60 border-white/10"
+                          : "bg-white/85 border-slate-200/80 shadow-sm"
+                      )}
+                    >
+                      <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse shrink-0" />
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold uppercase tracking-widest truncate max-w-[160px]",
+                          isDarkTheme ? "text-white" : "text-slate-900"
+                        )}
+                      >
+                        {camName}
+                      </span>
+                    </div>
+
+                    {isResizingThis && liveRect && (
+                      <div
+                        className={cn(
+                          "absolute top-3 right-3 z-20 px-2 py-0.5 rounded-full border text-[10px] font-mono pointer-events-none",
+                          isDarkTheme
+                            ? "bg-black/80 border-white/20 text-white"
+                            : "bg-white/90 border-slate-200 text-slate-900 shadow-sm"
+                        )}
+                      >
+                        {Math.round(liveRect.width)} × {Math.round(liveRect.height)}
                       </div>
                     )}
+
+                    <div className="absolute bottom-3 left-3 z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedScreensaverFeedIndex(prev => (prev === i ? null : i));
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        title={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
+                        aria-label={isFeedExpanded ? "Exit feed full screen" : "Open feed in full screen"}
+                        className={cn(
+                          "h-7 w-7 flex items-center justify-center rounded-full border backdrop-blur-sm transition-colors cursor-pointer",
+                          isDarkTheme
+                            ? "bg-black/60 hover:bg-black/85 text-white border-white/15"
+                            : "bg-white/85 hover:bg-white text-slate-900 border-slate-200/80 shadow-sm"
+                        )}
+                      >
+                        {isFeedExpanded ? (
+                          <Minimize2 className="h-3.5 w-3.5" />
+                        ) : (
+                          <Maximize2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+
+                    <div
+                      className={cn(
+                        "absolute bottom-3 right-6 z-10 px-2.5 py-1 rounded-full border backdrop-blur-sm pointer-events-none",
+                        isDarkTheme
+                          ? "bg-black/60 border-white/10"
+                          : "bg-white/85 border-slate-200/80 shadow-sm"
+                      )}
+                    >
+                      <span className={cn("text-[10px] font-mono", isDarkTheme ? "text-white/75" : "text-slate-700")}>
+                        {format(new Date(), 'HH:mm:ss')}
+                      </span>
+                    </div>
+
+                    {showResizeHandles && (
+                      <>
+                        {/* Left edge resize handle */}
+                        <div
+                          role="separator"
+                          aria-label={`Resize ${camName} left edge`}
+                          onMouseDown={(e) => startScreensaverResize(e, i, 'left', camCount)}
+                          onTouchStart={(e) => startScreensaverResize(e, i, 'left', camCount)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute top-2 bottom-10 left-0 w-2 cursor-ew-resize z-20 transition-colors",
+                            isDarkTheme ? "hover:bg-white/25" : "hover:bg-slate-900/20"
+                          )}
+                        />
+                        {/* Right edge resize handle */}
+                        <div
+                          role="separator"
+                          aria-label={`Resize ${camName} width`}
+                          onMouseDown={(e) => startScreensaverResize(e, i, 'right', camCount)}
+                          onTouchStart={(e) => startScreensaverResize(e, i, 'right', camCount)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute top-2 bottom-5 right-0 w-2 cursor-ew-resize z-20 transition-colors",
+                            isDarkTheme ? "hover:bg-white/25" : "hover:bg-slate-900/20"
+                          )}
+                        />
+                        {/* Top edge resize handle */}
+                        <div
+                          role="separator"
+                          aria-label={`Resize ${camName} top edge`}
+                          onMouseDown={(e) => startScreensaverResize(e, i, 'top', camCount)}
+                          onTouchStart={(e) => startScreensaverResize(e, i, 'top', camCount)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute left-5 right-5 top-0 h-2 cursor-ns-resize z-20 transition-colors",
+                            isDarkTheme ? "hover:bg-white/25" : "hover:bg-slate-900/20"
+                          )}
+                        />
+                        {/* Bottom edge resize handle */}
+                        <div
+                          role="separator"
+                          aria-label={`Resize ${camName} height`}
+                          onMouseDown={(e) => startScreensaverResize(e, i, 'bottom', camCount)}
+                          onTouchStart={(e) => startScreensaverResize(e, i, 'bottom', camCount)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute left-5 right-5 bottom-0 h-2 cursor-ns-resize z-20 transition-colors",
+                            isDarkTheme ? "hover:bg-white/25" : "hover:bg-slate-900/20"
+                          )}
+                        />
+                        {/* Bottom-right corner resize handle */}
+                        <button
+                          type="button"
+                          title={`Drag to resize ${camName}`}
+                          aria-label={`Drag to resize ${camName}`}
+                          onMouseDown={(e) => startScreensaverResize(e, i, 'corner', camCount)}
+                          onTouchStart={(e) => startScreensaverResize(e, i, 'corner', camCount)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute bottom-0.5 right-0.5 z-20 h-4 w-4 flex items-center justify-center rounded-xs cursor-nwse-resize transition-colors",
+                            isDarkTheme
+                              ? "bg-white/15 hover:bg-white/35 text-white/80"
+                              : "bg-slate-900/15 hover:bg-slate-900/30 text-slate-800"
+                          )}
+                        >
+                          <MoveDiagonal2 className="h-2.5 w-2.5" />
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <div className={cn("w-full h-full flex flex-col items-center justify-center gap-3", isDarkTheme ? "text-slate-500" : "text-slate-500")}>
+                    <CameraOff className="h-12 w-12 opacity-25" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">No Signal - CAM {i + 1}</span>
                   </div>
-                );
-              })}
-              {(!userProfile.cameraIds || userProfile.cameraIds.length === 0) && (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-600 col-span-full">
-                  <CameraOff className="h-12 w-12 opacity-20" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">No Cameras Configured in Profile</span>
+                )}
+              </div>
+            );
+          };
+
+          const otherCameraIndices = camIds
+            .map((_, idx) => idx)
+            .filter(idx => idx !== safeSpotlightIdx);
+
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={cn(
+                "fixed inset-0 z-[9999] cursor-pointer overflow-hidden transition-colors",
+                isDarkTheme ? "bg-black" : "bg-slate-100"
+              )}
+              onDoubleClick={() => setIsScreensaverOpen(false)}
+            >
+              {/* Top-Right Date Pill + Rounded Layout Selector */}
+              <div
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                className="absolute top-4 right-4 z-40 flex items-center gap-2"
+              >
+                <div
+                  className={cn(
+                    "px-3.5 py-2 rounded-full backdrop-blur-md border shadow-xl flex items-center gap-2 pointer-events-none select-none",
+                    isDarkTheme
+                      ? "bg-black/70 border-white/15 text-white"
+                      : "bg-white/85 border-slate-200/80 text-slate-900"
+                  )}
+                >
+                  <span className="text-xs font-bold tracking-wider">
+                    {format(new Date(), 'MMM dd, yyyy')}
+                  </span>
+                </div>
+
+                <div
+                  className={cn(
+                    "flex items-center gap-1 rounded-full backdrop-blur-md border p-1 shadow-2xl",
+                    isDarkTheme
+                      ? "bg-black/70 border-white/15"
+                      : "bg-white/85 border-slate-200/80"
+                  )}
+                >
+                  <button
+                    type="button"
+                    title="Grid Layout"
+                    aria-label="Grid Layout"
+                    aria-pressed={screensaverLayout === 'grid'}
+                    onClick={() => {
+                      setExpandedScreensaverFeedIndex(null);
+                      setScreensaverLayout('grid');
+                    }}
+                    className={cn(
+                      "h-8 w-8 rounded-full flex items-center justify-center transition-all cursor-pointer",
+                      screensaverLayout === 'grid'
+                        ? (isDarkTheme ? "bg-white text-black shadow-sm" : "bg-slate-900 text-white shadow-sm")
+                        : (isDarkTheme ? "text-white/75 hover:text-white hover:bg-white/15" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70")
+                    )}
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Spotlight Layout (75% / 25%)"
+                    aria-label="Spotlight Layout"
+                    aria-pressed={screensaverLayout === 'spotlight'}
+                    onClick={() => {
+                      setExpandedScreensaverFeedIndex(null);
+                      setScreensaverLayout('spotlight');
+                    }}
+                    className={cn(
+                      "h-8 w-8 rounded-full flex items-center justify-center transition-all cursor-pointer",
+                      screensaverLayout === 'spotlight'
+                        ? (isDarkTheme ? "bg-white text-black shadow-sm" : "bg-slate-900 text-white shadow-sm")
+                        : (isDarkTheme ? "text-white/75 hover:text-white hover:bg-white/15" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70")
+                    )}
+                  >
+                    <PanelTop className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Custom Resizable Layout"
+                    aria-label="Custom Resizable Layout"
+                    aria-pressed={screensaverLayout === 'custom'}
+                    onClick={() => {
+                      setExpandedScreensaverFeedIndex(null);
+                      setScreensaverLayout('custom');
+                    }}
+                    className={cn(
+                      "h-8 w-8 rounded-full flex items-center justify-center transition-all cursor-pointer",
+                      screensaverLayout === 'custom'
+                        ? (isDarkTheme ? "bg-white text-black shadow-sm" : "bg-slate-900 text-white shadow-sm")
+                        : (isDarkTheme ? "text-white/75 hover:text-white hover:bg-white/15" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70")
+                    )}
+                  >
+                    <Scaling className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {camCount === 0 ? (
+                <div className={cn("w-full h-full flex flex-col items-center justify-center gap-3", isDarkTheme ? "text-slate-500" : "text-slate-500")}>
+                  <CameraOff className="h-12 w-12 opacity-25" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">
+                    No Cameras Configured in Profile
+                  </span>
+                </div>
+              ) : screensaverLayout === 'spotlight' ? (
+                <div className="h-full w-full flex flex-col gap-1 p-1 overflow-hidden">
+                  {/* Main 75% Height Selected Camera */}
+                  <div className={cn("w-full shrink-0 min-h-0", camCount > 1 ? "h-[75%]" : "h-full")}>
+                    {renderFeedTile(camIds[safeSpotlightIdx], safeSpotlightIdx, {
+                      containerClassName: "w-full h-full",
+                      allowResizeHandles: canResizeFeeds,
+                    })}
+                  </div>
+                  {/* Remaining Cameras Horizontal 25% Height Strip (each max 25% screen width) */}
+                  {camCount > 1 && (
+                    <div
+                      className="h-[25%] w-full shrink-0 flex flex-row gap-1 overflow-x-auto overflow-y-hidden min-h-0"
+                      style={{ scrollbarWidth: 'thin' }}
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
+                      {otherCameraIndices.map((idx) =>
+                        renderFeedTile(camIds[idx], idx, {
+                          containerClassName: "h-full shrink-0",
+                          containerStyle: {
+                            width: 'calc(25vw - 4px)',
+                            maxWidth: '25vw',
+                          },
+                          isStripItem: true,
+                          allowResizeHandles: false,
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : screensaverLayout === 'custom' ? (
+                <div className="h-full w-full flex flex-col gap-1 p-1 overflow-hidden">
+                  {gridRows.map((rowIndices, rIdx) => (
+                    <div
+                      key={`custom-row-${rIdx}`}
+                      className="w-full flex flex-row items-start gap-1 min-h-0"
+                      style={{
+                        flexGrow: rowWeights[rIdx] ?? 1,
+                        flexShrink: 1,
+                        flexBasis: 0,
+                      }}
+                    >
+                      {rowIndices.map((camIdx, cIdx) => {
+                        const singleRowPct =
+                          gridRows.length === 1 ? (screensaverSingleRowTileHeights[camIdx] ?? 100) : 100;
+                        return renderFeedTile(camIds[camIdx], camIdx, {
+                          containerClassName: "min-w-0 min-h-0",
+                          containerStyle: {
+                            flexGrow: colWeights[rIdx]?.[cIdx] ?? 1,
+                            flexShrink: 1,
+                            flexBasis: 0,
+                            height: `${singleRowPct}%`,
+                          },
+                          allowResizeHandles: true,
+                          rowIdx: rIdx,
+                          colIdx: cIdx,
+                          rowLen: rowIndices.length,
+                          numRows: gridRows.length,
+                        });
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full w-full grid gap-1 p-1" style={getGridStyle()}>
+                  {camIds.map((camId, i) =>
+                    renderFeedTile(camId, i, {
+                      containerClassName: "w-full h-full min-w-0 min-h-0",
+                      allowResizeHandles: true,
+                    })
+                  )}
                 </div>
               )}
-            </div>
-            
-            {/* Screensaver UI Overlays */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="text-white/20 text-9xl font-black uppercase tracking-[0.5em] select-none pointer-events-none">
-                CCTV
-              </div>
-            </div>
-            
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center gap-4">
-              <div className="px-6 py-3 bg-white/5 backdrop-blur-md rounded-full border border-white/10 flex items-center gap-4">
-                 <div className="flex flex-col items-center">
-                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Security Monitor</span>
-                   <span className="text-xl font-bold text-white tracking-widest">{format(new Date(), 'MMM dd, yyyy')}</span>
-                 </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {isMicOverlayActive && (
