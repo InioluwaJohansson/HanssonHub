@@ -14,13 +14,19 @@ import {
   Key,
   Trash2,
   Sun,
-  Moon
+  Moon,
+  Lock,
+  ShieldAlert,
+  ArrowLeft,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { API_BASE_URL } from '../config';
 import { GetUserDto } from '../api/types';
+import { Role } from '../types';
 import { cn } from '../lib/utils';
 import { DynamicParticleSphere } from './DynamicParticleSphere';
 
@@ -56,6 +62,23 @@ const PAGES = [
   { id: 'friday', label: 'Friday AI Assistant', icon: null, desc: 'Voice-controlled smart assistant with real-time feedback.', isSphere: true },
 ];
 
+const MAX_AUTH_ATTEMPTS = 3;
+
+function requiresAuthCodeForRole(userData: GetUserDto | undefined | null): boolean {
+  if (!userData) return false;
+  const rawRole = (userData as any).role ?? (userData as any).Role;
+  const roleNum = Number(rawRole);
+  if (roleNum === Role.Owner || roleNum === Role.Wife || roleNum === Role.Child) {
+    return true;
+  }
+  const rawRoleName =
+    (userData as any).roleName ??
+    (userData as any).RoleName ??
+    (typeof rawRole === 'string' ? rawRole : '');
+  const roleLower = String(rawRoleName || '').toLowerCase().trim();
+  return roleLower === 'owner' || roleLower === 'wife' || roleLower === 'child';
+}
+
 export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -63,6 +86,15 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
   const [rememberedUsers, setRememberedUsers] = useState<RememberedUser[]>([]);
   const [isChoosingAccount, setIsChoosingAccount] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // 6-digit auth code step inside the Login div for Owner, Wife, or Child roles
+  const [pendingAuth, setPendingAuth] = useState<{ userData: GetUserDto; token: string } | null>(null);
+  const [authCode, setAuthCode] = useState('');
+  const [authAttempts, setAuthAttempts] = useState(0);
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
+  const [authErrorMsg, setAuthErrorMsg] = useState<string | null>(null);
+  const [authVerified, setAuthVerified] = useState(false);
+  const verifyingLockRef = React.useRef(false);
 
   // Single active item carousel index & transition state (5s duration per item)
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
@@ -75,6 +107,17 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
       setIsChoosingAccount(true);
     }
   }, []);
+
+  // Focus first digit box when entering the auth code step
+  useEffect(() => {
+    if (pendingAuth) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById('login-auth-code-0');
+        el?.focus();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingAuth]);
 
   // 5s Per Item Cycle: 1s entrance, 3s hold, 1s exit in opposite direction
   useEffect(() => {
@@ -94,6 +137,80 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
     };
   }, [currentPageIndex]);
 
+  const verifyPendingAuthCode = React.useCallback(async (codeToVerify: string) => {
+    if (!pendingAuth || verifyingLockRef.current || authVerified) return;
+    if (!/^\d{6}$/.test(codeToVerify)) {
+      setAuthErrorMsg('Please enter all 6 numeric digits.');
+      return;
+    }
+
+    verifyingLockRef.current = true;
+    setIsVerifyingAuth(true);
+    setAuthErrorMsg(null);
+
+    try {
+      const response = await api.post(
+        `/User/VerifyAuthCode?authCode=${encodeURIComponent(codeToVerify)}`,
+        null,
+        {
+          headers: {
+            accept: '*/*',
+            Authorization: `Bearer ${pendingAuth.token}`,
+          },
+        }
+      );
+
+      const resData = response.data;
+      const isValid =
+        resData === true ||
+        resData?.success === true ||
+        resData?.isSuccess === true ||
+        resData?.data === true ||
+        (resData?.status === true && resData?.data !== false);
+
+      if (isValid) {
+        setAuthVerified(true);
+        toast.success('Successfully logged in!');
+        const completed = pendingAuth;
+        setTimeout(() => {
+          onLoginSuccess(completed.userData, completed.token);
+        }, 350);
+        return;
+      }
+
+      throw new Error(resData?.message || 'Invalid authorization code.');
+    } catch (err: any) {
+      const nextAttempts = authAttempts + 1;
+      setAuthCode('');
+
+      if (nextAttempts >= MAX_AUTH_ATTEMPTS) {
+        setPendingAuth(null);
+        setAuthAttempts(0);
+        setPassword('');
+        setAuthErrorMsg(null);
+        toast.error('Authorization failed. Please log in again.');
+      } else {
+        setAuthAttempts(nextAttempts);
+        const msg = 'Invalid authorization code.';
+        setAuthErrorMsg(msg);
+        toast.error(err?.response?.data?.message || msg);
+        setTimeout(() => {
+          document.getElementById('login-auth-code-0')?.focus();
+        }, 50);
+      }
+    } finally {
+      verifyingLockRef.current = false;
+      setIsVerifyingAuth(false);
+    }
+  }, [pendingAuth, authAttempts, authVerified, onLoginSuccess]);
+
+  // Auto-verify as soon as 6 numeric digits are entered
+  useEffect(() => {
+    if (pendingAuth && authCode.length === 6 && /^\d{6}$/.test(authCode)) {
+      verifyPendingAuthCode(authCode);
+    }
+  }, [pendingAuth, authCode, verifyPendingAuthCode]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password.trim()) {
@@ -103,17 +220,29 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
 
     setIsLoggingIn(true);
     try {
-      const url = `/User/Login?userName=${username}&password=${password}`;
-
-      const response = await api.get(url, {
+      const response = await api.get('/User/Login', {
+        params: {
+          userName: username,
+          password: password,
+        },
         headers: {
-          'accept': '*/*',
-        }
+          accept: '*/*',
+        },
       });
 
       const result = response.data;
       
       if (result.success || result.status || result.token) {
+        if (requiresAuthCodeForRole(result.data)) {
+          setPendingAuth({ userData: result.data, token: result.token });
+          setAuthCode('');
+          setAuthAttempts(0);
+          setAuthErrorMsg(null);
+          setAuthVerified(false);
+          setIsLoggingIn(false);
+          toast.info('Please enter your 6-digit authorization code to continue.');
+          return;
+        }
         toast.success("Successfully logged in!");
         onLoginSuccess(result.data, result.token);
       } else {
@@ -122,7 +251,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
     } 
     catch (error: any) {
       console.error('Login error:', error);
-      toast.error(error.message || "An error occurred during login. Please try again.");
+      toast.error(error?.response?.data?.message || error.message || "An error occurred during login. Please try again.");
       setIsLoggingIn(false);
     }
   };
@@ -352,83 +481,223 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
               <h2 className="text-2xl font-black text-slate-900 dark:text-zinc-100 tracking-tight uppercase">Hansson Hub</h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed font-semibold uppercase tracking-wider">
-              Enter authorized credentials to proceed
+              {pendingAuth
+                ? 'Two-step authorization required'
+                : 'Enter authorized credentials to proceed'}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-5">
-              
-              {/* Username Field */}
-              <div className="space-y-1.5">
-                <Label htmlFor="login-username" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
-                  <User className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
-                  Username
-                </Label>
-                <div className="relative">
-                  <Input 
-                    id="login-username"
-                    value={username} 
-                    onChange={(e) => setUsername(e.target.value)} 
-                    placeholder="e.g. admin"
-                    required
-                    autoComplete="off"
-                    className={username ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100"}
-                  />
-                </div>
-              </div>
-
-              {/* Password Field */}
-              <div className="space-y-1.5 font-sans">
-                <Label htmlFor="login-password" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
-                  <Key className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
-                  Password
-                </Label>
-                <div className="relative flex items-center">
-                  <Input 
-                    id="login-password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    placeholder="••••••••"
-                    required
-                    autoComplete="new-password"
-                    className={password ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8"}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors bg-transparent border-0 outline-none p-1 cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4 text-slate-900 dark:text-zinc-100" /> : <Eye className="h-4 w-4 text-slate-900 dark:text-zinc-100" />}
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Login Button with LogIn icon */}
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full h-11 border border-slate-900 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-bold rounded-xl text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer bg-white dark:bg-zinc-900 disabled:opacity-50"
+          {pendingAuth ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                verifyPendingAuthCode(authCode);
+              }}
+              className="space-y-5"
             >
-              {isLoggingIn ? (
-                <div className="flex items-center justify-center gap-1.5 h-4">
-                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.3s]" style={{ animationDuration: '0.6s' }}></span>
-                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.15s]" style={{ animationDuration: '0.6s' }}></span>
-                  <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce" style={{ animationDuration: '0.6s' }}></span>
-                </div>
-              ) : (
-                <>
-                  <LogIn className="h-4 w-4 text-slate-900 dark:text-zinc-100" />
-                  Login
-                </>
-              )}
-            </button>
-          </form>
+              {/* Signed-in user summary */}
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs min-w-0">
+                <Lock className="h-3.5 w-3.5 text-slate-700 dark:text-zinc-300 shrink-0" />
+                <span className="font-semibold truncate">@{pendingAuth.userData.userName}</span>
+              </div>
 
-          {rememberedUsers.length > 0 && (
+              <div className="space-y-2.5">
+                <Label
+                  htmlFor="login-auth-code-0"
+                  className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider select-none block"
+                >
+                  6-Digit Authorization Code
+                </Label>
+
+                {/* 6 Individual Digit Boxes */}
+                <div
+                  className="grid grid-cols-6 gap-2"
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+                    if (pasted) {
+                      e.preventDefault();
+                      setAuthCode(pasted);
+                      setAuthErrorMsg(null);
+                      const targetIdx = Math.min(5, pasted.length);
+                      document.getElementById(`login-auth-code-${targetIdx}`)?.focus();
+                    }
+                  }}
+                >
+                  {[0, 1, 2, 3, 4, 5].map((index) => (
+                    <input
+                      key={index}
+                      id={`login-auth-code-${index}`}
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={1}
+                      disabled={isVerifyingAuth || authVerified}
+                      value={authCode[index] || ''}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Backspace' && !authCode[index] && index > 0) {
+                          document.getElementById(`login-auth-code-${index - 1}`)?.focus();
+                        }
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        if (val) {
+                          const chars = authCode.padEnd(6, ' ').split('');
+                          chars[index] = val[0];
+                          const nextCode = chars.join('').replace(/\s+/g, '').slice(0, 6);
+                          setAuthCode(nextCode);
+                          setAuthErrorMsg(null);
+                          if (index < 5) {
+                            document.getElementById(`login-auth-code-${index + 1}`)?.focus();
+                          }
+                        } else {
+                          const nextCode =
+                            authCode.substring(0, index) + authCode.substring(index + 1);
+                          setAuthCode(nextCode);
+                        }
+                      }}
+                      className={cn(
+                        'h-11 w-full text-center text-lg font-mono font-bold rounded-xl border-2 transition-all bg-transparent outline-none',
+                        authVerified
+                          ? 'border-green-500 bg-green-500/10 text-green-600 dark:text-green-400'
+                          : authErrorMsg
+                          ? 'border-rose-500 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                          : authCode[index]
+                          ? 'border-slate-900 dark:border-zinc-100 text-slate-900 dark:text-zinc-100'
+                          : 'border-slate-200 dark:border-zinc-700 focus:border-slate-900 dark:focus:border-zinc-200 text-slate-900 dark:text-zinc-100'
+                      )}
+                    />
+                  ))}
+                </div>
+
+                {/* Status Feedback */}
+                <div className="flex items-center text-[11px] pt-1">
+                  {authErrorMsg ? (
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
+                      <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                      {authErrorMsg}
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 dark:text-zinc-400">
+                      Enter your 6-digit security code
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isVerifyingAuth || authVerified || authCode.length !== 6}
+                className="w-full h-11 border border-slate-900 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-bold rounded-xl text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer bg-white dark:bg-zinc-900 disabled:opacity-50"
+              >
+                {isVerifyingAuth ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Verifying...
+                  </>
+                ) : authVerified ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    Verified
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="h-4 w-4" />
+                    Verify &amp; Login
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isVerifyingAuth || authVerified}
+                onClick={() => {
+                  setPendingAuth(null);
+                  setAuthCode('');
+                  setAuthAttempts(0);
+                  setAuthErrorMsg(null);
+                  setPassword('');
+                }}
+                className="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-black dark:hover:text-white flex items-center gap-1 bg-transparent border-none outline-none cursor-pointer transition-colors"
+              >
+                <ArrowLeft className="h-3 w-3" />
+                Back to login
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-5">
+                
+                {/* Username Field */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="login-username" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
+                    <User className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
+                    Username
+                  </Label>
+                  <div className="relative">
+                    <Input 
+                      id="login-username"
+                      value={username} 
+                      onChange={(e) => setUsername(e.target.value)} 
+                      placeholder="e.g. admin"
+                      required
+                      autoComplete="off"
+                      className={username ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100"}
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div className="space-y-1.5 font-sans">
+                  <Label htmlFor="login-password" className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 tracking-wider flex items-center gap-1.5 select-none">
+                    <Key className="h-3 w-3 text-slate-900 dark:text-zinc-100" />
+                    Password
+                  </Label>
+                  <div className="relative flex items-center">
+                    <Input 
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password} 
+                      onChange={(e) => setPassword(e.target.value)} 
+                      placeholder="••••••••"
+                      required
+                      autoComplete="new-password"
+                      className={password ? "border-b-2 border-b-green-400 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8" : "border-b-2 border-b-slate-200 dark:border-b-zinc-700 text-base font-medium bg-transparent text-slate-900 dark:text-zinc-100 pr-8"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors bg-transparent border-0 outline-none p-1 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4 text-slate-900 dark:text-zinc-100" /> : <Eye className="h-4 w-4 text-slate-900 dark:text-zinc-100" />}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Login Button with LogIn icon */}
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full h-11 border border-slate-900 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-bold rounded-xl text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer bg-white dark:bg-zinc-900 disabled:opacity-50"
+              >
+                {isLoggingIn ? (
+                  <div className="flex items-center justify-center gap-1.5 h-4">
+                    <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.3s]" style={{ animationDuration: '0.6s' }}></span>
+                    <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce [animation-delay:-0.15s]" style={{ animationDuration: '0.6s' }}></span>
+                    <span className="h-2 w-2 rounded-full bg-slate-900 dark:bg-zinc-100 animate-bounce" style={{ animationDuration: '0.6s' }}></span>
+                  </div>
+                ) : (
+                  <>
+                    <LogIn className="h-4 w-4 text-slate-900 dark:text-zinc-100" />
+                    Login
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {!pendingAuth && rememberedUsers.length > 0 && (
             <button
               type="button"
               onClick={() => setIsChoosingAccount(true)}

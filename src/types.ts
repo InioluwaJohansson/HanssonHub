@@ -102,6 +102,7 @@ export enum UtilityComponent {
   EmergencyMild = 10,
   EmergencySevere = 11,
   EmergencyCritical = 12,
+  SwimmingPool = 13,
 }
 
 export interface Device {

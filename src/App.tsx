@@ -273,7 +273,8 @@ import {
   LightbulbOff,
   PanelTop,
   Scaling,
-  MoveDiagonal2
+  MoveDiagonal2,
+  Box
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PullToRefresh } from './components/PullToRefresh';
@@ -283,6 +284,7 @@ import { RememberedUsersManager } from './utils/rememberedUsers';
 import { RecordingWaveform } from './components/RecordingWaveform';
 import { GrainyAudioOverlay } from './components/GrainyAudioOverlay';
 import { DynamicParticleSphere } from './components/DynamicParticleSphere';
+import { House3DOverlay } from './components/threeD/House3DOverlay';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
 import { initSignalR } from './lib/signalR';
@@ -2213,6 +2215,7 @@ const DEFAULT_UTILITY_COMPONENTS: UtilityTypeComponentsDto[] = [
       { id: UtilityComponent.WaterTank, name: 'WaterTank' },
       { id: UtilityComponent.WaterPump, name: 'WaterPump' },
       { id: UtilityComponent.WaterMeter, name: 'WaterMeter' },
+      { id: UtilityComponent.SwimmingPool, name: 'SwimmingPool' },
     ],
   },
   {
@@ -3035,6 +3038,7 @@ export default function App() {
   });
   const [isHeaderMicMuted, setIsHeaderMicMuted] = React.useState<boolean>(false);
   const [isMicOverlayActive, setIsMicOverlayActive] = React.useState<boolean>(false);
+  const [is3DOverlayOpen, setIs3DOverlayOpen] = React.useState<boolean>(false);
   const [isMicMinimized, setIsMicMinimized] = React.useState<boolean>(false);
   const [fridayResponse, setFridayResponse] = React.useState<string | null>(null);
   const [isFridaySpeaking, setIsFridaySpeaking] = React.useState<boolean>(false);
@@ -3594,7 +3598,13 @@ export default function App() {
     if (!device || device.type !== 'utility') return true;
     if (isOwner) return true;
     if (isWifeOrChild) {
-      return resolveUtilityTypeId(device.utilityType, appNamesDetailList) === UtilityType.Emergency;
+      const utilTypeId = resolveUtilityTypeId(device.utilityType, appNamesDetailList);
+      return (
+        utilTypeId === UtilityType.Emergency ||
+        utilTypeId === UtilityType.Water ||
+        utilTypeId === UtilityType.Gas ||
+        utilTypeId === UtilityType.Irrigation
+      );
     }
     return false;
   }, [isOwner, isWifeOrChild, appNamesDetailList]);
@@ -9820,7 +9830,7 @@ export default function App() {
       if (!d) return;
 
       if (d.type === 'utility' && !canUpdateUtilityDevice(d)) {
-        toast.error('Only Owner can update non-emergency utilities', {
+        toast.error('You do not have permission to update this utility', {
           icon: getNotificationIcon('utility', { utilityType: d.utilityType })
         });
         return;
@@ -11437,7 +11447,9 @@ export default function App() {
     } else if (activeView === 'facility-appliances') {
       filtered = filtered.filter(d => d.type === 'appliance');
     } else if (activeView === 'facility-utilities') {
-      filtered = filtered.filter(d => d.type === 'utility');
+      filtered = filtered.filter(
+        d => d.type === 'utility' && canUpdateUtilityDevice(d)
+      );
     } else if (activeView === 'facility-cameras') {
       filtered = filtered.filter(d => d.type === 'camera');
     } else if (activeView === 'facility-windows') {
@@ -16401,6 +16413,18 @@ export default function App() {
                 <div className="flex items-center justify-center w-5 h-5 overflow-hidden rounded-full">
                   <DynamicParticleSphere size={20} audioLevel={isMicOverlayActive ? 140 : 0} isIcon={true} />
                 </div>
+              </button>
+
+              {/* 3D House Designer & Viewer Button (Disabled) */}
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="relative rounded-full px-2.5 py-1.5 transition-all flex items-center justify-center gap-1 border shadow-2xs text-xs font-bold tracking-tight bg-background/50 text-muted-foreground border-border/40 opacity-50 cursor-not-allowed"
+                title="3D Property Designer & Viewer (Disabled)"
+              >
+                <Box className="h-3.5 w-3.5" />
+                <span>3D</span>
               </button>
 
               {/* Chat Button */}
@@ -27774,6 +27798,18 @@ export default function App() {
           onExecuteCommand={handleVoiceCommand}
           lastResponse={fridayResponse}
           isSpeaking={isFridaySpeaking}
+        />
+      )}
+
+      {is3DOverlayOpen && (
+        <House3DOverlay
+          isOpen={is3DOverlayOpen}
+          onClose={() => setIs3DOverlayOpen(false)}
+          devices={devices}
+          rooms={rooms}
+          sections={sections}
+          theme={theme}
+          onToggleDevice={handleToggle}
         />
       )}
     </div>

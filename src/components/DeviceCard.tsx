@@ -39,7 +39,8 @@ import {
   Flame,
   Sprout,
   ShieldAlert,
-  Clock
+  Clock,
+  Waves
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
@@ -102,6 +103,11 @@ const getIcon = (device: Device) => {
       return <Power className={cn("h-5 w-5 transition-colors", color)} />;
     case 'utility': {
       const ut = Number(device.utilityType || 1);
+      const compId = Number(device.utilityComponent);
+      const compName = String(device.utilityComponentName ?? device.utilityComponent ?? '').trim().toLowerCase().replace(/\s+/g, '');
+      if (ut === 2 && (compId === UtilityComponent.SwimmingPool || compName === 'swimmingpool')) {
+        return <Waves className={cn("h-5 w-5 transition-colors", isActive ? "text-sky-500" : "text-muted-foreground")} />;
+      }
       if (ut === 2) return <Droplets className={cn("h-5 w-5 transition-colors", isActive ? "text-sky-500" : "text-muted-foreground")} />;
       if (ut === 3) return <Flame className={cn("h-5 w-5 transition-colors", isActive ? "text-orange-500" : "text-muted-foreground")} />;
       if (ut === 4) return <Wind className={cn("h-5 w-5 transition-colors", isActive ? "text-cyan-500" : "text-muted-foreground")} />;

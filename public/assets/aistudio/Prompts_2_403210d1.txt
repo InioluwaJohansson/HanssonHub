@@ -1,0 +1,19 @@
+In the app header inbetween the Friday assistant button and the chatbox button add a button called 3D that opens a fullscreen overlay that uses Three.js and implements the below ensure all impelmentations have a polished finish and are fully functional. The overlay should be dismissable by clicking a close button or pressing the escape key. The 3D view should be responsive and adapt to different screen sizes.
+In the 3D viewer we'll be constructing and rendering a house in 3D.
+I want to build a 3d house model design
+I want to create a property, that has 3 floors, a top floor, 
+a ground floor and an underground floor. 
+Each floor has rooms and sections and sections is a collection of rooms. 
+Each room and section has different facilities that can be attached to it (door, windows, cameras, power outlets, lights and external sensors) 
+utilities alone can be attached to anywhere on the property. 
+Also there will need to be stairs moving from one level to another (most likely a slab to reduce the ground length by half and enable the use of the stairs in both directions) and the ground floor can be the ceiling of the floor below it. 
+Also there are utilities that can be attached to anywhere in the property can be tied to a room, section or to the property itself. also, a property can have multiple buildings.
+The facilities like camera can be attached to the wall or directly to the ceiling. 
+Also a camera and lights can be attached to the exterior walls and roof on a property e.g fence. 
+The walls will also have colors. 
+I also want to be able to add grass patches and also there is a pool, that will be added to a section. 
+Make reference to the utilities and the facilities. 
+Also remember openings can be created to a floor only a stir case can be attached to it  the same goes for slabs, only a staircase can be attached to it and also the water tanks are to be supported by scaffolds which are within the compound of the property.
+Also remember a door can be attached to the house perimeter also known as a gate. 
+Also dont forget the roof too it can be custom designed and at some openings can be made of glass especially railings around some openings e.g vahranders and staircase guards and dont forget the type of material for walls, doors and railings.
+Lets use a day a drop to attach utilites, scaffolds, facilities and also only lights and only be dragged to multiple places campared to the rest of the faclities. I als want to be able to drag and drop sections and rooms and then resize it i wanbt to sart be dragging a property then be able to resize it then add the buillding then floors add geomatric shapes like cylinders to create supports and then i want to be able to render the house in 3D. Lets do this for now
