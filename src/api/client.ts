@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { clearBrowserId, getBrowserId } from '../utils/browserId';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -9,16 +10,28 @@ const api = axios.create({
   },
 });
 
-// Add a request interceptor to include the token in headers
+// Add a request interceptor to include JWT and X-Browser-Id headers
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     // Don't add token to login request
     const isLoginRequest = config.url?.includes('/User/Login');
-    
-    if (token && !isLoginRequest && config.headers) {
+    const isGetBrowserIdRequest = config.url?.includes('/User/GetBrowserId');
+    const existingAuth = config.headers?.['Authorization'] || config.headers?.['authorization'];
+
+    if (token && !isLoginRequest && config.headers && !existingAuth) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+
+    const browserId = getBrowserId();
+    if (!isLoginRequest && !isGetBrowserIdRequest && (token || existingAuth) && browserId && config.headers) {
+      config.headers['X-Browser-Id'] = browserId;
+    }
+
+    if (config.data instanceof FormData && config.headers) {
+      delete config.headers['Content-Type'];
+    }
+
     return config;
   },
   (error) => {
@@ -35,6 +48,7 @@ api.interceptors.response.use(
       localStorage.removeItem('userId');
       localStorage.removeItem('userName');
       localStorage.removeItem('roleName');
+      clearBrowserId();
       // Only reload if we are not on the login page already to avoid loops
       window.dispatchEvent(new CustomEvent('auth-expired'));
     }
@@ -50,13 +64,20 @@ export async function apiFetch<T>(endpoint: string, options: any = {}): Promise<
   
   const token = localStorage.getItem('token');
   const isLoginRequest = endpoint.includes('/User/Login');
+  const isGetBrowserIdRequest = endpoint.includes('/User/GetBrowserId');
   
   const finalHeaders = { ...headers };
-  if (token && !isLoginRequest) {
+  const hasExplicitAuth = Boolean(finalHeaders['Authorization'] || finalHeaders['authorization']);
+
+  if (token && !isLoginRequest && !hasExplicitAuth) {
     finalHeaders['Authorization'] = `Bearer ${token}`;
   }
+  const browserId = getBrowserId();
+  if (!isLoginRequest && !isGetBrowserIdRequest && (token || hasExplicitAuth) && browserId) {
+    finalHeaders['X-Browser-Id'] = browserId;
+  }
   if (body instanceof FormData) {
-    finalHeaders['Content-Type'] = undefined;
+    delete finalHeaders['Content-Type'];
   }
   window.dispatchEvent(new CustomEvent('api-fetch-start'));
   try {

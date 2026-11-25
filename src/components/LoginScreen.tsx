@@ -32,6 +32,7 @@ import { DynamicParticleSphere } from './DynamicParticleSphere';
 
 import api from '../api/client';
 import { RememberedUsersManager, RememberedUser } from '../utils/rememberedUsers';
+import { clearBrowserId, extractBrowserId, setBrowserId } from '../utils/browserId';
 
 const getFullImageUrl = (url: string | null | undefined): string | undefined => {
   if (!url) return undefined;
@@ -184,6 +185,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
       setAuthCode('');
 
       if (nextAttempts >= MAX_AUTH_ATTEMPTS) {
+        clearBrowserId();
         setPendingAuth(null);
         setAuthAttempts(0);
         setPassword('');
@@ -233,6 +235,28 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
       const result = response.data;
       
       if (result.success || result.status || result.token) {
+        clearBrowserId();
+        try {
+          const browserIdRes = await api.get('/User/GetBrowserId', {
+            headers: {
+              accept: '*/*',
+              ...(result.token ? { Authorization: `Bearer ${result.token}` } : {}),
+            },
+          });
+          const fetchedBrowserId = extractBrowserId(browserIdRes.data);
+          if (!fetchedBrowserId) {
+            throw new Error('Failed to retrieve browser ID from server.');
+          }
+          setBrowserId(fetchedBrowserId);
+        } catch (browserIdErr: any) {
+          console.error('Failed to fetch BrowserId after login:', browserIdErr);
+          throw new Error(
+            browserIdErr?.response?.data?.message ||
+            browserIdErr?.message ||
+            'Failed to initialize browser authentication ID.'
+          );
+        }
+
         if (requiresAuthCodeForRole(result.data)) {
           setPendingAuth({ userData: result.data, token: result.token });
           setAuthCode('');
@@ -611,6 +635,7 @@ export function LoginScreen({ onLoginSuccess, theme, toggleTheme }: LoginScreenP
                 type="button"
                 disabled={isVerifyingAuth || authVerified}
                 onClick={() => {
+                  clearBrowserId();
                   setPendingAuth(null);
                   setAuthCode('');
                   setAuthAttempts(0);

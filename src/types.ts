@@ -105,6 +105,14 @@ export enum UtilityComponent {
   SwimmingPool = 13,
 }
 
+export enum AccessLevel {
+  Owner = 1,
+  Wife = 2,
+  Child = 3,
+  Relative = 4,
+  Visitor = 5,
+}
+
 export interface Device {
   id: string;
   name: string;
@@ -114,7 +122,9 @@ export interface Device {
   liveStreamUrl?: string;
   room?: string; // Optional if attached directly to a section
   section?: string;
-  doorType?: 'exterior' | 'interior';
+  doorType?: string | number;
+  doorTypeId?: DoorType | number;
+  minimumAccessLevel?: AccessLevel | number;
   powerUsage?: number; // in Watts
   ipAddress?: string;
   username?: string;
@@ -481,6 +491,7 @@ export interface AppNamesDetailList {
   utilityComponent?: UtilityTypeComponentsDto[];
   gender: GenericIdNames[];
   doorType: GenericIdNames[];
+  accessLevel?: GenericIdNames[];
   facilityType: GenericIdNames[];
   role: GenericIdNames[];
   roomIds: GenericIdNames[]; 
@@ -529,6 +540,7 @@ export interface BaseDefaultDto {
   isDeleted?: boolean;
   personId?: number;
   peronName?: string;
+  minimumAccessLevel?: AccessLevel | number;
 }
 
 export interface GetExternalDto extends BaseDefaultDto {
@@ -845,6 +857,7 @@ export interface UtilitiesResponseModel extends BaseResponse {
 export interface CreateDoorDto extends CreateBaseDefaultDto {
   doorName: string;
   doorType: DoorType;
+  minimumAccessLevel?: AccessLevel | number;
   isLocked: boolean;
   isOpen: boolean;
   openedBy: number;
@@ -856,6 +869,7 @@ export interface UpdateDoorDto extends CreateBaseDefaultDto {
   id: number;
   doorName: string;
   doorType: DoorType;
+  minimumAccessLevel: AccessLevel | number;
   isLocked: boolean;
   isOpen: boolean;
   openedBy: number;
@@ -867,7 +881,9 @@ export interface GetDoorDto extends BaseDefaultDto {
   id: number;
   doorName: string;
   doorId: string;
-  doorType: DoorType;
+  doorType: string;
+  doorTypeId: DoorType | number;
+  minimumAccessLevel: AccessLevel | number;
   isLocked: boolean;
   isOpen: boolean;
   openedBy: number;

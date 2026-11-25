@@ -1,5 +1,6 @@
 import * as signalR from "@microsoft/signalr";
 import { API_BASE_URL } from "../config";
+import { getBrowserId } from "../utils/browserId";
 
 let homeSecurityConnection: signalR.HubConnection | null = null;
 
@@ -25,12 +26,19 @@ export const initSignalR = () => {
     const baseUrl = API_BASE_URL.replace('/Home_Security', '');
 
     if (!homeSecurityConnection) {
+        const hubHeaders: Record<string, string> = {
+            "X-Tunnel-Skip-AntiPhishing-Page": "true",
+        };
+        Object.defineProperty(hubHeaders, "X-Browser-Id", {
+            enumerable: true,
+            configurable: true,
+            get: () => getBrowserId(),
+        });
+
         homeSecurityConnection = new signalR.HubConnectionBuilder()
             .withUrl(`${baseUrl}/HomeSecurityHub`, {
                 accessTokenFactory: () => localStorage.getItem("token") || "",
-                headers: {
-                    "X-Tunnel-Skip-AntiPhishing-Page": "true"
-                },
+                headers: hubHeaders,
                 transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.ServerSentEvents | signalR.HttpTransportType.LongPolling
             })
             .withAutomaticReconnect({
@@ -46,3 +54,14 @@ export const initSignalR = () => {
     return { homeSecurityConnection };
 };
 
+export const resetSignalRConnection = async () => {
+    if (homeSecurityConnection) {
+        const conn = homeSecurityConnection;
+        homeSecurityConnection = null;
+        try {
+            await conn.stop();
+        } catch {
+            // Ignore errors while stopping connection during logout/reset
+        }
+    }
+};

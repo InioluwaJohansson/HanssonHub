@@ -8,6 +8,7 @@ import {
   Gender, 
   Role, 
   DoorType,
+  AccessLevel,
   GetHardwareDto, 
   GetExternalDto, 
   GetWindowDto, 
@@ -470,9 +471,9 @@ export const INITIAL_APPLIANCES: GetApplianceDto[] = [
 ];
 
 export const INITIAL_DOORS: GetDoorDto[] = [
-  { id: 10, doorName: 'Garage Door', doorId: 'DOOR-01', doorType: DoorType.Exterior, isLocked: true, isOpen: false, openedBy: 0, lockedBy: 1, unlockedBy: 0, roomId: 105, roomName: 'Garage', sectionId: 202, sectionName: 'Outdoor', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
-  { id: 15, doorName: 'Smart Lock', doorId: 'DOOR-02', doorType: DoorType.Exterior, isLocked: true, isOpen: false, openedBy: 0, lockedBy: 1, unlockedBy: 0, roomId: 106, roomName: 'Front Door', sectionId: 203, sectionName: 'Security', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
-  { id: 17, doorName: 'Bedroom Door', doorId: 'DOOR-03', doorType: DoorType.Interior, isLocked: false, isOpen: false, openedBy: 1, lockedBy: 0, unlockedBy: 1, roomId: 103, roomName: 'Bedroom', sectionId: 201, sectionName: 'Indoor', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
+  { id: 10, doorName: 'Garage Door', doorId: 'DOOR-01', doorType: 'Exterior', doorTypeId: DoorType.Exterior, minimumAccessLevel: AccessLevel.Visitor, isLocked: true, isOpen: false, openedBy: 0, lockedBy: 1, unlockedBy: 0, roomId: 105, roomName: 'Garage', sectionId: 202, sectionName: 'Outdoor', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
+  { id: 15, doorName: 'Smart Lock', doorId: 'DOOR-02', doorType: 'Exterior', doorTypeId: DoorType.Exterior, minimumAccessLevel: AccessLevel.Visitor, isLocked: true, isOpen: false, openedBy: 0, lockedBy: 1, unlockedBy: 0, roomId: 106, roomName: 'Front Door', sectionId: 203, sectionName: 'Security', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
+  { id: 17, doorName: 'Bedroom Door', doorId: 'DOOR-03', doorType: 'Interior', doorTypeId: DoorType.Interior, minimumAccessLevel: AccessLevel.Visitor, isLocked: false, isOpen: false, openedBy: 1, lockedBy: 0, unlockedBy: 1, roomId: 103, roomName: 'Bedroom', sectionId: 201, sectionName: 'Indoor', createdBy: 1, createdByName: 'System', createdOn: new Date().toISOString(), lastModifiedBy: 1, lastModifiedByName: 'System', lastModifiedOn: new Date().toISOString(), isDeleted: false, personId: 1, peronName: 'Owner' },
 ];
 
 export const INITIAL_LIGHTS: GetLightDto[] = [

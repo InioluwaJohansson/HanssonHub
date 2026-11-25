@@ -239,6 +239,12 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
     (Number(device.utilityComponent) === UtilityComponent.WaterPump ||
       String(device.utilityComponentName ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'waterpump' ||
       String(device.utilityComponent ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'waterpump');
+  const isSwimmingPoolUtility =
+    isWaterUtility &&
+    (Number(device.utilityComponent) === UtilityComponent.SwimmingPool ||
+      String(device.utilityComponentName ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'swimmingpool' ||
+      String(device.utilityComponent ?? '').trim().toLowerCase().replace(/\s+/g, '') === 'swimmingpool');
+  const hideWaterTankDisplay = isWaterPumpUtility || isSwimmingPoolUtility;
   const hasHvacMetrics =
     device.type === 'utility' &&
     utilityTypeNum === 4 &&
@@ -251,7 +257,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
   };
 
   const handleDoorAction = (action: 'lock' | 'unlock' | 'open' | 'close') => {
-    if ((device.type !== 'door' && device.type !== 'window') || isSummary) return;
+    if (!canUpdate || (device.type !== 'door' && device.type !== 'window') || isSummary) return;
     
     if ((action === 'open' || action === 'close') && isLocked) {
       return;
@@ -347,13 +353,15 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 <Button 
                   variant="ghost" 
                   size="icon" 
+                  disabled={!canUpdate}
                   className={cn(
                     "h-8 w-8 transition-colors",
-                    isLocked ? "text-red-500 hover:bg-red-500/10" : "text-green-500 hover:bg-green-500/10"
+                    isLocked ? "text-red-500 hover:bg-red-500/10" : "text-green-500 hover:bg-green-500/10",
+                    !canUpdate && "opacity-50 cursor-not-allowed"
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleDoorAction(isLocked ? 'unlock' : 'lock');
+                    if (canUpdate) handleDoorAction(isLocked ? 'unlock' : 'lock');
                   }}
                 >
                   {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
@@ -409,13 +417,15 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 <Button 
                   variant="outline" 
                   size="icon" 
+                  disabled={!canUpdate}
                   className={cn(
                     "h-8 w-8 transition-colors rounded-lg border flex items-center justify-center shadow-sm",
                     isLocked 
                       ? "border-green-200 bg-green-50 text-green-700 hover:bg-green-100" 
-                      : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                      : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+                    !canUpdate && "opacity-40 cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400"
                   )}
-                  onClick={(e) => { e.stopPropagation(); handleDoorAction(isLocked ? 'unlock' : 'lock'); }}
+                  onClick={(e) => { e.stopPropagation(); if (canUpdate) handleDoorAction(isLocked ? 'unlock' : 'lock'); }}
                   title={isLocked ? 'Unlock' : 'Lock'}
                 >
                   {isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
@@ -423,15 +433,15 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                 <Button 
                   variant="outline" 
                   size="icon" 
-                  disabled={isLocked}
+                  disabled={isLocked || !canUpdate}
                   className={cn(
                     "h-8 w-8 transition-colors rounded-lg border flex items-center justify-center shadow-sm",
                     isOpen
                       ? "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
                       : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100",
-                    isLocked && "opacity-40 cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400"
+                    (isLocked || !canUpdate) && "opacity-40 cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400"
                   )}
-                  onClick={(e) => { e.stopPropagation(); handleDoorAction(isOpen ? 'close' : 'open'); }}
+                  onClick={(e) => { e.stopPropagation(); if (canUpdate) handleDoorAction(isOpen ? 'close' : 'open'); }}
                   title={isOpen ? 'Close' : 'Open'}
                 >
                   {device.type === 'door' ? (
@@ -446,7 +456,7 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
             
             {device.type === 'utility' && !isSummary && (() => {
               const ut = Number(device.utilityType || 1);
-              if (ut === 2 && !isWaterPumpUtility) {
+              if (ut === 2 && !hideWaterTankDisplay) {
                 return (
                   <div className="pt-2 border-t border-border/50">
                     <WaterTank
@@ -589,12 +599,16 @@ export function DeviceCard({ device, onToggle, onValueChange, onValueChangeEnd, 
                   min="0"
                   max="100"
                   step="1"
+                  disabled={!canUpdate}
                   value={device.value}
-                  onChange={(e) => { e.stopPropagation(); onValueChange?.(device.id, parseInt(e.target.value)); }}
-                  onMouseUp={(e) => { e.stopPropagation(); onValueChangeEnd?.(device.id, device.value || 0); }}
-                  onTouchEnd={(e) => { e.stopPropagation(); onValueChangeEnd?.(device.id, device.value || 0); }}
+                  onChange={(e) => { e.stopPropagation(); if (canUpdate) onValueChange?.(device.id, parseInt(e.target.value)); }}
+                  onMouseUp={(e) => { e.stopPropagation(); if (canUpdate) onValueChangeEnd?.(device.id, device.value || 0); }}
+                  onTouchEnd={(e) => { e.stopPropagation(); if (canUpdate) onValueChangeEnd?.(device.id, device.value || 0); }}
                   onPointerDown={(e) => e.stopPropagation()}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+                  className={cn(
+                    "w-full h-2 bg-muted rounded-lg appearance-none accent-primary",
+                    canUpdate ? "cursor-pointer" : "cursor-not-allowed opacity-60"
+                  )}
                 />
               </div>
             )}

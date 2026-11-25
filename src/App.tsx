@@ -57,6 +57,8 @@ import {
   UtilityComponent,
   UtilityDataMQTT,
   UtilityTypeComponentsDto,
+  DoorType,
+  AccessLevel,
   GetDoorDto,
   GetLightDto,
   GetWindowDto,
@@ -106,6 +108,7 @@ import { toast, Toaster } from 'sonner';
 import { GetUserDto } from './api/types';
 import { API_BASE_URL } from './config';
 import { apiFetch } from './api/client';
+import { clearBrowserId, extractBrowserId, setBrowserId } from './utils/browserId';
 import { ScrollArea } from './components/ui/scroll-area';
 import { HlsVideo } from './components/HlsVideo';
 import { WaterTank } from './components/WaterTank';
@@ -287,7 +290,7 @@ import { DynamicParticleSphere } from './components/DynamicParticleSphere';
 import { House3DOverlay } from './components/threeD/House3DOverlay';
 import { io } from 'socket.io-client';
 import { format, subHours, subSeconds } from 'date-fns';
-import { initSignalR } from './lib/signalR';
+import { initSignalR, resetSignalRConnection } from './lib/signalR';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -475,6 +478,20 @@ const mapSection = (s: any): Section => {
   } as Section;
 };
 
+const DEFAULT_DOOR_TYPES: GenericIdNames[] = [
+  { id: DoorType.Interior, name: 'Interior' },
+  { id: DoorType.Exterior, name: 'Exterior' },
+  { id: DoorType.Gate, name: 'Gate' },
+];
+
+const DEFAULT_ACCESS_LEVELS: GenericIdNames[] = [
+  { id: AccessLevel.Owner, name: 'Owner' },
+  { id: AccessLevel.Wife, name: 'Wife' },
+  { id: AccessLevel.Child, name: 'Child' },
+  { id: AccessLevel.Relative, name: 'Relative' },
+  { id: AccessLevel.Visitor, name: 'Visitor' },
+];
+
 const resolveDoorType = (typeVal: any): number => {
   if (typeVal === undefined || typeVal === null) return 1;
   if (typeof typeVal === 'number') {
@@ -486,6 +503,54 @@ const resolveDoorType = (typeVal: any): number => {
   if (strVal === 'exterior' || strVal === '2') return 2;
   if (strVal === 'gate' || strVal === '3') return 3;
   return 1;
+};
+
+const resolveDoorTypeName = (typeVal: any, appList?: any): string => {
+  if (typeVal === undefined || typeVal === null || typeVal === '') return 'Interior';
+  const list = (appList?.doorType && appList.doorType.length > 0) ? appList.doorType : DEFAULT_DOOR_TYPES;
+  if (typeof typeVal === 'number' || /^\d+$/.test(typeVal.toString().trim())) {
+    const idNum = Number(typeVal);
+    const found = list.find((t: any) => Number(t.id ?? t.Id) === idNum);
+    if (found) return found.name ?? found.Name;
+    const enumName = (DoorType as any)[idNum];
+    return typeof enumName === 'string' ? enumName : 'Interior';
+  }
+  const str = typeVal.toString().trim();
+  const foundByName = list.find((t: any) => (t.name ?? t.Name ?? '').toLowerCase() === str.toLowerCase());
+  return foundByName ? (foundByName.name ?? foundByName.Name) : str;
+};
+
+const resolveAccessLevelId = (levelVal: any, appList?: any): number => {
+  if (levelVal === undefined || levelVal === null || levelVal === '') return 0;
+  if (typeof levelVal === 'number') {
+    return isNaN(levelVal) || levelVal <= 0 ? 0 : levelVal;
+  }
+  const strVal = levelVal.toString().trim().toLowerCase();
+  if (/^\d+$/.test(strVal)) {
+    const parsed = parseInt(strVal, 10);
+    return parsed > 0 ? parsed : 0;
+  }
+  const list = (appList?.accessLevel && appList.accessLevel.length > 0) ? appList.accessLevel : DEFAULT_ACCESS_LEVELS;
+  const found = list.find((a: any) => (a.name ?? a.Name ?? '').toLowerCase() === strVal);
+  if (found) return Number(found.id ?? found.Id);
+  if (strVal === 'owner') return AccessLevel.Owner;
+  if (strVal === 'wife') return AccessLevel.Wife;
+  if (strVal === 'child') return AccessLevel.Child;
+  if (strVal === 'relative') return AccessLevel.Relative;
+  if (strVal === 'visitor') return AccessLevel.Visitor;
+  return 0;
+};
+
+const resolveAccessLevelName = (levelVal: any, appList?: any): string => {
+  const id = resolveAccessLevelId(levelVal, appList);
+  if (!id) {
+    return typeof levelVal === 'string' && levelVal.trim() ? levelVal.trim() : 'Visitor';
+  }
+  const list = (appList?.accessLevel && appList.accessLevel.length > 0) ? appList.accessLevel : DEFAULT_ACCESS_LEVELS;
+  const found = list.find((a: any) => Number(a.id ?? a.Id) === id);
+  if (found) return found.name ?? found.Name;
+  const enumName = (AccessLevel as any)[id];
+  return typeof enumName === 'string' ? enumName : 'Visitor';
 };
 
 const getProp = (obj: any, propName: string) => {
@@ -700,6 +765,8 @@ const getSectionDirectDevices = (section: any, globalDevices: Device[]): Device[
     else if (item.isOpen) doorStatus = 'open';
     else if (item.isLocked) doorStatus = 'locked';
 
+    const doorTypeIdVal = resolveDoorType(item.doorTypeId ?? item.DoorTypeId ?? item.doorType ?? item.DoorType);
+    const minAccessVal = resolveAccessLevelId(item.minimumAccessLevel ?? item.MinimumAccessLevel);
     list.push({
       id: `door-${item.id}`,
       name: item.doorName || item.name || "Unknown Door",
@@ -707,7 +774,9 @@ const getSectionDirectDevices = (section: any, globalDevices: Device[]): Device[
       status: doorStatus,
       room: '',
       section: sectionIdStr,
-      doorType: item.doorType || 'Interior'
+      doorType: resolveDoorTypeName(item.doorType ?? doorTypeIdVal),
+      doorTypeId: doorTypeIdVal,
+      ...(minAccessVal > 0 ? { minimumAccessLevel: minAccessVal } : {})
     } as Device);
   });
 
@@ -1089,7 +1158,9 @@ const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: st
       return;
     }
 
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    });
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1100,8 +1171,14 @@ const handleDownloadFile = async (e: React.MouseEvent, url: string, fileName: st
     document.body.removeChild(link);
     URL.revokeObjectURL(blobUrl);
   } catch (err) {
-    console.error('Failed to download file directly, falling back to window.open', err);
-    window.open(url, '_blank');
+    console.error('Failed to download file directly, falling back to link click', err);
+    const fallbackLink = document.createElement('a');
+    fallbackLink.href = url;
+    fallbackLink.target = '_blank';
+    fallbackLink.rel = 'noopener noreferrer';
+    document.body.appendChild(fallbackLink);
+    fallbackLink.click();
+    document.body.removeChild(fallbackLink);
   }
 };
 
@@ -1454,7 +1531,8 @@ const CustomAudioPlayer = ({
     try {
       const res = await fetch("/api/transcribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        referrerPolicy: "strict-origin-when-cross-origin",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify({ audioUrl: src })
       });
       const data = await res.json();
@@ -2406,6 +2484,8 @@ const mergeAppNamesDetailList = (prev: any, rawData: any) => {
     next[camelKey] = normalizedVal;
     if (key === 'DoorType') next['doorType'] = normalizedVal;
     if (key === 'doorType') next['DoorType'] = normalizedVal;
+    if (key === 'AccessLevel') next['accessLevel'] = normalizedVal;
+    if (key === 'accessLevel') next['AccessLevel'] = normalizedVal;
     if (key === 'UtilityIdNames' || key === 'utilityIdNames') {
       next['utilityIdNames'] = normalizeIdNamesArray(val);
     }
@@ -2554,6 +2634,19 @@ const isWaterPumpComponent = (compVal: any, appList?: any): boolean => {
     .toLowerCase()
     .replace(/\s+/g, '');
   return compName === 'waterpump';
+};
+
+const isSwimmingPoolComponent = (compVal: any, appList?: any): boolean => {
+  const compId = resolveUtilityComponentId(compVal, appList, UtilityType.Water);
+  if (compId === UtilityComponent.SwimmingPool) return true;
+  const compName = resolveUtilityComponentName(compVal, appList, UtilityType.Water)
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  return compName === 'swimmingpool';
+};
+
+const isWaterLevelHiddenComponent = (compVal: any, appList?: any): boolean => {
+  return isWaterPumpComponent(compVal, appList) || isSwimmingPoolComponent(compVal, appList);
 };
 
 const normalizeUtilityDto = (raw: any): GetUtilityDto => {
@@ -2780,6 +2873,8 @@ export default function App() {
           else if (item.isOpen) doorStatus = 'open';
           else if (item.isLocked) doorStatus = 'locked';
 
+          const doorTypeIdVal = resolveDoorType(item.doorTypeId ?? item.DoorTypeId ?? item.doorType ?? item.DoorType);
+          const minAccessVal = resolveAccessLevelId(item.minimumAccessLevel ?? item.MinimumAccessLevel, appNamesDetailList);
           return {
             id: `door-${item.id}`,
             name: item.doorName || item.name || "Unknown Door",
@@ -2787,7 +2882,9 @@ export default function App() {
             status: doorStatus,
             room: roomStr,
             section: sectionStr,
-            doorType: item.doorType || 'Interior'
+            doorType: resolveDoorTypeName(item.doorType ?? doorTypeIdVal, appNamesDetailList),
+            doorTypeId: doorTypeIdVal,
+            ...(minAccessVal > 0 ? { minimumAccessLevel: minAccessVal } : {})
           } as Device;
         }
 
@@ -2994,6 +3091,8 @@ export default function App() {
           else if (item.isOpen) doorStatus = 'open';
           else if (item.isLocked) doorStatus = 'locked';
           
+          const doorTypeIdVal = resolveDoorType(item.doorTypeId ?? item.DoorTypeId ?? item.doorType ?? item.DoorType);
+          const minAccessVal = resolveAccessLevelId(item.minimumAccessLevel ?? item.MinimumAccessLevel, appNamesDetailList);
           return {
             id: `door-${item.id}`,
             name: item.doorName || item.name || "Unknown Door",
@@ -3001,7 +3100,9 @@ export default function App() {
             status: doorStatus,
             room: roomStr,
             section: sectionStr,
-            doorType: (appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === item.doorType?.toString())?.name || item.doorType || 'Interior'
+            doorType: resolveDoorTypeName(item.doorType ?? doorTypeIdVal, appNamesDetailList),
+            doorTypeId: doorTypeIdVal,
+            ...(minAccessVal > 0 ? { minimumAccessLevel: minAccessVal } : {})
           } as Device;
         }
         if (type === 'window') {
@@ -3136,6 +3237,7 @@ export default function App() {
     // We only clear out bad session state here, requiring explicit login
     const token = localStorage.getItem('token');
     if (!token || token === "undefined" || token === "null") {
+       clearBrowserId();
        localStorage.clear();
     }
   }, []);
@@ -3172,6 +3274,8 @@ export default function App() {
   React.useEffect(() => {
     const handleAuthExpired = () => {
       const remembered = localStorage.getItem('remembered_users_list');
+      clearBrowserId();
+      void resetSignalRConnection();
       localStorage.clear();
       sessionStorage.clear();
       if (remembered) {
@@ -3285,6 +3389,8 @@ export default function App() {
     } catch (e) {}
 
     const remembered = localStorage.getItem('remembered_users_list');
+    clearBrowserId();
+    void resetSignalRConnection();
     localStorage.clear();
     sessionStorage.clear();
     if (remembered) {
@@ -3404,6 +3510,7 @@ export default function App() {
     room: '',
     section: '',
     doorType: 1,
+    minimumAccessLevel: AccessLevel.Visitor,
     ipAddress: '',
     username: '',
     password: '',
@@ -3439,6 +3546,7 @@ export default function App() {
         room: initialRoom,
         section: initialSection,
         doorType: 1,
+        minimumAccessLevel: AccessLevel.Visitor,
         ipAddress: '',
         username: '',
         password: '',
@@ -3503,10 +3611,8 @@ export default function App() {
       { id: 2, name: 'Female' },
       { id: 3, name: 'Other' }
     ],
-    doorType: [
-      { id: 1, name: 'Interior' },
-      { id: 2, name: 'Exterior' }
-    ],
+    doorType: DEFAULT_DOOR_TYPES,
+    accessLevel: DEFAULT_ACCESS_LEVELS,
     facilityType: [
       { id: FacilityType.Appliance, name: 'Appliance' },
       { id: FacilityType.Camera, name: 'Camera' },
@@ -3609,6 +3715,160 @@ export default function App() {
     return false;
   }, [isOwner, isWifeOrChild, appNamesDetailList]);
 
+  const getUserRoleValue = React.useCallback((): number => {
+    const rawRole = userProfile?.getUserDto?.role ?? (userDto as any)?.role;
+    if (typeof rawRole === 'number' && rawRole > 0) return rawRole;
+    if (typeof rawRole === 'string' && /^\d+$/.test(rawRole.trim())) {
+      const parsed = parseInt(rawRole.trim(), 10);
+      if (parsed > 0) return parsed;
+    }
+    const roleName = (
+      userProfile?.getUserDto?.roleName ??
+      (userDto as any)?.roleName ??
+      localStorage.getItem('roleName') ??
+      ''
+    ).toString().trim().toLowerCase();
+    if (roleName === 'owner') return Role.Owner;
+    if (roleName === 'wife') return Role.Wife;
+    if (roleName === 'child') return Role.Child;
+    if (roleName === 'relative') return Role.Relative;
+    if (roleName === 'visitor') return Role.Visitor;
+    return Role.Visitor;
+  }, [userProfile, userDto]);
+
+  const getCurrentPersonIds = React.useCallback((): Set<string> => {
+    const ids = new Set<string>();
+    const candidates = [
+      userProfile?.id,
+      userProfile?.personId,
+      userProfile?.getUserDto?.personId,
+      localStorage.getItem('personId')
+    ];
+    candidates.forEach((val) => {
+      if (val !== undefined && val !== null) {
+        const str = val.toString().trim();
+        if (str !== '' && str !== '0' && str !== 'null' && str !== 'undefined') {
+          ids.add(str);
+        }
+      }
+    });
+    return ids;
+  }, [userProfile]);
+
+  const resolveFacilityItemDto = React.useCallback((item: any, kind: string): any => {
+    if (!item) return null;
+    const isDeviceShape = typeof item.id === 'string' && item.id.includes('-');
+    const rawId = isDeviceShape ? getRawId(item.id) : (item.id ?? item.Id)?.toString();
+    if (!rawId) return item;
+    if (kind === 'door') return (doors || []).find(d => d.id.toString() === rawId) || item;
+    if (kind === 'camera') return (cameras || []).find(c => c.id.toString() === rawId) || item;
+    if (kind === 'appliance') return (appliances || []).find(a => a.id.toString() === rawId) || item;
+    if (kind === 'light') return (lights || []).find(l => l.id.toString() === rawId) || item;
+    if (kind === 'window') return (windows || []).find(w => w.id.toString() === rawId) || item;
+    if (kind === 'external') return (externals || []).find(e => e.id.toString() === rawId) || item;
+    return item;
+  }, [doors, cameras, appliances, lights, windows, externals]);
+
+  const getFacilityRoomInfo = React.useCallback((item: any, explicitKind?: string) => {
+    const kind = (explicitKind || item?.type || '').toString().toLowerCase();
+    const dto = resolveFacilityItemDto(item, kind);
+    const rawRoom =
+      dto?.roomId ??
+      dto?.RoomId ??
+      item?.roomId ??
+      item?.RoomId ??
+      item?.room;
+    const roomStr =
+      rawRoom !== undefined &&
+      rawRoom !== null &&
+      rawRoom !== '' &&
+      rawRoom !== 'none' &&
+      rawRoom !== 0 &&
+      rawRoom !== '0' &&
+      rawRoom !== 'null' &&
+      rawRoom !== 'undefined'
+        ? rawRoom.toString()
+        : '';
+
+    if (!roomStr) {
+      return { hasRoom: false, roomObj: null as Room | null, roomHasPersonId: false, roomPersonIdStr: '', isCurrentUserRoom: false };
+    }
+
+    const matchesRoom = (r: Room) =>
+      r.id?.toString() === roomStr ||
+      (r as any).dbId?.toString() === roomStr ||
+      (r.name && roomStr && r.name.toLowerCase() === roomStr.toLowerCase());
+
+    const isInUserRooms = (userRooms || []).some(matchesRoom);
+    const roomObj =
+      (rooms || []).find(matchesRoom) ||
+      (userRooms || []).find(matchesRoom) ||
+      null;
+
+    const rawPersonId = roomObj?.personId ?? (roomObj as any)?.PersonId;
+    const roomPersonIdStr =
+      rawPersonId !== undefined && rawPersonId !== null ? rawPersonId.toString().trim() : '';
+    const roomHasPersonId =
+      roomPersonIdStr !== '' && roomPersonIdStr !== '0' && roomPersonIdStr !== 'null' && roomPersonIdStr !== 'undefined';
+
+    const currentPersonIds = getCurrentPersonIds();
+    const isCurrentUserRoom =
+      isInUserRooms ||
+      (roomHasPersonId && currentPersonIds.has(roomPersonIdStr));
+
+    return { hasRoom: true, roomObj, roomHasPersonId, roomPersonIdStr, isCurrentUserRoom };
+  }, [resolveFacilityItemDto, rooms, userRooms, getCurrentPersonIds]);
+
+  const canViewFacilityItem = React.useCallback((item: any, explicitKind?: string): boolean => {
+    if (!item) return false;
+    const kind = (explicitKind || item?.type || '').toString().toLowerCase();
+    if (kind === 'utility') return canUpdateUtilityDevice(item);
+
+    const restrictedKinds = ['door', 'camera', 'appliance', 'light', 'window', 'external'];
+    if (!restrictedKinds.includes(kind)) return true;
+    if (isOwner) return true;
+
+    const { hasRoom, roomHasPersonId, isCurrentUserRoom } = getFacilityRoomInfo(item, kind);
+    if (hasRoom && isCurrentUserRoom) {
+      return true;
+    }
+    if (hasRoom && roomHasPersonId) {
+      return false;
+    }
+
+    const dto = resolveFacilityItemDto(item, kind);
+    const rawMinLevel =
+      dto?.minimumAccessLevel ??
+      dto?.MinimumAccessLevel ??
+      item?.minimumAccessLevel ??
+      item?.MinimumAccessLevel;
+    const minLevel = resolveAccessLevelId(rawMinLevel, appNamesDetailList);
+    if (minLevel > 0) {
+      const userRoleVal = getUserRoleValue();
+      if (userRoleVal > minLevel) {
+        return false;
+      }
+    }
+
+    return true;
+  }, [isOwner, canUpdateUtilityDevice, getFacilityRoomInfo, resolveFacilityItemDto, appNamesDetailList, getUserRoleValue]);
+
+  const canControlFacilityItem = React.useCallback((item: any, explicitKind?: string): boolean => {
+    if (!item) return false;
+    const kind = (explicitKind || item?.type || '').toString().toLowerCase();
+    if (kind === 'utility') return canUpdateUtilityDevice(item);
+
+    const restrictedKinds = ['door', 'camera', 'appliance', 'light', 'window', 'external'];
+    if (!restrictedKinds.includes(kind)) return true;
+    if (!canViewFacilityItem(item, kind)) return false;
+    if (isOwner) return true;
+
+    const { hasRoom, roomHasPersonId, isCurrentUserRoom } = getFacilityRoomInfo(item, kind);
+    if (!hasRoom) return true;
+    if (isCurrentUserRoom) return true;
+    return !roomHasPersonId;
+  }, [isOwner, canUpdateUtilityDevice, canViewFacilityItem, getFacilityRoomInfo]);
+
   const getNotificationIcon = React.useCallback((
     kind?: string | null,
     opts?: {
@@ -3660,7 +3920,7 @@ export default function App() {
         return <RoomIc className="h-4 w-4 shrink-0 text-teal-500" />;
       }
       case 'section':
-        return <Layers className="h-4 w-4 shrink-0 text-sky-500" />;
+        return <LayoutGrid className="h-4 w-4 shrink-0 text-sky-500" />;
       case 'hardware':
         return <Cpu className="h-4 w-4 shrink-0 text-orange-500" />;
       case 'action':
@@ -7082,9 +7342,19 @@ export default function App() {
           const appTypeVal = getProp(item, 'applianceType');
           
           const rawDoorType = getProp(item, 'doorType') ?? getProp(item, 'DoorType');
+          const rawDoorTypeId = getProp(item, 'doorTypeId') ?? getProp(item, 'DoorTypeId');
+          const resolvedDoorTypeId = (rawDoorTypeId !== undefined && rawDoorTypeId !== null)
+            ? resolveDoorType(rawDoorTypeId)
+            : (rawDoorType !== undefined && rawDoorType !== null ? resolveDoorType(rawDoorType) : existingDev?.doorTypeId);
           const doorTypeMapped = (rawDoorType !== undefined && rawDoorType !== null)
-            ? ((appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === rawDoorType.toString())?.name || rawDoorType.toString())
-            : (existingDev?.doorType);
+            ? resolveDoorTypeName(rawDoorType, appNamesDetailList)
+            : (rawDoorTypeId !== undefined && rawDoorTypeId !== null
+                ? resolveDoorTypeName(rawDoorTypeId, appNamesDetailList)
+                : existingDev?.doorType);
+          const rawMinAccess = getProp(item, 'minimumAccessLevel') ?? getProp(item, 'MinimumAccessLevel');
+          const minAccessMapped = (rawMinAccess !== undefined && rawMinAccess !== null)
+            ? resolveAccessLevelId(rawMinAccess, appNamesDetailList)
+            : existingDev?.minimumAccessLevel;
           
           return {
             id: `${type}-${getProp(item, 'id') ?? id}`,
@@ -7095,7 +7365,8 @@ export default function App() {
             section: (sectionVal !== undefined && sectionVal !== null && sectionVal !== '') ? sectionVal : existSection,
             value: type === 'light' ? (brightnessVal !== undefined ? brightnessVal : (existingDev?.value ?? 0)) : undefined,
             applianceType: appTypeVal ? ((appNamesDetailList?.applianceType || []).find(t => t.name === appTypeVal)?.id || 1) : (existingDev?.applianceType),
-            ...(type === 'door' ? { doorType: doorTypeMapped } : {})
+            ...(type === 'door' ? { doorType: doorTypeMapped, doorTypeId: resolvedDoorTypeId } : {}),
+            ...(minAccessMapped ? { minimumAccessLevel: minAccessMapped } : {})
           };
         };
 
@@ -7938,7 +8209,45 @@ export default function App() {
       }
     });
 
+    hsWrapper.on("RefreshedBrowserId", (...args: any[]) => {
+      console.log("RefreshedBrowserId event received from SignalR hub:", args);
+      const currentUserId =
+        userProfileRef.current?.getUserDto?.id ??
+        localStorage.getItem('userId');
+
+      let targetUserId: any = null;
+      let payload: any = null;
+
+      if (args.length >= 2) {
+        targetUserId = args[0];
+        payload = args[1];
+      } else if (args.length === 1) {
+        payload = args[0];
+        if (payload && typeof payload === 'object') {
+          targetUserId = payload.userId ?? payload.UserId ?? null;
+        }
+      }
+
+      if (
+        targetUserId !== undefined &&
+        targetUserId !== null &&
+        String(targetUserId).trim() !== '' &&
+        currentUserId !== undefined &&
+        currentUserId !== null &&
+        String(currentUserId).trim() !== '' &&
+        String(targetUserId) !== String(currentUserId)
+      ) {
+        return;
+      }
+
+      const nextBrowserId = extractBrowserId(payload);
+      if (nextBrowserId) {
+        setBrowserId(nextBrowserId);
+      }
+    });
+
     return () => {
+       hsWrapper.off("RefreshedBrowserId");
        hs.off("HighLevelLogOut");
        hs.off("LogOut");
        hs.off("ActionCreated");
@@ -9128,7 +9437,8 @@ export default function App() {
     const currentRoomObj = (userRooms || []).find(r => r.id.toString() === roomId.toString());
     const doorsInRoom = devices.filter(d => 
       (d.room?.toString() === roomId.toString() || (currentRoomObj?.name && d.room?.toLowerCase() === currentRoomObj.name.toLowerCase())) &&
-      d.type === 'door'
+      d.type === 'door' &&
+      canViewFacilityItem(d, 'door')
     );
 
     const unlockedDoors = doorsInRoom.filter(d => {
@@ -9143,14 +9453,22 @@ export default function App() {
       return;
     }
 
+    const controllableUnlockedDoors = unlockedDoors.filter(d => canControlFacilityItem(d, 'door'));
+    if (controllableUnlockedDoors.length === 0) {
+      toast.error("You do not have permission to control doors in this room", {
+        icon: getNotificationIcon('door', { status: 'locked' })
+      });
+      return;
+    }
+
     setIsLockingRoomDoors(true);
-    const unlockedRawIds = unlockedDoors.map(d => getRawId(d.id));
-    const unlockedDevIds = unlockedDoors.map(d => d.id);
+    const unlockedRawIds = controllableUnlockedDoors.map(d => getRawId(d.id));
+    const unlockedDevIds = controllableUnlockedDoors.map(d => d.id);
 
     let successCount = 0;
     let lastError: any = null;
 
-    for (const doorDev of unlockedDoors) {
+    for (const doorDev of controllableUnlockedDoors) {
       const rawId = getRawId(doorDev.id);
       try {
         await apiFetch(`/Door/LockDoor?id=${rawId}`, { method: 'PUT' });
@@ -9197,7 +9515,8 @@ export default function App() {
     const currentRoomObj = (userRooms || []).find(r => r.id.toString() === roomId.toString());
     const doorsInRoom = devices.filter(d => 
       (d.room?.toString() === roomId.toString() || (currentRoomObj?.name && d.room?.toLowerCase() === currentRoomObj.name.toLowerCase())) &&
-      d.type === 'door'
+      d.type === 'door' &&
+      canViewFacilityItem(d, 'door')
     );
     const unlockedDoors = doorsInRoom.filter(d => {
       const rawId = getRawId(d.id);
@@ -9836,6 +10155,13 @@ export default function App() {
         return;
       }
 
+      if (d.type !== 'utility' && !canControlFacilityItem(d)) {
+        toast.error(`You do not have permission to control this ${d.type}`, {
+          icon: getNotificationIcon(d.type)
+        });
+        return;
+      }
+
       const executeToggle = async () => {
         const rawId = d.id.includes('-') ? d.id.split('-')[1] : d.id;
 
@@ -10170,6 +10496,13 @@ export default function App() {
     let d = devices.find(x => x.id === id || x.id.split('-')[1] === id || x.id === `door-${id}` || x.id === `window-${id}`);
     if (!d) return;
 
+    if (!canControlFacilityItem(d)) {
+      toast.error(`You do not have permission to control this ${d.type}`, {
+        icon: getNotificationIcon(d.type)
+      });
+      return;
+    }
+
     const rawId = getRawId(d.id);
     const isCurrentlyLocked = d.status === 'locked' || d.status === 'open-locked';
 
@@ -10273,6 +10606,7 @@ export default function App() {
   const handleValueChange = (id: string, value: number) => {
     let d = devices.find(x => x.id === id || x.id.split('-')[1] === id);
     if (!d) return;
+    if (!canControlFacilityItem(d)) return;
     setDevices(prev => prev.map(dev => 
       dev.id === d.id ? { ...dev, value } : dev
     ));
@@ -10283,7 +10617,14 @@ export default function App() {
   const valueChangeTimers = React.useRef<{ [id: string]: ReturnType<typeof setTimeout> }>({});
 
   const handleValueChangeEnd = (id: string, value: number) => {
-    const matchedId = devices.find(x => x.id === id || x.id.split('-')[1] === id)?.id || id;
+    const matchedDev = devices.find(x => x.id === id || x.id.split('-')[1] === id);
+    if (matchedDev && !canControlFacilityItem(matchedDev)) {
+      toast.error(`You do not have permission to control this ${matchedDev.type}`, {
+        icon: getNotificationIcon(matchedDev.type)
+      });
+      return;
+    }
+    const matchedId = matchedDev?.id || id;
     if (valueChangeTimers.current[matchedId]) {
       clearTimeout(valueChangeTimers.current[matchedId]);
     }
@@ -10407,9 +10748,16 @@ export default function App() {
         }
       }
       if (device.type === 'door') {
-        // Reverse map device.doorType (the string name) back to the ID for the select dropdown
-        const doorTypeItem = (appNamesDetailList?.doorType || []).find((t: any) => t.name === device.doorType);
-        finalDevice.doorType = doorTypeItem ? doorTypeItem.id : 1;
+        const doorDto = (doors || []).find(d => d.id.toString() === rawId || d.doorName === device.name);
+        const doorTypeItem = (appNamesDetailList?.doorType || []).find(
+          (t: any) =>
+            t.id.toString() === (doorDto?.doorTypeId ?? device.doorTypeId ?? '')?.toString() ||
+            t.name?.toLowerCase() === (doorDto?.doorType ?? device.doorType ?? '').toString().toLowerCase()
+        );
+        finalDevice.doorType = doorTypeItem ? doorTypeItem.id : resolveDoorType(doorDto?.doorTypeId ?? device.doorTypeId ?? device.doorType);
+        finalDevice.doorTypeId = resolveDoorType(finalDevice.doorType);
+        finalDevice.minimumAccessLevel =
+          resolveAccessLevelId(doorDto?.minimumAccessLevel ?? device.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor;
       }
       if (device.type === 'camera') {
         const camDto = (cameras || []).find(c => c.id.toString() === rawId || c.cameraName === device.name);
@@ -10501,7 +10849,7 @@ export default function App() {
       case 'hardware': return <Cpu className="h-3 w-3" />;
       case 'action': return <Play className="h-3 w-3" />;
       case 'room': return <HomeIcon className="h-3 w-3" />;
-      case 'section': return <Layers className="h-3 w-3" />;
+      case 'section': return <LayoutGrid className="h-3 w-3" />;
       case 'person': return <UserIcon className="h-3 w-3" />;
       case 'contact': return <Contact className="h-3 w-3" />;
       case 'contactcategory': return <Tag className="h-3 w-3" />;
@@ -10899,6 +11247,7 @@ export default function App() {
               ? resolveUtilityComponentId(editingDevice.utilityComponent, appNamesDetailList, utilTypeId)
               : null;
             const isWaterPump = utilTypeId === UtilityType.Water && isWaterPumpComponent(utilCompId, appNamesDetailList);
+            const isWaterLevelHidden = utilTypeId === UtilityType.Water && isWaterLevelHiddenComponent(utilCompId, appNamesDetailList);
             const hasElectricalTelemetry =
               utilTypeId === UtilityType.Electricity ||
               utilTypeId === UtilityType.HVAC ||
@@ -10918,9 +11267,9 @@ export default function App() {
                 powerConsumption: hasElectricalTelemetry && editingDevice.powerConsumption !== undefined && editingDevice.powerConsumption !== null ? Number(editingDevice.powerConsumption) : null,
                 powerConsumptionToday: hasElectricalTelemetry && editingDevice.powerConsumptionToday !== undefined && editingDevice.powerConsumptionToday !== null ? Number(editingDevice.powerConsumptionToday) : null,
                 actionIds: utilTypeId === UtilityType.Emergency ? (editingDevice.actionIds || []).map(Number) : [],
-                currentWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? Number(editingDevice.currentWaterLevel) : null,
-                maxWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? Number(editingDevice.maxWaterLevel) : null,
-                minWaterLevel: utilTypeId === UtilityType.Water && !isWaterPump && editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? Number(editingDevice.minWaterLevel) : null
+                currentWaterLevel: utilTypeId === UtilityType.Water && !isWaterLevelHidden && editingDevice.currentWaterLevel !== undefined && editingDevice.currentWaterLevel !== null ? Number(editingDevice.currentWaterLevel) : null,
+                maxWaterLevel: utilTypeId === UtilityType.Water && !isWaterLevelHidden && editingDevice.maxWaterLevel !== undefined && editingDevice.maxWaterLevel !== null ? Number(editingDevice.maxWaterLevel) : null,
+                minWaterLevel: utilTypeId === UtilityType.Water && !isWaterLevelHidden && editingDevice.minWaterLevel !== undefined && editingDevice.minWaterLevel !== null ? Number(editingDevice.minWaterLevel) : null
               })
             });
           } else if (editingDevice.type === 'window') {
@@ -10940,6 +11289,8 @@ export default function App() {
               })
             });
           } else if (editingDevice.type === 'door') {
+            const resolvedDoorTypeId = resolveDoorType(editingDevice.doorType);
+            const resolvedMinAccess = resolveAccessLevelId(editingDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor;
             await apiFetch('/Door/UpdateDoor', {
               method: 'PUT',
               body: JSON.stringify({
@@ -10948,7 +11299,8 @@ export default function App() {
                 sectionId: finalSectionId,
                 isHidden: false,
                 doorName: editingDevice.name,
-                doorType: resolveDoorType(editingDevice.doorType),
+                doorType: resolvedDoorTypeId,
+                minimumAccessLevel: resolvedMinAccess,
                 isLocked: editingDevice.status === 'locked' || editingDevice.status === 'open-locked',
                 isOpen: editingDevice.status === 'open' || editingDevice.status === 'open-locked',
                 openedBy: 0,
@@ -10981,16 +11333,19 @@ export default function App() {
           const finalSection = (finalSectionId !== null) ? finalSectionId.toString() : '';
           
           let doorTypeName = undefined;
+          let resolvedDoorTypeIdVal = undefined;
+          let resolvedDoorMinAccessVal = undefined;
           if (editingDevice.type === 'door') {
-            const dtId = editingDevice.doorType?.toString();
-            doorTypeName = (appNamesDetailList?.doorType || []).find((t: any) => t.id.toString() === dtId)?.name || editingDevice.doorType;
+            resolvedDoorTypeIdVal = resolveDoorType(editingDevice.doorType);
+            doorTypeName = resolveDoorTypeName(editingDevice.doorType, appNamesDetailList);
+            resolvedDoorMinAccessVal = resolveAccessLevelId(editingDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor;
           }
 
           const processedEditingDevice = {
             ...editingDevice,
             room: finalRoom,
             section: finalSection,
-            ...(doorTypeName ? { doorType: doorTypeName } : {})
+            ...(doorTypeName ? { doorType: doorTypeName, doorTypeId: resolvedDoorTypeIdVal, minimumAccessLevel: resolvedDoorMinAccessVal } : {})
           };
           setDevices(prev => prev.map(d => d.id === editingDevice.id ? { ...d, ...processedEditingDevice } as Device : d));
           
@@ -10998,7 +11353,9 @@ export default function App() {
             setDoors(prev => prev.map(d => d.id.toString() === rawId ? {
               ...d,
               doorName: editingDevice.name || d.doorName,
-              doorType: editingDevice.doorType || d.doorType,
+              doorType: doorTypeName || d.doorType,
+              doorTypeId: resolvedDoorTypeIdVal ?? d.doorTypeId,
+              minimumAccessLevel: resolvedDoorMinAccessVal ?? d.minimumAccessLevel,
               roomId: finalRoomId,
               sectionId: finalSectionId
             } : d));
@@ -11245,15 +11602,15 @@ export default function App() {
           const utilCompId = compsForType.length > 0
             ? (resolveUtilityComponentId(newDevice.utilityComponent, appNamesDetailList, utilTypeId) ?? compsForType[0]?.id ?? null)
             : null;
-          const isCreateWaterPump = utilTypeId === UtilityType.Water && isWaterPumpComponent(utilCompId, appNamesDetailList);
+          const isCreateWaterLevelHidden = utilTypeId === UtilityType.Water && isWaterLevelHiddenComponent(utilCompId, appNamesDetailList);
           const payload = {
             utilityName: newDevice.name,
             utilityType: utilTypeId,
             utilityComponent: utilCompId,
             timeOut: newDevice.timeOut !== undefined && newDevice.timeOut !== null && newDevice.timeOut !== ('' as any) ? Number(newDevice.timeOut) : null,
             actionIds: utilTypeId === UtilityType.Emergency ? (newDevice.actionIds || []).map(Number) : [],
-            maxWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterPump && newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? Number(newDevice.maxWaterLevel) : null,
-            minWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterPump && newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? Number(newDevice.minWaterLevel) : null
+            maxWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterLevelHidden && newDevice.maxWaterLevel !== undefined && newDevice.maxWaterLevel !== null ? Number(newDevice.maxWaterLevel) : null,
+            minWaterLevel: utilTypeId === UtilityType.Water && !isCreateWaterLevelHidden && newDevice.minWaterLevel !== undefined && newDevice.minWaterLevel !== null ? Number(newDevice.minWaterLevel) : null
           };
           const res: any = await apiFetch('/Utility/CreateUtility', {
             method: 'POST',
@@ -11283,6 +11640,7 @@ export default function App() {
             isHidden: true,
             doorName: newDevice.name,
             doorType: resolveDoorType(newDevice.doorType),
+            minimumAccessLevel: resolveAccessLevelId(newDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor,
             isLocked: true,
             isOpen: false,
             openedBy: 0,
@@ -11345,7 +11703,9 @@ export default function App() {
             section: newDevice.section || undefined,
             status: (inferredType === 'door' || inferredType === 'window') ? 'locked' : 'off',
             value: inferredType === 'light' ? 0 : undefined,
-            doorType: inferredType === 'door' ? (newDevice.doorType || 'interior') : undefined,
+            doorType: inferredType === 'door' ? resolveDoorTypeName(newDevice.doorType, appNamesDetailList) : undefined,
+            doorTypeId: inferredType === 'door' ? resolveDoorType(newDevice.doorType) : undefined,
+            minimumAccessLevel: inferredType === 'door' ? (resolveAccessLevelId(newDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor) : undefined,
             powerUsage: 0
           };
           setDevices(prev => [...prev, device]);
@@ -11361,6 +11721,7 @@ export default function App() {
           room: '',
           section: '',
           doorType: 1,
+          minimumAccessLevel: AccessLevel.Visitor,
           ipAddress: '',
           username: '',
           password: '',
@@ -11435,7 +11796,7 @@ export default function App() {
   };
 
   const getFilteredDevices = () => {
-    let filtered = devices;
+    let filtered = devices.filter(d => canViewFacilityItem(d));
     
     if (activeView.startsWith('room-')) {
       const roomId = activeView.replace('room-', '');
@@ -11484,9 +11845,9 @@ export default function App() {
     return filtered;
   };
 
-  const activeDevicesCount = devices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
-  const lockedDoorsCount = devices.filter(d => d.type === 'door' && d.status === 'locked').length;
-  const totalDoorsCount = devices.filter(d => d.type === 'door').length;
+  const activeDevicesCount = devices.filter(d => canViewFacilityItem(d) && (d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open')).length;
+  const lockedDoorsCount = devices.filter(d => d.type === 'door' && canViewFacilityItem(d, 'door') && d.status === 'locked').length;
+  const totalDoorsCount = devices.filter(d => d.type === 'door' && canViewFacilityItem(d, 'door')).length;
 
   const getTitleInfo = () => {
     const isRoom = activeView.startsWith('room-');
@@ -11570,8 +11931,8 @@ export default function App() {
     const filteredDevices = getFilteredDevices();
 
     if (activeView === 'dashboard') {
-      const activeDevices = devices.filter(d => d.status === 'on' || d.status === 'active').length;
-      const externalCameras = (dashboardData?.cameraNamesUrls && dashboardData.cameraNamesUrls.length > 0)
+      const activeDevices = devices.filter(d => canViewFacilityItem(d) && (d.status === 'on' || d.status === 'active')).length;
+      const rawExternalCameras = (dashboardData?.cameraNamesUrls && dashboardData.cameraNamesUrls.length > 0)
         ? dashboardData.cameraNamesUrls
         : (cameras && cameras.length > 0)
           ? cameras.map(c => ({
@@ -11586,19 +11947,48 @@ export default function App() {
               url: d.liveStreamUrl,
               liveStreamUrl: d.liveStreamUrl
             }));
-      const totalFacilityCount = (appliances?.length || 0) + (utilities?.length || 0) + (cameras?.length || 0) + (doors?.length || 0) + (lights?.length || 0) + (windows?.length || 0) + (externals?.length || 0) + (hardwares?.length || 0) + (rooms?.length || 0) + (sections?.length || 0) + (actions?.length || 0);
+      const externalCameras = rawExternalCameras.filter((cam: any) => {
+        const matchedCam = (cameras || []).find(
+          c => (cam.id !== undefined && c.id.toString() === cam.id.toString()) ||
+               (cam.cameraName && c.cameraName === cam.cameraName) ||
+               (cam.name && c.cameraName === cam.name)
+        );
+        const matchedDev = devices.find(
+          d => d.type === 'camera' && (d.id === `camera-${cam.id}` || d.id === cam.id?.toString() || d.name === (cam.cameraName || cam.name))
+        );
+        return canViewFacilityItem(matchedCam || matchedDev || cam, 'camera');
+      });
+      const visibleAppliancesCount = (appliances || []).filter(a => canViewFacilityItem(a, 'appliance')).length;
+      const visibleUtilitiesCount = (utilities || []).filter(u => canUpdateUtilityDevice(mapUtilityToDevice(u, undefined, appNamesDetailList))).length;
+      const visibleCamerasCount = (cameras || []).filter(c => canViewFacilityItem(c, 'camera')).length;
+      const visibleDoorsCount = (doors || []).filter(d => canViewFacilityItem(d, 'door')).length;
+      const visibleLightsCount = (lights || []).filter(l => canViewFacilityItem(l, 'light')).length;
+      const visibleWindowsCount = (windows || []).filter(w => canViewFacilityItem(w, 'window')).length;
+      const visibleExternalsCount = (externals || []).filter(e => canViewFacilityItem(e, 'external')).length;
+      const totalFacilityCount =
+        visibleAppliancesCount +
+        (canSeeUtilities ? visibleUtilitiesCount : 0) +
+        visibleCamerasCount +
+        visibleDoorsCount +
+        visibleLightsCount +
+        visibleWindowsCount +
+        visibleExternalsCount +
+        (isOwner ? (hardwares?.length || 0) : 0) +
+        (rooms?.length || 0) +
+        (sections?.length || 0) +
+        (canSeeActions ? (actions?.length || 0) : 0);
       
       const facilityItemsList = [
-        { id: 'appliances', label: 'Appliances', icon: Power, count: appliances?.length || 0, targetView: 'facility-appliances', visible: true },
-        { id: 'cameras', label: 'Cameras', icon: Camera, count: cameras?.length || 0, targetView: 'facility-cameras', visible: true },
-        { id: 'doors', label: 'Doors', icon: Lock, count: doors?.length || 0, targetView: 'facility-doors', visible: true },
-        { id: 'externals', label: 'Externals', icon: Radio, count: externals?.length || 0, targetView: 'facility-externals', visible: true },
+        { id: 'appliances', label: 'Appliances', icon: Power, count: visibleAppliancesCount, targetView: 'facility-appliances', visible: true },
+        { id: 'cameras', label: 'Cameras', icon: Camera, count: visibleCamerasCount, targetView: 'facility-cameras', visible: true },
+        { id: 'doors', label: 'Doors', icon: Lock, count: visibleDoorsCount, targetView: 'facility-doors', visible: true },
+        { id: 'externals', label: 'Externals', icon: Radio, count: visibleExternalsCount, targetView: 'facility-externals', visible: true },
         { id: 'hardware', label: 'Hardware', icon: Cpu, count: hardwares?.length || 0, targetView: 'facility-hardware', visible: isOwner },
-        { id: 'lights', label: 'Lights', icon: Lightbulb, count: lights?.length || 0, targetView: 'facility-lights', visible: true },
-        { id: 'windows', label: 'Windows', icon: WindowIcon, count: windows?.length || 0, targetView: 'facility-windows', visible: true },
+        { id: 'lights', label: 'Lights', icon: Lightbulb, count: visibleLightsCount, targetView: 'facility-lights', visible: true },
+        { id: 'windows', label: 'Windows', icon: WindowIcon, count: visibleWindowsCount, targetView: 'facility-windows', visible: true },
         { id: 'rooms', label: 'Rooms', icon: Sofa, count: rooms?.length || 0, targetView: 'facility-rooms', visible: true },
         { id: 'sections', label: 'Sections', icon: LayoutGrid, count: sections?.length || 0, targetView: 'facility-sections', visible: true },
-        { id: 'utilities', label: 'Utilities', icon: Zap, count: utilities?.length || 0, targetView: 'facility-utilities', visible: canSeeUtilities },
+        { id: 'utilities', label: 'Utilities', icon: Zap, count: visibleUtilitiesCount, targetView: 'facility-utilities', visible: canSeeUtilities },
         { id: 'actions', label: 'Actions', icon: Play, count: actions?.length || 0, targetView: 'facility-actions', visible: canSeeActions },
       ];
 
@@ -11959,8 +12349,9 @@ export default function App() {
                 inactive = total - active;
                 statusSummary = `${active} Active • ${inactive} Off`;
               } else if (cat.type === 'externals') {
-                total = externals.length;
-                active = externals.filter(e => isExternalTriggered(e)).length;
+                const visibleExternals = externals.filter(e => canViewFacilityItem(e, 'external'));
+                total = visibleExternals.length;
+                active = visibleExternals.filter(e => isExternalTriggered(e)).length;
                 inactive = total - active;
                 statusSummary = `${active} Triggered • ${inactive} OK`;
               } else if (cat.type === 'section') {
@@ -11968,7 +12359,7 @@ export default function App() {
                 active = total; // always full except if 0
                 statusSummary = `${total} Total Sections`;
               } else {
-                const categoryDevices = devices.filter(d => d.type === cat.type);
+                const categoryDevices = devices.filter(d => d.type === cat.type && canViewFacilityItem(d));
                 total = categoryDevices.length;
                 
                 if (cat.type === 'light' || cat.type === 'appliance' || cat.type === 'utility') {
@@ -13031,7 +13422,10 @@ export default function App() {
                     Camera Access
                   </h3>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 p-4 rounded-2xl border bg-muted/20">
-                    {(appNamesDetailList?.cameraIdNames || []).map(camera => (
+                    {(appNamesDetailList?.cameraIdNames || []).filter((camera: any) => {
+                      const camDto = (cameras || []).find(c => c.id.toString() === camera.id?.toString());
+                      return canViewFacilityItem(camDto || { id: `camera-${camera.id}`, name: camera.name, type: 'camera' }, 'camera');
+                    }).map((camera: any) => (
                       <div key={camera.id} className="flex items-center space-x-2">
                         <Checkbox 
                           id={`cam-${camera.id}`} 
@@ -13356,7 +13750,7 @@ export default function App() {
               ) : filteredUserRooms && filteredUserRooms.length > 0 ? (
                 filteredUserRooms.map(room => {
                   const RoomIcon = iconMap[room.icon || ''] || Sofa;
-                  const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                  const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString() && canViewFacilityItem(d));
                   const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
 
                   return (
@@ -13400,7 +13794,7 @@ export default function App() {
 
       const userRoomId = selectedUserRoomId || userRooms[0]?.id || 'bedroom'; // Assuming fallback to the first room
       const currentRoom = (userRooms || []).find(r => r.id.toString() === userRoomId.toString());
-      const roomDevices = devices.filter(d => d.room?.toString() === userRoomId?.toString());
+      const roomDevices = devices.filter(d => d.room?.toString() === userRoomId?.toString() && canViewFacilityItem(d));
       
       const securityPriority: Record<string, number> = {
         'door': 1,
@@ -13434,7 +13828,9 @@ export default function App() {
       };
 
       const unlockedDoorsInRoom = roomDoorDevices.filter(dev => !isDoorDeviceLocked(dev));
+      const controllableUnlockedDoorsInRoom = unlockedDoorsInRoom.filter(dev => canControlFacilityItem(dev, 'door'));
       const isRoomLocked = roomDoorDevices.length > 0 ? (unlockedDoorsInRoom.length === 0) : roomLocked;
+      const isRoomLockActionDisabled = isRoomLocked || isLockingRoomDoors || (unlockedDoorsInRoom.length > 0 && controllableUnlockedDoorsInRoom.length === 0);
       
       const roomScenes = scenes.filter(scene => 
         scene.actions.some(action => roomDevices.some(d => d.id === action.deviceId))
@@ -13509,12 +13905,14 @@ export default function App() {
                 "p-6 flex flex-col items-center justify-center gap-3 transition-all duration-300 border-2 select-none",
                 isRoomLocked 
                   ? "bg-red-500/5 border-red-500/20 text-red-600 cursor-not-allowed opacity-90" 
-                  : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10 cursor-pointer group"
+                  : isRoomLockActionDisabled
+                    ? "bg-muted/40 border-border text-muted-foreground cursor-not-allowed opacity-80"
+                    : "bg-green-500/5 border-green-500/20 text-green-600 hover:bg-green-500/10 cursor-pointer group"
               )}
-              onClick={isRoomLocked || isLockingRoomDoors ? undefined : () => handleLockUnlockedRoomDoors(userRoomId)}
+              onClick={isRoomLockActionDisabled ? undefined : () => handleLockUnlockedRoomDoors(userRoomId)}
               role="button"
-              aria-disabled={isRoomLocked}
-              title={isRoomLocked ? "All doors in this room are locked. Cannot be clicked." : "Click to lock unlocked doors"}
+              aria-disabled={isRoomLockActionDisabled}
+              title={isRoomLocked ? "All doors in this room are locked. Cannot be clicked." : isRoomLockActionDisabled ? "You do not have permission to control doors in this room." : "Click to lock unlocked doors"}
             >
               <div className={cn(
                 "rounded-full p-4 transition-transform",
@@ -13557,6 +13955,7 @@ export default function App() {
                         onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
+                        canUpdate={canControlFacilityItem(device)}
                       />
                     ))}
                   </div>
@@ -13581,6 +13980,7 @@ export default function App() {
                         onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
+                        canUpdate={canControlFacilityItem(device)}
                       />
                     ))}
                   </div>
@@ -13605,6 +14005,7 @@ export default function App() {
                         onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
+                        canUpdate={canControlFacilityItem(device)}
                       />
                     ))}
                   </div>
@@ -13659,6 +14060,7 @@ export default function App() {
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
                         onClick={handleDeviceClick}
+                        canUpdate={canControlFacilityItem(device)}
                       />
                     ))}
                   </div>
@@ -13685,6 +14087,7 @@ export default function App() {
                         onDoorAction={handleDoorAction}
                         onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
+                        canUpdate={canControlFacilityItem(device)}
                       />
                     ))}
                   </div>
@@ -13712,6 +14115,7 @@ export default function App() {
                     onValueChange={handleValueChange}
                         onValueChangeEnd={handleValueChangeEnd}
                     onClick={handleDeviceClick}
+                    canUpdate={canControlFacilityItem(device)}
                   />
                 ))}
               </div>
@@ -13784,7 +14188,7 @@ export default function App() {
             ) : rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).length > 0 ? (
               rooms.filter(r => (r?.name || '').toLowerCase().includes(roomSearchQuery.toLowerCase())).map(room => {
                 const Icon = iconMap[room.icon] || Sofa;
-                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString() && canViewFacilityItem(d));
                 const activeCount = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
                 
                 return (
@@ -14133,8 +14537,9 @@ export default function App() {
     }
 
     if (activeView === 'facility-externals') {
+      const visibleExternalsList = (externals || []).filter(ext => canViewFacilityItem(ext, 'external'));
       const getFilteredExternals = () => {
-        let result = [...externals];
+        let result = [...visibleExternalsList];
 
         // Search by name
         if (facilitySearchQuery) {
@@ -14186,7 +14591,7 @@ export default function App() {
                   <h1 className="text-3xl font-bold tracking-tight">Externals</h1>
                   <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-black dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider">
                     <Radio className="h-3 w-3" />
-                    {externals.length} {externals.length === 1 ? 'External' : 'Externals'}
+                    {visibleExternalsList.length} {visibleExternalsList.length === 1 ? 'External' : 'Externals'}
                   </Badge>
                 </div>
               </div>
@@ -14240,7 +14645,9 @@ export default function App() {
             {isViewLoading('facility-externals') ? (
               <ThreeDotsLoading label="Loading external devices..." />
             ) : filteredExternals && filteredExternals.length > 0 ? (
-              (filteredExternals || []).map(ext => (
+              (filteredExternals || []).map(ext => {
+                const canControlExt = canControlFacilityItem(ext, 'external');
+                return (
                 <Card key={ext.id} className="p-6 flex flex-col gap-4 border transition-all cursor-pointer bg-card shadow-sm" onClick={() => { setSelectedExternal(ext); setIsViewExternalOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
@@ -14259,7 +14666,14 @@ export default function App() {
                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <Switch 
                             checked={ext.isActive} 
+                            disabled={!canControlExt}
                             onCheckedChange={async (checked) => {
+                              if (!canControlExt) {
+                                toast.error('You do not have permission to control this external', {
+                                  icon: getNotificationIcon('external')
+                                });
+                                return;
+                              }
                               try {
                                 const dto = {
                                     id: Number(ext.id),
@@ -14293,7 +14707,7 @@ export default function App() {
                     <div className="flex gap-2 text-xs border-t pt-2">
                       {ext.section && (
                         <Badge variant="secondary" className="flex items-center gap-1.5 font-normal text-slate-500 dark:text-zinc-400 bg-muted/50">
-                          <Layers className="h-3 w-3" />
+                          <LayoutGrid className="h-3 w-3" />
                           {(sections || []).find(s => s.id === ext.section)?.name || ext.section}
                         </Badge>
                       )}
@@ -14322,7 +14736,8 @@ export default function App() {
                     </div>
                   </div>
                 </Card>
-              ))
+                );
+              })
             ) : (
               <div className="col-span-full">
                 <NoItems icon={Radio} message="There are no external items in the selected external page to be listed." />
@@ -14355,7 +14770,7 @@ export default function App() {
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   <div className="h-4 w-px bg-border mx-1 shrink-0" />
-                  <Layers className="h-8 w-8 text-primary shrink-0" />
+                  <LayoutGrid className="h-8 w-8 text-primary shrink-0" />
                   <h1 className="text-3xl font-bold tracking-tight">Home Sections</h1>
                 </div>
                 <p className="text-slate-500 dark:text-zinc-400">Manage devices and rooms grouped by section.</p>
@@ -14363,7 +14778,7 @@ export default function App() {
               
               <div className="shrink-0 pt-1">
                 <Badge variant="secondary" className="h-8 px-4 rounded-full flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-none font-bold text-[10px] uppercase tracking-wider shrink-0">
-                  <Layers className="h-3 w-3" />
+                  <LayoutGrid className="h-3 w-3" />
                   {sections.length} {sections.length === 1 ? 'Section' : 'Sections'}
                 </Badge>
               </div>
@@ -14394,12 +14809,12 @@ export default function App() {
             ) : sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).length > 0 ? (
               sections.filter(s => (s?.name || '').toLowerCase().includes(sectionSearchQuery.toLowerCase())).map(section => {
                 const sectionRooms = getSectionRooms(section, rooms);
-                const sectionDevices = getSectionDirectDevices(section, devices);
+                const sectionDevices = getSectionDirectDevices(section, devices).filter(d => canViewFacilityItem(d));
                 
                 return (
                   <div key={section.id} className="space-y-4 group relative">
                     <div className="flex items-center gap-2 border-b pb-2">
-                      <Layers className="h-5 w-5 text-primary" />
+                      <LayoutGrid className="h-5 w-5 text-primary" />
                       <h2 className="text-xl font-bold">{section.name}</h2>
                       <Badge variant="secondary" className="ml-2 uppercase text-[10px] tracking-wider">
                         {section.type || 'general'}
@@ -14462,7 +14877,7 @@ export default function App() {
                               onUtilityComponentChange={handleUtilityComponentChange}
                               emergencyOptions={getUtilityComponentsForType(UtilityType.Emergency, appNamesDetailList)}
                               countdownEndAt={utilityCountdownEnds[device.id]?.endAt}
-                              canUpdate={canUpdateUtilityDevice(device)}
+                              canUpdate={canControlFacilityItem(device)}
                             />
                           ))}
                           {sectionDevices.length === 0 && (
@@ -14476,7 +14891,7 @@ export default function App() {
               })
             ) : (
               <div className="col-span-full">
-                <NoItems icon={Layers} message="There are no section items in the selected section page to be listed." />
+                <NoItems icon={LayoutGrid} message="There are no section items in the selected section page to be listed." />
               </div>
             )}
           </div>
@@ -14511,7 +14926,7 @@ export default function App() {
             {rooms && rooms.length > 0 ? (
               (rooms || []).map(room => {
                 const Icon = iconMap[room.icon] || Sofa;
-                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString());
+                const roomDevices = devices.filter(d => d.room?.toString() === room.id?.toString() && canViewFacilityItem(d));
                 const activeInRoom = roomDevices.filter(d => d.status === 'on' || d.status === 'active' || d.status === 'unlocked' || d.status === 'open').length;
                 
                 return (
@@ -14913,7 +15328,7 @@ export default function App() {
                   onDelete={handleDeleteDevice}
                   onEdit={handleEditDevice}
                   onClick={handleDeviceClick}
-                  canUpdate={canUpdateUtilityDevice(device)}
+                  canUpdate={canControlFacilityItem(device)}
                 />
               ))}
             </div>
@@ -16108,7 +16523,8 @@ export default function App() {
     try {
       const askRes = await fetch("/api/assistant/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        referrerPolicy: "strict-origin-when-cross-origin",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify({
           question: lower,
           context: `User: ${userProfile?.getPersonDetailsDto?.firstName || 'User'}, Devices count: ${devices.length}`
@@ -16686,7 +17102,7 @@ export default function App() {
                     />
                   </div>
 
-                  {selectedTypeId === UtilityType.Water && !isWaterPumpComponent(selectedCompVal, appNamesDetailList) && (
+                  {selectedTypeId === UtilityType.Water && !isWaterLevelHiddenComponent(selectedCompVal, appNamesDetailList) && (
                     <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                       <div className="grid gap-2">
                         <Label htmlFor="utility-min-water" className="flex items-center gap-2 text-[11px] font-semibold">
@@ -16827,36 +17243,61 @@ export default function App() {
             )}
 
             {activeView === 'facility-doors' && (
-              <div className="grid gap-2">
-                <Label htmlFor="door-type" className="flex items-center gap-2">
-                  <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                  Door Type
-                </Label>
-                <Select 
-                  value={newDevice.doorType?.toString() || '1'} 
-                  onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: parseInt(v) }))}
-                >
-                  <SelectTrigger id="door-type">
-                    <SelectValue placeholder="Select type">
-                      {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (newDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(appNamesDetailList?.doorType || []).map((dt: any) => (
-                      <SelectItem key={dt.id} value={dt.id.toString()}>
-                        {dt.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="door-type" className="flex items-center gap-2">
+                    <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                    Door Type
+                  </Label>
+                  <Select 
+                    value={newDevice.doorType?.toString() || '1'} 
+                    onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, doorType: parseInt(v) }))}
+                  >
+                    <SelectTrigger id="door-type">
+                      <SelectValue placeholder="Select type">
+                        {((appNamesDetailList?.doorType || DEFAULT_DOOR_TYPES).find((dt: any) => dt.id.toString() === (newDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(appNamesDetailList?.doorType || DEFAULT_DOOR_TYPES).map((dt: any) => (
+                        <SelectItem key={dt.id} value={dt.id.toString()}>
+                          {dt.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="door-min-access-level" className="flex items-center gap-2">
+                    <Shield className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                    Minimum Access Level
+                  </Label>
+                  <Select 
+                    value={(resolveAccessLevelId(newDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor).toString()} 
+                    onValueChange={(v: any) => setNewDevice(prev => ({ ...prev, minimumAccessLevel: parseInt(v, 10) }))}
+                  >
+                    <SelectTrigger id="door-min-access-level">
+                      <SelectValue placeholder="Select access level">
+                        {resolveAccessLevelName(newDevice.minimumAccessLevel || AccessLevel.Visitor, appNamesDetailList)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(appNamesDetailList?.accessLevel || DEFAULT_ACCESS_LEVELS).map((al: any) => (
+                        <SelectItem key={al.id} value={al.id.toString()}>
+                          {al.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             )}
 
             {activeView !== 'facility-utilities' && (
               <>
                 <div className="grid gap-2">
                   <Label htmlFor="section" className="flex items-center gap-2">
-                    <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                    <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                     Section Name (Optional)
                   </Label>
                   <Select value={newDevice.section || 'none'} onValueChange={(v) => setNewDevice(prev => ({ ...prev, section: v === 'none' ? undefined : v, room: undefined }))}
@@ -17055,7 +17496,7 @@ export default function App() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="room-section" className="flex items-center gap-2">
-                <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                 Section Name (Optional)
               </Label>
               <Select value={newRoom.section || 'none'} onValueChange={(v) => setNewRoom(prev => ({ ...prev, section: v === 'none' ? undefined : v }))}
@@ -17133,7 +17574,7 @@ export default function App() {
           <div className="flex-1 min-h-0 overflow-y-auto grid gap-4 pt-[3px] pb-4 px-1">
             <div className="grid gap-2">
               <Label htmlFor="edit-sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+                <LayoutGrid className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
                 Section Name
               </Label>
               <Input autoComplete="off" id="edit-sec-name" 
@@ -18380,7 +18821,7 @@ export default function App() {
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader className="mb-0">
             <DialogTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
+              <LayoutGrid className="h-5 w-5 text-primary" />
               Add New Section
             </DialogTitle>
             <DialogDescription>Create a new home section to group your rooms and devices.</DialogDescription>
@@ -18388,7 +18829,7 @@ export default function App() {
           <div className="grid gap-4 pt-[3px] pb-4">
             <div className="grid gap-2">
               <Label htmlFor="sec-name" className="flex items-center gap-2">
-                <Layers className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+                <LayoutGrid className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
                 Section Name
               </Label>
               <Input autoComplete="off" id="sec-name" 
@@ -18984,7 +19425,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {currentTypeId === UtilityType.Water && !isWaterPumpComponent(currentCompVal, appNamesDetailList) && (
+                    {currentTypeId === UtilityType.Water && !isWaterLevelHiddenComponent(currentCompVal, appNamesDetailList) && (
                       <div className="space-y-3 pt-2 border-t">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
                           <Droplets className="h-3 w-3" /> Water Level Thresholds
@@ -19078,36 +19519,61 @@ export default function App() {
               })()}
 
               {editingDevice.type === 'door' && (
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-door-type" className="flex items-center gap-2">
-                    <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
-                    Door Type
-                  </Label>
-                  <Select 
-                    value={editingDevice.doorType?.toString() || '1'} 
-                    onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: parseInt(v) })}
-                  >
-                    <SelectTrigger id="edit-door-type">
-                      <SelectValue placeholder="Select type">
-                        {((appNamesDetailList?.doorType || []).find((dt: any) => dt.id.toString() === (editingDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(appNamesDetailList?.doorType || []).map((dt: any) => (
-                        <SelectItem key={dt.id} value={dt.id.toString()}>
-                          {dt.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-door-type" className="flex items-center gap-2">
+                      <Building2 className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Door Type
+                    </Label>
+                    <Select 
+                      value={editingDevice.doorType?.toString() || '1'} 
+                      onValueChange={(v: any) => setEditingDevice({ ...editingDevice, doorType: parseInt(v) })}
+                    >
+                      <SelectTrigger id="edit-door-type">
+                        <SelectValue placeholder="Select type">
+                          {((appNamesDetailList?.doorType || DEFAULT_DOOR_TYPES).find((dt: any) => dt.id.toString() === (editingDevice.doorType?.toString() || '1'))?.name) || 'Interior'}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(appNamesDetailList?.doorType || DEFAULT_DOOR_TYPES).map((dt: any) => (
+                          <SelectItem key={dt.id} value={dt.id.toString()}>
+                            {dt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-door-min-access-level" className="flex items-center gap-2">
+                      <Shield className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      Minimum Access Level
+                    </Label>
+                    <Select 
+                      value={(resolveAccessLevelId(editingDevice.minimumAccessLevel, appNamesDetailList) || AccessLevel.Visitor).toString()} 
+                      onValueChange={(v: any) => setEditingDevice({ ...editingDevice, minimumAccessLevel: parseInt(v, 10) })}
+                    >
+                      <SelectTrigger id="edit-door-min-access-level">
+                        <SelectValue placeholder="Select access level">
+                          {resolveAccessLevelName(editingDevice.minimumAccessLevel || AccessLevel.Visitor, appNamesDetailList)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(appNamesDetailList?.accessLevel || DEFAULT_ACCESS_LEVELS).map((al: any) => (
+                          <SelectItem key={al.id} value={al.id.toString()}>
+                            {al.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
               )}
 
               {editingDevice.type !== 'utility' && (
                 <>
                   <div className="grid gap-2">
                     <Label htmlFor="edit-device-section" className="flex items-center gap-2">
-                      <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                      <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                       Section
                     </Label>
                     <Select 
@@ -19370,7 +19836,7 @@ export default function App() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-room-section" className="flex items-center gap-2">
-                  <Layers className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
+                  <LayoutGrid className="h-3 w-3 text-slate-500 dark:text-zinc-400" />
                   Section
                 </Label>
                 <Select 
@@ -21001,6 +21467,7 @@ export default function App() {
                               <Switch
                                 id="camera-modal-power-toggle"
                                 checked={isCurrentlyActive}
+                                disabled={!canControlFacilityItem(selectedCamera, 'camera')}
                                 onCheckedChange={() => handleToggle(selectedCamera.id)}
                               />
                             </div>
@@ -21497,7 +21964,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {liveTypeId === UtilityType.Water && !isWaterPumpComponent(liveCompId, appNamesDetailList) && (
+                    {liveTypeId === UtilityType.Water && !isWaterLevelHiddenComponent(liveCompId, appNamesDetailList) && (
                       <div className="pt-3 border-t space-y-3">
                         <div className="rounded-xl border bg-muted/30 p-3.5">
                           <WaterTank
@@ -21685,7 +22152,15 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Door Type</span>
-                  <div className="font-medium capitalize">{selectedDoor.doorType || 'Interior'}</div>
+                  <div className="font-medium capitalize">{currentDoorDto?.doorType || selectedDoor.doorType || 'Interior'}</div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-slate-500 dark:text-zinc-400 uppercase font-semibold">Minimum Access Level</span>
+                  <div>
+                    <Badge variant="outline" className="font-semibold">
+                      {resolveAccessLevelName(currentDoorDto?.minimumAccessLevel ?? selectedDoor.minimumAccessLevel, appNamesDetailList)}
+                    </Badge>
+                  </div>
                 </div>
                 
                 <div className="space-y-1">
@@ -21916,7 +22391,7 @@ export default function App() {
           </div>
           <DialogHeader className="mb-0 pr-24 shrink-0">
             <DialogTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
+              <LayoutGrid className="h-5 w-5 text-primary" />
               View {viewingSection?.name || 'Section'}
             </DialogTitle>
             <DialogDescription>
@@ -22709,12 +23184,12 @@ export default function App() {
                     {(() => {
                       const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
                       switch (stepKind) {
-                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case 'door': return (appNamesDetailList?.doorIdNames || []).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case 'external': return (appNamesDetailList?.externalIdNames || []).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case 'light': return (appNamesDetailList?.lightIdNames || []).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case 'window': return (appNamesDetailList?.windowIdNames || []).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).filter((a: any) => canViewFacilityItem(resolveFacilityItemDto({ id: a.id }, 'appliance'), 'appliance')).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).filter((c: any) => canViewFacilityItem(resolveFacilityItemDto({ id: c.id }, 'camera'), 'camera')).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case 'door': return (appNamesDetailList?.doorIdNames || []).filter((d: any) => canViewFacilityItem(resolveFacilityItemDto({ id: d.id }, 'door'), 'door')).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case 'external': return (appNamesDetailList?.externalIdNames || []).filter((e: any) => canViewFacilityItem(resolveFacilityItemDto({ id: e.id }, 'external'), 'external')).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case 'light': return (appNamesDetailList?.lightIdNames || []).filter((l: any) => canViewFacilityItem(resolveFacilityItemDto({ id: l.id }, 'light'), 'light')).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case 'window': return (appNamesDetailList?.windowIdNames || []).filter((w: any) => canViewFacilityItem(resolveFacilityItemDto({ id: w.id }, 'window'), 'window')).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
                         case 'utility': {
                           const utilList = appNamesDetailList?.utilityIdNames || [];
                           return utilList.length > 0
@@ -22923,12 +23398,12 @@ export default function App() {
                     {(() => {
                       const stepKind = resolveActionStepFacilityKind(actionStepForm.facilityType, appNamesDetailList);
                       switch (stepKind) {
-                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
-                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
-                        case 'door': return (appNamesDetailList?.doorIdNames || []).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
-                        case 'external': return (appNamesDetailList?.externalIdNames || []).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
-                        case 'light': return (appNamesDetailList?.lightIdNames || []).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
-                        case 'window': return (appNamesDetailList?.windowIdNames || []).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
+                        case 'appliance': return (appNamesDetailList?.applianceIdNames || []).filter((a: any) => canViewFacilityItem(resolveFacilityItemDto({ id: a.id }, 'appliance'), 'appliance')).map((a: any) => <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>);
+                        case 'camera': return (appNamesDetailList?.cameraIdNames || []).filter((c: any) => canViewFacilityItem(resolveFacilityItemDto({ id: c.id }, 'camera'), 'camera')).map((c: any) => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>);
+                        case 'door': return (appNamesDetailList?.doorIdNames || []).filter((d: any) => canViewFacilityItem(resolveFacilityItemDto({ id: d.id }, 'door'), 'door')).map((d: any) => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>);
+                        case 'external': return (appNamesDetailList?.externalIdNames || []).filter((e: any) => canViewFacilityItem(resolveFacilityItemDto({ id: e.id }, 'external'), 'external')).map((e: any) => <SelectItem key={e.id} value={e.id.toString()}>{e.name}</SelectItem>);
+                        case 'light': return (appNamesDetailList?.lightIdNames || []).filter((l: any) => canViewFacilityItem(resolveFacilityItemDto({ id: l.id }, 'light'), 'light')).map((l: any) => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>);
+                        case 'window': return (appNamesDetailList?.windowIdNames || []).filter((w: any) => canViewFacilityItem(resolveFacilityItemDto({ id: w.id }, 'window'), 'window')).map((w: any) => <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>);
                         case 'utility': {
                           const utilList = appNamesDetailList?.utilityIdNames || [];
                           return utilList.length > 0
@@ -27347,7 +27822,10 @@ export default function App() {
       <AnimatePresence>
         {isScreensaverOpen && (() => {
           const isDarkTheme = theme === 'dark';
-          const camIds = userProfile.cameraIds || [];
+          const camIds = (userProfile.cameraIds || []).filter((camId) => {
+            const camDto = (cameras || []).find(c => c.id.toString() === camId.toString());
+            return canViewFacilityItem(camDto || { id: `camera-${camId}`, type: 'camera' }, 'camera');
+          });
           const camCount = camIds.length;
           const canResizeFeeds = camCount > 1;
           const safeSpotlightIdx = camCount > 0 ? Math.min(selectedScreensaverCameraIndex, camCount - 1) : 0;

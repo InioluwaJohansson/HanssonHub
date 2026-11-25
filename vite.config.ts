@@ -16,8 +16,14 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    optimizeDeps: {
+      entries: ['index.html', 'src/main.tsx'],
+    },
     server: {
       hmr: false,
+      watch: {
+        ignored: ['**/*.cjs', '**/*.txt', '**/*.sh', '**/dist/**'],
+      },
     },
   };
 });

@@ -21,6 +21,18 @@ const currentDir = getDirname();
 
 async function startServer() {
   const app = express();
+  app.disable("x-powered-by");
+
+  // Security headers compatible with iframe preview hosting
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    if (req.path.startsWith("/api/")) {
+      res.setHeader("X-Frame-Options", "DENY");
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "50mb" }));
   
   const httpServer = createServer(app);
@@ -31,7 +43,7 @@ async function startServer() {
     }
   });
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // In-memory chat history
   const messages: any[] = [
@@ -210,16 +222,36 @@ async function startServer() {
     });
   });
 
-  // Vite middleware
+
+  // Vite middleware (initialized concurrently so port 3000 binds immediately on startup)
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    let viteMiddleware: any = null;
+    const viteReadyPromise = createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === "true" ? false : undefined,
+        hmr: false,
       },
       appType: "spa",
+    })
+      .then((vite) => {
+        viteMiddleware = vite.middlewares;
+        return vite;
+      })
+      .catch((err) => {
+        console.error("Failed to initialize Vite middleware:", err);
+        throw err;
+      });
+
+    app.use(async (req, res, next) => {
+      try {
+        if (!viteMiddleware) {
+          await viteReadyPromise;
+        }
+        return viteMiddleware(req, res, next);
+      } catch (err) {
+        return next(err);
+      }
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
