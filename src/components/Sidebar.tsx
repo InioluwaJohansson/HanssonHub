@@ -224,7 +224,7 @@ export function Sidebar({ activeView, onViewChange, rooms, sections, userProfile
 
             {[
               { id: 'contacts', label: 'Contacts', icon: Contact },
-              { id: 'all-users', label: 'All Users', icon: UserCircle },
+              { id: 'all-users', label: 'Users', icon: UserCircle },
               { id: 'logs', label: 'Logs', icon: ClipboardList },
             ].filter((item) => {
               if (isRelativeOrVisitor) {
